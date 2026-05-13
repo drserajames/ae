@@ -17,7 +17,7 @@ main = function() {
   library(dplyr, quietly = T, warn.conflicts = F, verbose = F)
   library(stringr, quietly = T, warn.conflicts = F, verbose = F)
 
-  convergence:::add_to_PATH("/home/sat65/miniforge3/envs/treebuild/bin") # usher
+  convergence:::add_to_PATH("/home/samt123/miniforge3/envs/treebuild/bin") # usher
 
   # args ------------------------------------------------------------
   args <- commandArgs(trailingOnly = TRUE)
