@@ -95,7 +95,7 @@ main = function() {
     trimmed_phy = phy
     trimmed_seqs = fa
   } else {
-    tree_and_sequences = list(
+    tree_and_sequences = convergence::makeTreeAndSequences(
       tree = phy,
       sequences = tibble::tibble(
         Isolate_unique_identifier = names(fa),
