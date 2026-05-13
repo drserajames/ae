@@ -5,7 +5,7 @@ main = function() {
 
   .libPaths(
     c(
-      "/home/samt123/R/x86_64-pc-linux-gnu-library/4.2",
+      "/home/samt123/R/x86_64-pc-linux-gnu-library/4.4",
       .libPaths()
     )
   )
