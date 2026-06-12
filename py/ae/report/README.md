@@ -13,6 +13,10 @@ because it depends on the map-drawing subsystem (TODO.md #1) — see
 ## Usage
 
 ```bash
+# scaffold a new report working dir (subdirs + templates + report.json/setup.json)
+# a dir named like YYYY-MMDD (e.g. 2026-0219) is parsed as the meeting date
+PYTHONPATH=build:py bin/ssm-report-init --working-dir <dir>
+
 # working dir contains report.json + the figure PDFs it references
 PYTHONPATH=build:py bin/ssm-report --working-dir <dir>
 
@@ -38,10 +42,13 @@ make_report(source_dir=Path("."), source_dir_2=Path(""),
 |------|------|
 | `report.py` | `LatexReport` page-by-page assembler, the signature-page / serum-coverage addendum subclasses, and `StatisticsTableMaker`. Ported from AD `report.py`. |
 | `latex.py` | LaTeX template strings (`T_Head`, `T_Cover`, `T_Section`, descriptions, table/figure environments, …). Ported **verbatim** from AD `latex.py`. |
+| `init.py` | Working-dir scaffolding: subdirs, static templates, and the date-substituted `report.json` / `setup.json`. Ported from the unblocked parts of AD `init.py`. |
 | `labs.py` | Lab-name constants (`sLabDisplayName`, `sLabOrder`). Extracted from AD `map.py`/`stat.py` so the assembler doesn't import the figure-generation modules. |
 | `jsonio.py` | `read_json` replacing AD `acmacs_base.json.read_json`: transparent `.xz`/`.bz2` decompression + comment/trailing-comma tolerance. |
-| `cli.py` | `--working-dir` command-line entry point (mirrors AD `bin/report-simple`, plus `--no-compile`/`--no-view`). |
-| `templates/report.json` | Reference settings file copied from AD `template/report.json` — documents the canonical page sequence. |
+| `cli.py` | `--working-dir` command-line entry point for *assembly* (mirrors AD `bin/report-simple`, plus `--no-compile`/`--no-view`). |
+| `templates/` | Reference templates copied from AD `template/`: `report.json` (canonical page sequence), `setup.json`, `index.html`, `README.org`, `root-gitignore`, `merges-index.html`. |
+
+`bin/ssm-report-init` scaffolds a working dir; `bin/ssm-report` assembles it.
 
 The only deviation from the AD source is the import wiring (`jsonio`/`labs`
 instead of `acmacs_base` / the `.map` figure module); the emitted LaTeX is
@@ -86,6 +93,14 @@ dispatches to a `LatexReport.make_<type>` method. A leading `?` on a `type` (or 
 **Ported now (this package):** everything that turns a `report.json` + existing
 PDFs into the final report PDF. Verifiable with no map-draw present (see below).
 
+Also ported: the unblocked parts of AD `init.py` — working-dir scaffolding +
+`report.json` / `setup.json` templating (`init.py`, above). The site-specific
+infra steps it omits (a bare git repo + hidb/seqdb/locationdb rsync from the CPE
+`albertine` host; the `rr`/`sy`/`rename-report-on-server` deploy scripts that
+shell out to `ssm-make` / `ssh i19` / `syput`) are left to the operator, and the
+`init_settings` serum-coverage/geographic sub-makers wait on map-draw — see the
+`init.py` module docstring.
+
 **Not yet ported — blocked on map-draw (#1):** the modules that *produce* the
 figure PDFs the assembler embeds —
 - `map.py` / `maker.py` — antigenic maps & time series (needs `cc/map-draw`)
@@ -93,19 +108,28 @@ figure PDFs the assembler embeds —
 - `geographic.py` — geographic time-series maps
 - `stat.py` — `stat.json.xz` generation (counts; the *reader* is already ported
   here in `StatisticsTableMaker`)
-- `serum_coverage.py`, `commands.py` / `maker.py` orchestration, `init.py`
-  (working-dir scaffolding, template install, DB fetch)
+- `serum_coverage.py`, the `commands.py` / `maker.py` orchestration, and the
+  figure-settings half of `init_settings`
 
 These need `ae_backend` chart/map APIs that don't exist until map-draw lands.
-The natural next milestones are: port `init.py` (pure-Python working-dir +
-`report.json` scaffolding, no map-draw needed), then wire figure generation onto
-`ae_backend` + the `chart-draw` path as map-draw M2+ matures.
+The natural next milestone is to wire figure generation onto `ae_backend` + the
+`chart-draw` path as map-draw M2+ matures.
 
 ## Verification
 
-The assembly core is exercised end-to-end against a dummy 1-page figure PDF
+**Assembly core** — exercised end-to-end against a dummy 1-page figure PDF
 (standing in for a real map/tree): a minimal `report.json` covering `cover`,
 `toc`, sections, descriptions, an embedded `pdf`, a `maps` grid and `raw`/`latex`
 blocks assembles and compiles cleanly to a **6-page PDF** via `pdflatex`. This
 requires a TeX installation (`pdflatex` on `PATH`) but **no** map-draw and **no**
 `ae_backend`. `--no-compile` produces just the `.tex` and needs neither.
+
+**Scaffolding (`init.py`)** — `bin/ssm-report-init --working-dir 2026-0219`
+creates the subdirs + static templates and writes a `report.json` / `setup.json`
+with the date fields substituted; the meeting date is parsed from the dir name.
+The date logic is unit-checked against AD semantics (Northern/Southern season,
+teleconference selection, the October year split). The generated 233-page
+`report.json` round-trips through the assembler's `read_json` and constructs a
+`LatexReport` with the correct `ts_dates` — proving the init→assembly handoff
+with no figure data. (A *full* compile of that template still needs the blocked
+figure/stat PDFs.)

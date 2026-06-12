@@ -29,6 +29,7 @@ from .report import (
     LatexSerumCoverageAddendum,
     StatisticsTableMaker,
 )
+from .init import init, make_report_json, compute_substitutions
 
 __all__ = [
     "make_report",
@@ -41,4 +42,7 @@ __all__ = [
     "LatexSignaturePageAddendum",
     "LatexSerumCoverageAddendum",
     "StatisticsTableMaker",
+    "init",
+    "make_report_json",
+    "compute_substitutions",
 ]
