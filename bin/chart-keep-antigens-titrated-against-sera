@@ -1,0 +1,80 @@
+#! /usr/bin/env python3
+"""Keep only antigens that have at least one numeric titer against the selected sera.
+
+Antigens with all-missing titers against the selected sera (or against all
+sera when no serum selector is given) are removed.  This is useful for
+trimming a merged table down to antigens that are actually represented in
+the current assay.
+
+Serum selection (at least one required):
+  --sr INDEXES       keep antigens titrated against these serum indexes
+  --sr-re REGEX      keep antigens titrated against sera matching this regex
+  (if neither is given, uses all sera)
+
+Examples:
+  chart-keep-antigens-titrated-against-sera input.ace output.ace
+  chart-keep-antigens-titrated-against-sera input.ace output.ace --sr 0,1,2,3
+  chart-keep-antigens-titrated-against-sera input.ace output.ace --sr-re 'GUINEA PIG'
+"""
+import sys, re, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def parse_indexes(s: str) -> set:
+    result = set()
+    for part in s.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            a, b = part.split("-", 1)
+            result.update(range(int(a), int(b) + 1))
+        else:
+            result.add(int(part))
+    return result
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    titers = chart.titers()
+
+    sr_indexes = parse_indexes(args.serum_indexes) if args.serum_indexes else None
+    sr_re = re.compile(args.serum_pattern) if args.serum_pattern else None
+
+    if sr_indexes is not None or sr_re:
+        selected_sera = {
+            no for no, sr in chart.select_all_sera()
+            if (sr_indexes is None or no in sr_indexes) and (sr_re is None or sr_re.search(sr.name()))
+        }
+    else:
+        selected_sera = set(range(chart.number_of_sera()))
+
+    if not selected_sera:
+        raise RuntimeError("no sera selected — check --sr / --sr-re options")
+
+    def has_titer(ag_no):
+        return any(not titers.titer(ag_no, sr_no).is_dont_care() for sr_no in selected_sera)
+
+    antigens_to_keep = chart.select_antigens(lambda sd: has_titer(sd.no))
+    n_before = chart.number_of_antigens()
+    n_keep = len(antigens_to_keep)
+    print(f"keeping {n_keep} / {n_before} antigens (titrated against {len(selected_sera)} sera)")
+
+    chart.keep_antigens_sera(antigens=antigens_to_keep, remove_projections=args.remove_projections)
+    chart.write(args.output)
+    print(f"written: {args.output}  AG:{chart.number_of_antigens()} SR:{chart.number_of_sera()}")
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart", type=Path)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--sr", dest="serum_indexes", metavar="INDEXES", help="comma-separated serum indexes to check titration against")
+    parser.add_argument("--sr-re", dest="serum_pattern", metavar="REGEX", help="regex matched against serum name; antigens must be titrated against matching sera")
+    parser.add_argument("--remove-projections", action="store_true", default=False)
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

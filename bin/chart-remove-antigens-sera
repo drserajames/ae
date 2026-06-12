@@ -1,0 +1,78 @@
+#! /usr/bin/env python3
+"""Remove antigens and/or sera from a chart and write the result.
+
+Selection by comma-separated 0-based indexes (--ag 0,3,5) or by Python regex
+matched against the full designation (--ag-re 'EGG').  Both options can be
+combined; a point is removed if it matches either.  Projections are kept by
+default (coordinates of removed points are dropped); use --remove-projections
+to strip all projections from the output.
+
+Examples:
+  chart-remove-antigens-sera input.ace output.ace --ag 0,1,2
+  chart-remove-antigens-sera input.ace output.ace --sr-re 'FERRET'
+  chart-remove-antigens-sera input.ace output.ace --ag-re 'REASSORTANT' --sr 0
+"""
+import sys, re, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def parse_indexes(s: str) -> set:
+    result = set()
+    for part in s.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            a, b = part.split("-", 1)
+            result.update(range(int(a), int(b) + 1))
+        else:
+            result.add(int(part))
+    return result
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+
+    ag_indexes = parse_indexes(args.antigen_indexes) if args.antigen_indexes else set()
+    sr_indexes = parse_indexes(args.serum_indexes) if args.serum_indexes else set()
+    ag_re = re.compile(args.antigen_pattern) if args.antigen_pattern else None
+    sr_re = re.compile(args.serum_pattern) if args.serum_pattern else None
+
+    antigens = None
+    if ag_indexes or ag_re:
+        antigens = chart.select_antigens(lambda sd: sd.no in ag_indexes or bool(ag_re and ag_re.search(sd.name)))
+
+    sera = None
+    if sr_indexes or sr_re:
+        sera = chart.select_sera(lambda sd: sd.no in sr_indexes or bool(sr_re and sr_re.search(sd.name)))
+
+    n_ag = len(antigens) if antigens else 0
+    n_sr = len(sera) if sera else 0
+    if n_ag == 0 and n_sr == 0:
+        print("nothing selected for removal", file=sys.stderr)
+    else:
+        if n_ag:
+            print(f"removing {n_ag} antigen(s)")
+        if n_sr:
+            print(f"removing {n_sr} serum/sera")
+        chart.remove_antigens_sera(antigens=antigens, sera=sera, remove_projections=args.remove_projections)
+
+    chart.write(args.output)
+    print(f"written: {args.output}  AG:{chart.number_of_antigens()} SR:{chart.number_of_sera()}")
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart", type=Path)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--ag", dest="antigen_indexes", metavar="INDEXES", help="comma-separated 0-based antigen indexes to remove (ranges like 2-5 allowed)")
+    parser.add_argument("--ag-re", dest="antigen_pattern", metavar="REGEX", help="regex matched against antigen designation; matching antigens are removed")
+    parser.add_argument("--sr", dest="serum_indexes", metavar="INDEXES", help="comma-separated 0-based serum indexes to remove")
+    parser.add_argument("--sr-re", dest="serum_pattern", metavar="REGEX", help="regex matched against serum designation; matching sera are removed")
+    parser.add_argument("--remove-projections", action="store_true", default=False, help="strip all projections from output (default: keep projections, adjusting coordinates)")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

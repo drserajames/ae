@@ -1,0 +1,37 @@
+#! /usr/bin/env python3
+"""Find common antigens and/or sera between two charts.
+
+Prints a detailed report of which antigens/sera are shared and their index
+mapping between chart1 and chart2.
+"""
+import sys, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    chart1 = ae_backend.chart_v3.Chart(args.chart1)
+    chart2 = ae_backend.chart_v3.Chart(args.chart2)
+    common = ae_backend.chart_v3.CommonAntigensSeraFromChart(chart1, chart2, args.match)
+    print(f"chart1: {chart1.name()}  AG:{chart1.number_of_antigens()} SR:{chart1.number_of_sera()}")
+    print(f"chart2: {chart2.name()}  AG:{chart2.number_of_antigens()} SR:{chart2.number_of_sera()}")
+    print()
+    print(f"common antigens: {common.number_of_antigens()}")
+    print(f"common sera:     {common.number_of_sera()}")
+    print()
+    if not args.summary:
+        print(common.report())
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart1", type=Path)
+    parser.add_argument("chart2", type=Path)
+    parser.add_argument("--match", default="auto", choices=["strict", "relaxed", "ignored", "auto"], help="name matching level (default: auto)")
+    parser.add_argument("-s", "--summary", action="store_true", default=False, help="print summary counts only, no per-antigen/serum detail")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

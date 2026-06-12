@@ -1,0 +1,35 @@
+#! /usr/bin/env python3
+"""List antigen and serum names from a chart."""
+import sys, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    if not args.sera_only:
+        for no, ag in chart.select_all_antigens():
+            if args.numbers:
+                print(f"AG {no:3d}  {ag.designation()}")
+            else:
+                print(ag.designation())
+    if not args.antigens_only:
+        for no, sr in chart.select_all_sera():
+            if args.numbers:
+                print(f"SR {no:3d}  {sr.designation()}")
+            else:
+                print(sr.designation())
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("chart", type=Path)
+    parser.add_argument("--ag", "--antigens-only", dest="antigens_only", action="store_true", default=False, help="print only antigens")
+    parser.add_argument("--sr", "--sera-only", dest="sera_only", action="store_true", default=False, help="print only sera")
+    parser.add_argument("-n", "--numbers", action="store_true", default=False, help="prefix each line with AG/SR and 0-based index")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

@@ -1,0 +1,42 @@
+#! /usr/bin/env python3
+"""Combine projections from multiple charts into a single chart.
+
+Takes the first chart as the base and appends projections from each subsequent
+chart.  All charts must have the same antigen/serum table (same names in the
+same order).  The output has the same table as the first chart and all
+projections from all input charts, sorted by stress.
+
+Example:
+  chart-combine-projections run1.ace run2.ace run3.ace combined.ace
+"""
+import sys, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    charts = [ae_backend.chart_v3.Chart(f) for f in args.charts]
+    base = charts[0]
+    n_proj = base.number_of_projections()
+    for other in charts[1:]:
+        base.combine_projections(other)
+    print(f"combined {sum(c.number_of_projections() for c in charts)} projections from {len(charts)} charts → {base.number_of_projections()} total")
+    if args.keep:
+        base.keep_projections(args.keep)
+        print(f"kept best {base.number_of_projections()} projections")
+    base.write(args.output)
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("charts", nargs="+", type=Path, help="input charts (first is the base)")
+    parser.add_argument("-o", "--output", type=Path, required=True, help="output chart")
+    parser.add_argument("-k", "--keep", type=int, metavar="N", default=0, help="keep only the best N projections in output (0 = keep all)")
+    args = parser.parse_args()
+    if len(args.charts) < 2:
+        parser.error("need at least two input charts")
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

@@ -101,6 +101,18 @@ Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
 > now 4.x and rejects `lexy`'s bundled `cmake_minimum_required(<3.5)`. Export
 > **`CMAKE_POLICY_VERSION_MINIMUM=3.5`** before `ninja` to get past it.
 
+> **⚠ Note for the map-draw agent (from webserver agent, #5) — stale `ae_backend` `.so`
+> aborts on chart load.** The current `build/ae_backend.cpython-310-darwin.so` is from
+> **Jun 10**, but source has changed since (incl. the Jun 12 build-fix commit). With this
+> stale binary, **`ae_backend.chart_v3.Chart('test/chart1.ace')` aborts at construction**
+> (SIGABRT, no message) — this breaks *all* chart tools, e.g. `bin/chart-info
+> test/chart1.ace` aborts identically, not just my webserver. Since you own the active
+> `build/`, **when you next rebuild for M3, please confirm chart loading works again**
+> (`PYTHONPATH=build python3 -c "import ae_backend; ae_backend.chart_v3.Chart('test/chart1.ace')"`
+> should not abort). That rebuild also unblocks webserver M2's chart-**data** endpoint
+> verification — no code change needed on my side. Ping #5 if the abort persists after a
+> clean rebuild (then it's a real runtime regression, not staleness).
+
 ---
 
 ## 2. hidb — historical influenza database  *(owner: hidb agent — 🟡 in progress)*
@@ -222,8 +234,9 @@ re-hosted behind FastAPI/ASGI later without changing clients.
 - [x] **M1 — Decide: port C++ server vs Python rewrite.** → Python rewrite over `ae_backend`
       (rationale above).
 - [x] **M2 — Implement chart-serving endpoint.** HTTP/HTTPS server, chart listing, info/table
-      JSON + HTML pages, path-traversal protection. **Verify:** ✅ HTTP layer end-to-end —
-      `/healthz`→200, `/api/charts` lists `test/chart1.ace`, `/`→index HTML, `/nope`→404,
+      JSON + HTML pages, path-traversal protection. **Verify:** ✅ HTTP layer end-to-end via the
+      real `bin/chart-serve` + `curl` (`PYTHONPATH=build bin/chart-serve test/`) —
+      `/healthz`→ok, `/api/charts` lists `test/chart1.ace`, `/`→index HTML 200, `/nope`→404,
       missing-path→400, `../CLAUDE.md`→403; **HTTPS** verified with a self-signed cert
       (`https://…/healthz`→200 over TLS). The chart **data** endpoints
       (`/api/chart/info|table`) call `ae_backend.chart_v3.Chart(...)`, which currently

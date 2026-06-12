@@ -1,0 +1,46 @@
+#! /usr/bin/env python3
+"""Remove projections from a chart.
+
+Usage examples:
+  chart-remove-projections input.ace output.ace --all          # remove all
+  chart-remove-projections input.ace output.ace --keep 1       # keep only the best
+  chart-remove-projections input.ace output.ace --remove 1,3   # remove specific projections
+"""
+import sys, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    n_before = chart.number_of_projections()
+
+    if args.all:
+        chart.remove_all_projections()
+    elif args.keep is not None:
+        chart.keep_projections(args.keep)
+    elif args.remove:
+        for no in sorted(args.remove, reverse=True):
+            chart.remove_projection(no)
+    else:
+        parser.error("specify --all, --keep N, or --remove INDEXES")
+
+    n_after = chart.number_of_projections()
+    print(f"projections: {n_before} → {n_after}")
+    chart.write(args.output)
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart", type=Path)
+    parser.add_argument("output", type=Path)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--all", action="store_true", default=False, help="remove all projections")
+    group.add_argument("--keep", type=int, metavar="N", help="keep only the best N projections")
+    group.add_argument("--remove", type=lambda s: [int(x) for x in s.split(",")], metavar="INDEXES", help="comma-separated 0-based projection indexes to remove")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

@@ -1,0 +1,36 @@
+#! /usr/bin/env python3
+"""Show column bases for a chart (one per serum, derived from the titer table)."""
+import sys, re, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    if forced := chart.forced_column_bases():
+        print("forced column bases")
+        column_bases = forced
+    else:
+        if chart.number_of_projections():
+            mcb = chart.projection(0).minimum_column_basis()
+        else:
+            mcb = args.minimum_column_basis
+        column_bases = chart.column_bases(mcb)
+        print(f"column bases (minimum_column_basis={mcb!r})")
+    for no, sr in chart.select_all_sera():
+        cb = f"{column_bases[no]:11.8f}"
+        cb = re.sub(r"0+$", lambda m: " " * len(m.group(0)), cb)
+        cb = re.sub(r"\. ", "  ", cb)
+        print(f"  {no:3d}  {cb}  {sr.name()} {sr.serum_id()} {sr.passage()}")
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("chart", type=Path)
+    parser.add_argument("-m", "--minimum-column-basis", default="none", help="minimum column basis when chart has no projections (default: none)")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================
