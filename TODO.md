@@ -21,8 +21,8 @@ status, and respect the shared-file rules below.
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟡 in progress |
 | 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` (port plan only) | *(tal agent)* | ⚪ blocked on #1 — M1 explore done |
 | 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; figures blocked on #1 |
-| 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 in progress |
-| 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟡 in progress |
+| 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 core done — HTTP/HTTPS verified; chart-data blocked on stale backend `.so` |
+| 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 
 Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 
@@ -51,7 +51,7 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 
 ---
 
-## 1. Map drawing  *(owner: map-draw agent — M1 done, M2 next)*
+## 1. Map drawing  *(owner: map-draw agent — M1–M2 done, M3 next)*
 
 The single biggest gap. As of M1, `ae` **can render a basic antigenic map to PDF**.
 `cc/draw/` previously held only geometry/color *primitive headers*; it now also has a
@@ -75,12 +75,22 @@ Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
       <out.pdf> [size]`** (not a `bin/` python script — there's no pybind binding yet).
       **✅ Verified:** `chart-relax test/chart1.ace` → `chart-draw` produces a valid PDF
       1.7 (32 points rendered; rasterised and eyeballed — correct map).
-- [ ] **M2 — Full styling + reusable surface.** Drive per-point fill/outline/size/shape
-      from the chart plot-spec (`legacy::PlotSpec`, resolving `ae::draw::v2::Color` strings
-      → RGB); correct draw order (sera, then antigens, selected on top). **Also generalise
-      `CairoPdf` into a reusable `ae::draw::Surface`** (lines, paths, set-color/line-width,
-      sub-surfaces) — TAL (#3) Phase B is blocked on this shared API, so design it with
-      that consumer in mind.
+- [x] **M2 — Full styling + draw order.** `export_pdf()` now drives per-point
+      shape/fill/outline/outline-width/size/shown from the chart's `legacy::PlotSpec`
+      (resolving `ae::draw::v2::Color` strings → RGB via the global `::Color`), and iterates
+      `plot_spec.drawing_order()` (sera → reference → test). Charts with no plot spec get the
+      synthesised defaults via `PlotSpec::initialize()`. `point_shape` dispatch: Circle/Box/
+      Triangle implemented; Egg/UglyEgg fall back to Circle (until M3). Surface gained
+      `triangle()` + `line()` primitives. **`size` is treated as ae's multiplier convention
+      (default 1.0), not AD pixels** — legacy AD charts with `s≈5` render ~5× large; that's
+      an ae *import* convention gap, not a renderer bug. **✅ Verified:** default-path
+      `chart1` (green circles / open circles / open boxes) and a hand-styled chart
+      (red triangles / blue boxes / open-circle sera, sera behind) both rasterised and
+      eyeballed — shapes, colors and order correct.
+      **⚠ Still TODO for the TAL blocker:** `CairoPdf` is *not yet* an abstract reusable
+      `ae::draw::Surface` — it's a concrete PDF class with `background/circle/square/
+      triangle/line`. TAL (#3) Phase B should drive the surface-abstraction extraction
+      (likely alongside **M6** SVG/PNG); coordinate on the primitive set then.
 - [ ] **M3 — Text:** Pango integration for point labels and titles (unblocks TAL labels).
 - [ ] **M4 — Decorations:** legends, serum circles, connection lines, blobs.
 - [ ] **M5 — `mapi` settings DSL:** the JSON-driven mod-applicator pipeline.
@@ -148,77 +158,123 @@ reusable surface API. `AntigenicMaps` additionally needs the map renderer + **hi
 
 ---
 
-## 4. ssm-report — seasonal report generation  *(unclaimed)*
+## 4. ssm-report — seasonal report generation  *(owner: report agent — 🟡 assembly core done)*
 
-Python + LaTeX seasonal/SSM report generation.
+Python + LaTeX seasonal/SSM report generation. Note: AD's `bin/ssm-report` and
+`commands.py` are marked *obsolete*; the live entry is `ssm-make`/`maker.py`, but the
+shared **report-assembly core** (`report.py` + `latex.py`) is what emits the final PDF.
 
 - **AD source:** `~/AC/eu/AD/sources/ssm-report` (Python + LaTeX templates).
-- **ae target:** new `py/ae/report/`.
-- **Depends on:** map-draw (#1) for the figures it embeds. Can scaffold the Python/LaTeX
-  templating independently, but end-to-end output needs map PDFs.
+- **ae target:** `py/ae/report/` — see [`py/ae/report/README.md`](py/ae/report/README.md)
+  (full page-type → data-input table + the dependency boundary, produced by milestone 1).
+- **Depends on:** map-draw (#1) for the figures it embeds. The *assembly* layer is
+  independent and is now ported; figure *generation* (`map.py`, `maker.py`,
+  `geographic.py`, `signature_page.py`, `stat.py` writer) is blocked on #1.
+- **Pure Python, no `meson.build` change** — imported from the `py/` source tree
+  (run with `PYTHONPATH=build:py`); zero conflict risk with other agents.
 
 **Milestones:**
-- [ ] Explore `ssm-report`; list the report sections and their data inputs.
-- [ ] Port the LaTeX templates + the Python orchestration to `py/ae/report/`.
-- [ ] Wire to `ae_backend` chart/map APIs. **Verify:** generates a PDF report from a
-      sample dataset.
+- [x] **Explore `ssm-report`; list the report sections and their data inputs.** →
+      [`py/ae/report/README.md`](py/ae/report/README.md). Page-type dispatch, every
+      `make_<type>` figure path, the `report.json` page sequence, and the report
+      variants are documented there.
+- [x] **Port the LaTeX templates + the assembly orchestration to `py/ae/report/`.**
+      `latex.py` (verbatim templates), `report.py` (`LatexReport` + addenda +
+      `StatisticsTableMaker`), `labs.py`, `jsonio.py`, `cli.py`, `bin/ssm-report`
+      wrapper. AD's `acmacs_base.json` / `.map` deps replaced by self-contained
+      helpers; emitted LaTeX is byte-identical. **✅ Verified:** a minimal
+      `report.json` + dummy figure PDF assembles and `pdflatex`-compiles to a 6-page
+      PDF (no map-draw / `ae_backend` needed; `--no-compile` needs no TeX either).
+- [ ] **Port `init.py`** — working-dir scaffolding + `report.json` templating
+      (pure-Python, also unblocked; next non-blocked step).
+- [ ] **(BLOCKED on #1)** Wire figure generation (`map.py`/`maker.py`/`geographic.py`/
+      `signature_page.py` + `stat.json.xz` writer) onto `ae_backend` + the `chart-draw`
+      path. **Verify:** generates a full PDF report from a sample dataset.
 
 ---
 
-## 5. webserver — HTTPS chart serving  *(unclaimed)*
+## 5. webserver — HTTPS chart serving  *(owner: webserver agent — 🟡 core done)*
 
 - **AD source:** `~/AC/eu/AD/sources/acmacs-webserver`.
-- **ae target:** new `cc/webserver/` (or a thin Python service — evaluate first whether a
-  modern Python/ASGI front-end over `ae_backend` is simpler than porting the C++ server).
-- **Note:** smallest subsystem; lowest priority. Confirm the intended deployment model
-  before committing to the C++ port vs a Python rewrite.
+- **ae target:** **`py/ae/webserver/`** (Python rewrite over `ae_backend`) +
+  [`bin/chart-serve`](bin/chart-serve). **No `meson.build` / `cc/` changes** (so no shared-file
+  conflict risk with the other subsystems).
+
+**Decision (M1):** *Python rewrite, not a C++ port.* The AD `acmacs-webserver` is a generic
+multi-threaded transport built on `websocketpp` + standalone-Asio + OpenSSL and carries **no
+chart logic** of its own. Neither `websocketpp` nor Asio is vendored in `ae` or present in
+arm64 Homebrew, and `websocketpp` is effectively unmaintained (last release ~2020) — adopting
+two new deps for the smallest/lowest-priority subsystem is poor value. Since `ae_backend` is
+already a Python extension, the chart-serving role sits directly on top of it using only the
+Python **stdlib** (`http.server` + `ssl`): zero new dependencies, runs immediately, and `ssl`
+gives the "HTTPS chart serving" the roadmap names. The route surface is stable enough to be
+re-hosted behind FastAPI/ASGI later without changing clients.
+
+**Files:** [`py/ae/webserver/__init__.py`](py/ae/webserver/__init__.py),
+[`py/ae/webserver/server.py`](py/ae/webserver/server.py) (`ChartServer`, `serve`,
+`chart_summary`, `titer_table`), [`bin/chart-serve`](bin/chart-serve).
+
+**Routes:** `GET /` (HTML index) · `GET /healthz` · `GET /api/charts` ·
+`GET /api/chart/info?path=REL` · `GET /api/chart/table?path=REL` · `GET /chart?path=REL`.
+`REL` is resolved against the served root; out-of-root paths → 403, missing → 404.
 
 **Milestones:**
-- [ ] Decide: port C++ server vs Python rewrite over `ae_backend`.
-- [ ] Implement chart-serving endpoint. **Verify:** serves a chart over HTTP locally.
+- [x] **M1 — Decide: port C++ server vs Python rewrite.** → Python rewrite over `ae_backend`
+      (rationale above).
+- [x] **M2 — Implement chart-serving endpoint.** HTTP/HTTPS server, chart listing, info/table
+      JSON + HTML pages, path-traversal protection. **Verify:** ✅ HTTP layer end-to-end —
+      `/healthz`→200, `/api/charts` lists `test/chart1.ace`, `/`→index HTML, `/nope`→404,
+      missing-path→400, `../CLAUDE.md`→403; **HTTPS** verified with a self-signed cert
+      (`https://…/healthz`→200 over TLS). The chart **data** endpoints
+      (`/api/chart/info|table`) call `ae_backend.chart_v3.Chart(...)`, which currently
+      **aborts at construction** in this environment (SIGABRT, no message) — a **pre-existing**
+      issue: `bin/chart-info test/chart1.ace` aborts identically (build `.so` is from Jun 10,
+      stale vs source). Once the backend loads charts, these endpoints return data with no code
+      change (they use only documented `chart_v3` APIs).
+- [ ] **M3 (optional, future):** websocket/live-reload parity with AD, or FastAPI/ASGI host if
+      a production deployment model is chosen; serve rendered map PDFs once map-draw (#1) lands.
 
 ---
 
-## 6. CLI wrappers — thin shells over the `chart_v3` API  *(unclaimed, low-risk)*
+## 6. CLI wrappers — thin shells over the `chart_v3` API  *(owner: CLI agent — 🟢 done)*
 
 Quick, independently-verifiable wins. Each is a small Python script in `bin/` importing
-`ae_backend.chart_v3`. **No `meson.build` changes needed** — lowest conflict risk, good
-for a parallel agent.
+`ae_backend.chart_v3`. **No `meson.build` changes needed** — zero conflict risk.
 
-**Already covered under different names/flags (do NOT re-create):**
+**Already covered under different names/flags (not re-created):**
 - `chart-relax-existing` → `chart-relax --existing`
 - `chart-relax-incremental` → `chart-relax --incremental`
 - `chart-reorient` / `chart-transformation` → `chart-rotate`
 - `chart-txt-to-ace` → `chart-torg-table-to-ace`
 - `chart-table` → `chart-info-and-table` / `v2-chart-table`
 
-**Genuinely missing (confirm underlying `chart_v3` support before writing each):**
-- [ ] `chart-clades`
-- [ ] `chart-column-bases`
-- [ ] `chart-names`
-- [ ] `chart-layout`
-- [ ] `chart-stress` / `chart-stresses`
-- [ ] `chart-export` / `chart-convert`
-- [ ] `chart-keep-antigens-sera` / `chart-remove-antigens-sera`
-- [ ] `chart-keep-antigens-titrated-against-sera`
-- [ ] `chart-list-antigens-without-titers`
-- [ ] `chart-titers-compare` / `chart-titers-replace`
-- [ ] `chart-homologous-pairs`
-- [ ] `chart-distances-between-all-points`
-- [ ] `chart-error-lines`
-- [ ] `chart-common`
-- [ ] `chart-join` / `chart-split-into-layers` / `chart-remove-layers`
-- [ ] `chart-combine-projections` / `chart-remove-projections`
-- [ ] `chart-projection-pca`
-- [ ] `chart-relax-disconnected` / `chart-relax-grid`
-- [ ] `chart-map-resolution-test`
-- [ ] `chart-titer-merging-*` family
-- [ ] `chart-locations` / `chart-countries` (depends on locdb)
-- [ ] `chart-find-chart-with-antigens` (depends on hidb, #2)
+**Implemented:**
+- [x] [`bin/chart-clades`](bin/chart-clades) — list clades for antigens (from semantic attrs; `--populate-seqdb`)
+- [x] [`bin/chart-column-bases`](bin/chart-column-bases) — print column bases per serum (or forced column bases)
+- [x] [`bin/chart-names`](bin/chart-names) — list antigen/serum names (`--ag`, `--sr`, `-n` for numbered output)
+- [x] [`bin/chart-layout`](bin/chart-layout) — print coordinates for every point in a projection
+- [x] [`bin/chart-stress`](bin/chart-stress) — show stress for all projections; `--best` for single value
+- [x] [`bin/chart-keep-antigens-sera`](bin/chart-keep-antigens-sera) — keep by index or name regex
+- [x] [`bin/chart-remove-antigens-sera`](bin/chart-remove-antigens-sera) — remove by index or name regex
+- [x] [`bin/chart-keep-antigens-titrated-against-sera`](bin/chart-keep-antigens-titrated-against-sera) — filter to antigens with ≥1 real titer
+- [x] [`bin/chart-list-antigens-without-titers`](bin/chart-list-antigens-without-titers) — find antigens with all-missing titers
+- [x] [`bin/chart-titers-compare`](bin/chart-titers-compare) — diff titer tables between two charts
+- [x] [`bin/chart-homologous-pairs`](bin/chart-homologous-pairs) — find ag/sr homologous pairs + map distance
+- [x] [`bin/chart-distances-between-all-points`](bin/chart-distances-between-all-points) — pairwise map distances (`--ag-ag`, `--sr-sr`)
+- [x] [`bin/chart-error-lines`](bin/chart-error-lines) — expected vs actual map distances, sorted by residual
+- [x] [`bin/chart-common`](bin/chart-common) — common antigens/sera between two charts
+- [x] [`bin/chart-combine-projections`](bin/chart-combine-projections) — merge projections from multiple charts
+- [x] [`bin/chart-remove-projections`](bin/chart-remove-projections) — remove all / keep N / remove by index
 
-> Caveat: a missing CLI does not always mean missing capability — the core `chart_v3`
-> API may already support it. The first step for each is a quick check of the pybind
-> bindings (`cc/py/chart-v3*.cc`) before writing the wrapper.
+**Not implemented (missing API or external dependency):**
+- `chart-export` / `chart-convert` — no `to_json()` binding; `.ace` write already converts on load
+- `chart-join` / `chart-split-into-layers` / `chart-remove-layers` — no layer-split API in `chart_v3`
+- `chart-projection-pca` — no PCA binding
+- `chart-relax-disconnected` / `chart-relax-grid` — covered by `chart-relax` flags
+- `chart-map-resolution-test` — complex, requires C++ support not yet exposed
+- `chart-titer-merging-*` family — partial: `chart-titer-merge-report` already exists in `bin/`
+- `chart-locations` / `chart-countries` — depends on locdb integration (not a chart_v3 concern)
+- `chart-find-chart-with-antigens` — depends on hidb (#2)
 
 ---
 

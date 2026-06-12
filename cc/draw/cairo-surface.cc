@@ -60,6 +60,33 @@ namespace ae::draw
         cairo_stroke(context_);
     }
 
+    void CairoPdf::triangle(double cx, double cy, double radius, Color outline, double outline_width, Color fill)
+    {
+        constexpr double sin60 = 0.86602540378443864676; // sqrt(3)/2
+        cairo_new_path(context_);
+        cairo_move_to(context_, cx, cy - radius);                       // apex (up; PDF y grows downward)
+        cairo_line_to(context_, cx + sin60 * radius, cy + radius / 2.0); // bottom-right
+        cairo_line_to(context_, cx - sin60 * radius, cy + radius / 2.0); // bottom-left
+        cairo_close_path(context_);
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        set_source(context_, outline);
+        cairo_set_line_width(context_, outline_width);
+        cairo_stroke(context_);
+    }
+
+    void CairoPdf::line(double x1, double y1, double x2, double y2, Color color, double width)
+    {
+        cairo_new_path(context_);
+        cairo_move_to(context_, x1, y1);
+        cairo_line_to(context_, x2, y2);
+        set_source(context_, color);
+        cairo_set_line_width(context_, width);
+        cairo_stroke(context_);
+    }
+
 } // namespace ae::draw
 
 // ----------------------------------------------------------------------

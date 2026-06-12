@@ -27,9 +27,12 @@ namespace ae::draw
         CairoPdf& operator=(CairoPdf&&) = delete;
 
         void background(Color color);
-        // A transparent fill (Color::is_transparent()) is not painted, giving an outline-only shape.
+        // For the shapes below, a transparent fill (Color::is_transparent()) is not painted,
+        // giving an outline-only shape.
         void circle(double cx, double cy, double radius, Color outline, double outline_width, Color fill);
         void square(double cx, double cy, double side, Color outline, double outline_width, Color fill);
+        void triangle(double cx, double cy, double radius, Color outline, double outline_width, Color fill); // equilateral, point up
+        void line(double x1, double y1, double x2, double y2, Color color, double width);
 
       private:
         _cairo_surface* surface_{nullptr};
