@@ -17,10 +17,10 @@ status, and respect the shared-file rules below.
 
 | # | Subsystem | AD source | ~LOC | ae target | Owner | Status |
 |---|-----------|-----------|-----:|-----------|-------|--------|
-| 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | 🟡 in progress |
-| 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟡 read side done + verified; authoring (make/convert/stat) in progress |
-| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` (layout + plan) | *(tal agent)* | 🟡 Phase A layout done; draw blocked on #1 |
-| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; figures blocked on #1 |
+| 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
+| 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
+| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1 (tree→PDF) done |
+| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; **map figures come from kateri** (chart → kateri socket → PDF, see `py/ae/utils/kateri.py`), **not** the shelved C++ map-draw #1 |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 code complete — HTTP/HTTPS verified; chart-data blocked on a `chart_v3` import abort in `ae_backend` (open bug, see §1 note) |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 
@@ -51,11 +51,30 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 
 ---
 
-## 1. Map drawing  *(owner: map-draw agent — M1–M4 core done; M4 extras + M5/M6 remain)*
+## 1. Map drawing  *(owner: map-draw agent — ⚪ SHELVED: maps are implemented in kateri)*
 
-The single biggest gap. As of M1, `ae` **can render a basic antigenic map to PDF**.
-`cc/draw/` previously held only geometry/color *primitive headers*; it now also has a
-Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
+> **⚠ COURSE CORRECTION (kateri audit).** Antigenic-**map** drawing is **already implemented
+> in `kateri`** (`github.com/drserajames/kateri`, a Dart/Flutter app — its README: *"antigenic
+> map viewer and pdf generator"*). It does the semantic-style resolution (`lib/src/plot_spec.dart`
+> — the `// implement in kateri!` resolver), interactive viewing, **and headless PDF**
+> (`draw_on_pdf.dart`). ae drives it over a socket (`py/ae/utils/kateri.py`: send `CHRT`,
+> `set_style`, `pdf`). So the empty `cc/map-draw/` was an **architecture decision (drawing → kateri)**,
+> not a porting gap — my original "biggest gap" framing was wrong.
+>
+> **Consequences:**
+> - **`cc/map-draw/`** (`draw.cc`/`draw.hh`/`chart-draw-main.cc` + the `chart-draw` target) is
+>   **redundant** with kateri → **shelved** (M1–M4 below kept for reference / possible headless
+>   fallback; do not invest further; not merged to `main`).
+> - **`cc/draw/cairo-surface.*` is KEPT and is shared infrastructure.** kateri does **not** draw
+>   trees, so TAL (#3) renders trees in C++ using this exact surface — `cc/tal/draw-tree.cc`
+>   already `#include`s it and calls `pdf.line()/text()/background()`. The Cairo work was *not*
+>   wasted; only the map-specific renderer was.
+> - Other subsystems audited against kateri: **hidb / ssm-report / webserver are NOT in kateri**
+>   → they remain legitimate ae-side work. Only map-draw was already done there.
+
+The milestones below (M1–M4) record what the C++ map renderer reached **before** the kateri
+audit; they are retained for history. `cc/draw/cairo-surface.*` graduated out of map-draw into
+shared `cc/draw/` infrastructure (see TAL #3).
 
 - **AD source:** `~/AC/eu/AD/sources/acmacs-draw` (Cairo backend) and
   `~/AC/eu/AD/sources/acmacs-map-draw` (map render + the `mapi` settings DSL).
@@ -244,18 +263,41 @@ The reader above consumes a pre-built hidb. These tools *produce / maintain* it.
   the binding. `bin/hidb-stat`.
 
 **Authoring milestones:**
-- [ ] `cc/hidb/hidb-maker.{hh,cc}` + `HiDb::save()`; wire into `meson.build` (libae).
-- [ ] pybind: `hidb.make(chart_files, output)` (+ `HidbMaker`); `bin/hidb-make`, `bin/hidb-convert`.
-- [ ] `bin/hidb-stat`. **Verify:** build a small hidb from a couple of real charts, reload it
-      with the reader, and round-trip through `hidb-convert` — counts and a spot-checked
-      antigen/serum match the source charts.
+- [x] [`cc/hidb/hidb-maker.{hh,cc}`](cc/hidb/hidb-maker.hh) (`ae::hidb::HidbMaker`) +
+      `HiDb::save()` + a shared `ae::hidb::to_json()` serialiser; wired into `meson.build`
+      (`sources_hidb`).
+- [x] pybind: `hidb.make(chart_files, output, stop_on_error)` + `HidbMaker` + `HiDb.save`;
+      `bin/hidb-make`, `bin/hidb-convert`.
+- [x] `bin/hidb-stat`. **✅ Verified** (arm64 build): built a small hidb from several real
+      charts — cross-chart **dedup** works (N charts × ~M antigens collapse to fewer unique),
+      dates/lab_ids accumulate, antigen↔table links and serum **homologous** antigens are
+      correct, and `reference_antigens` matches on the built DB; `hidb-convert` round-trips
+      (xz→plain→reload) with identical counts and valid hidb-v5 JSON.
 
-**Not ported (low demand):** `hidb5-first-table-date` (a niche per-antigen CSV). The shared
-query surface is in place if it's wanted later.
+**Fidelity note:** like AD, a table's `a`/`s` index lists are sorted by global index while
+its `t` titers stay in source-chart order (so titer rows are not aligned with the sorted
+`a`/`s` — matches AD output; reader queries don't depend on titer alignment). `ae::chart::v3::Info`
+has no `subset`, so the table `s`(subset) field AD overwrote with the sera array anyway is
+simply omitted.
+
+- [x] `bin/hidb-first-table-date` — per antigen: isolation date, oldest (first) hidb table
+      date, AD's "Days" value, country, lab id, lineage; one CSV per subtype+lab+assay tag
+      (`db.oldest_table()` + `Antigen.country()`). **Reproduces AD's `Days` logic bug-for-bug**
+      (deliberately, for drop-in compatibility with downstream consumers — owner's call):
+      `days = isolation.ok() ? -1 : days_between(invalid_date, first_table_date)`, displayed as
+      `days>=0 ? str : ""`. So a *valid* isolation date yields a **blank** Days cell, and a
+      missing/invalid one yields AD's large constant-offset number (`sys_days(first_table_date)
+      − sys_days(year{0}/0/0)`, the latter == −719560 via Hinnant's `days_from_civil`, verified
+      against acmacs-base `date.hh`). The only AD behaviour not copied is its *throw* on a
+      literally empty date string (a crash, not a column value) — empty just takes the else
+      branch here. **✅ Verified** on real H3 data: dated antigens blank, date-less antigens
+      emit the AD offset numbers; constant and arithmetic checked.
+
+All AD hidb-5 tools are now ported.
 
 ---
 
-## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — ⚪ blocked on #1)*
+## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B M1 done)*
 
 `ae` already has tree **manipulation** (Newick parse, fix-names, substitution-labels,
 to-json in `cc/tree/`). Missing: the tree **drawing** / signature-page / time-aware
@@ -296,8 +338,16 @@ reusable surface API. `AntigenicMaps` additionally needs the map renderer + **hi
       `Leaf::date`). **Verify:** `python3 cc/tal/test/test-time-series.py` → `OK …`.
 - [ ] **Phase A (remaining, headless):** reconcile aa-transition labelling with
       `cc/tree/aa-transitions.cc`; hz-section detection (`hz-sections.cc`).
-- [ ] **Phase B (BLOCKED on #1 ≈M3):** agree a shared `ae::draw::Surface`, then port
-      `DrawTree` → column elements → title/legend/aa-transition draw paths.
+- [x] **Phase B M1 — tree → PDF.** `ae::tal::export_tree_pdf` in
+      [`cc/tal/draw-tree.cc`](cc/tal/draw-tree.cc) + the **`tal-draw`** CLI (port of
+      acmacs-tal `DrawTree::draw`: edge segments + inode connectors, optional leaf labels).
+      Reuses `compute_layout` + the `CairoPdf` surface from #1; Cairo linked only into the
+      `tal-draw` target. **Verify:** `sh cc/tal/test/test-draw-tree.sh` → `OK …` (20-leaf
+      tree also rasterised & eyeballed). *Used CairoPdf directly; the `ae::draw::Surface`
+      abstraction is deferred (lowest-conflict while map-draw evolves CairoPdf) — see PORTING.md.*
+- [ ] **Phase B M2+:** leaf coloring; then column elements — `Clades` bars + `TimeSeries`
+      dashes (data already computed in Phase A) — then title/legend/aa-transition draw paths.
+      Needs a couple more surface primitives (filled rect, rotated text); coordinate with #1.
 - [ ] Signature-page composition (`AntigenicMaps` — also needs map render + hidb #2).
 
 ---

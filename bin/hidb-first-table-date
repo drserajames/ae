@@ -1,0 +1,122 @@
+#! /usr/bin/env python3
+"""For every antigen, report its isolation date, the date of the oldest (first)
+hidb table it appears in, the gap in days between the two, country, lab id and
+lineage. One CSV file is written per subtype+lab+assay tag.
+
+Port of AD's hidb5-first-table-date, reproducing AD's "Days" logic exactly so
+the output is drop-in compatible with downstream consumers of the original tool:
+
+    days = isolation_date.ok() ? -1 : days_between(invalid_date, first_table_date)
+    Days field = days >= 0 ? str(days) : ""          # so days == -1 prints blank
+
+i.e. when an antigen has a valid isolation date the Days cell is left BLANK, and
+when it does not, AD emits days_between(year{0}/0/0, first_table_date) -- a large
+constant-offset number from Hinnant's sys_days arithmetic. This is faithful to AD
+(verified against acmacs-base date.hh); it is not the gap-in-days one might
+expect. The only AD behaviour not copied is its throw on a literally empty date
+string -- here an empty/invalid isolation date simply takes the else branch.
+
+Requires $HIDB_V5. $LOCDB_V2 is recommended (without it the Country column is
+reported as UNKNOWN).
+
+  hidb-first-table-date /tmp/ftd-            # writes /tmp/ftd-H3-<lab>-<assay>.csv etc.
+  hidb-first-table-date --subtypes H3 out-
+"""
+
+import sys
+import os
+import csv
+import argparse
+from datetime import date as date_t
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _hidb_boot
+
+
+def days_from_civil(y, m, d):
+    # Howard Hinnant's algorithm, matching the date lib's year_month_day -> sys_days
+    # conversion, so the else-branch value matches AD exactly. C++ truncating
+    # division and Python floor division agree for every input used here.
+    yy = y - 1 if m <= 2 else y
+    era = (yy if yy >= 0 else yy - 399) // 400
+    yoe = yy - era * 400
+    doy = (153 * ((m - 3) if m > 2 else (m + 9)) + 2) // 5 + d - 1
+    doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+
+# AD invalid_date() is year{0}/0/0 ; its sys_days value is the base AD subtracts
+INVALID_SYS_DAYS = days_from_civil(0, 0, 0)  # == -719560
+
+
+def isolation_ok(text):
+    # mirror date::from_string(date_compact()).ok(): valid full calendar date
+    if not text or len(text) < 10:
+        return False
+    try:
+        date_t(int(text[0:4]), int(text[5:7]), int(text[8:10]))
+        return True
+    except ValueError:
+        return False
+
+
+def days_field(isolation, first_table_date):
+    # AD: days = isolation.ok() ? -1 : days_between(invalid_date, first_table_date)
+    if isolation_ok(isolation):
+        days = -1
+    else:
+        ftd = first_table_date[:8]
+        try:
+            days = days_from_civil(int(ftd[0:4]), int(ftd[4:6]), int(ftd[6:8])) - INVALID_SYS_DAYS
+        except (ValueError, IndexError):
+            days = 0  # both dates invalid -> days_between == 0 (as AD)
+    return str(days) if days >= 0 else ""
+
+
+def main():
+    parser = argparse.ArgumentParser(description="first table date per antigen (CSV per tag)")
+    parser.add_argument("output_prefix", help="output filename prefix; <prefix><tag>.csv is written per tag")
+    parser.add_argument("--subtypes", nargs="+", default=["B", "H1", "H3"], help="virus types to process (default: B H1 H3)")
+    args = parser.parse_args()
+
+    hidb_dir = _hidb_boot.require_env("HIDB_V5", "the hidb data directory")
+    ae_backend = _hidb_boot.load_ae_backend()
+    ae_backend.hidb.set_dir(hidb_dir)
+
+    # tag -> list of rows
+    data = {}
+    for subtype in args.subtypes:
+        db = ae_backend.hidb.hidb(subtype)
+        for ag_no in range(db.number_of_antigens()):
+            ag = db.antigen(ag_no)
+            tables = list(ag.tables)
+            if not tables:
+                continue
+            first_table_index = db.oldest_table(tables)
+            first_table = db.table(first_table_index)
+            first_table_date = first_table.date[:8]
+
+            lab_ids = list(ag.lab_ids)
+            tag = f"{subtype}-{first_table.lab}-{first_table.assay}"
+            data.setdefault(tag, []).append([
+                ag.name(),
+                ag.date(),
+                first_table_date,
+                days_field(ag.date(), first_table_date),
+                ag.country(),
+                lab_ids[0] if lab_ids else "",
+                ag.lineage,
+            ])
+
+    header = ["Name", "Isolation", "Table", "Days", "Country", "Lab Id", "Lineage"]
+    for tag, rows in sorted(data.items()):
+        filename = f"{args.output_prefix}{tag}.csv"
+        with open(filename, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            writer.writerows(rows)
+        print(f"wrote {filename}  ({len(rows)} antigens)")
+
+
+if __name__ == "__main__":
+    main()

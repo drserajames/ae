@@ -124,6 +124,7 @@ sources_py = [
   'cc/py/chart-v2.cc',
   'cc/py/utils.cc',
   'cc/py/tal.cc', # --- tal (subsystem #3) ---
+  'cc/py/hidb.cc', # --- hidb (subsystem #2) ---
 ]
 
 # --- tal (subsystem #3) — headless tree layout; see cc/tal/PORTING.md ---
@@ -131,6 +132,12 @@ sources_tal = [
   'cc/tal/layout.cc',
   'cc/tal/clades.cc',
   'cc/tal/time-series.cc',
+]
+
+# --- hidb (subsystem #2) — historical influenza DB; port of AD hidb-5 ---
+sources_hidb = [
+  'cc/hidb/hidb.cc',
+  'cc/hidb/hidb-maker.cc',
 ]
 
 sources_tree = [
@@ -259,7 +266,8 @@ libae = library(
             sources_sequences + sources_virus + sources_whocc + sources_chart_v3 +
             sources_utils +
             sources_chart_v2 + sources_ad +
-            sources_tal, # --- tal (subsystem #3) ---
+            sources_tal + # --- tal (subsystem #3) ---
+            sources_hidb, # --- hidb (subsystem #2) ---
   include_directories : include_cc,
   dependencies : [alglib, omp, xxhash, fmt, simdjson, range_v3, lexy, xlnt, brotli_enc, brotli_dec, bzip2, xz, zlib],
   link_args : libomp_dir,

@@ -1,0 +1,34 @@
+#! /usr/bin/env python3
+"""Reformat / recompress a hidb file (read it, write it back out).
+
+Port of AD's hidb5-convert. AD converted between JSON and an optimised binary
+layout; this port has no binary form, so "convert" is JSON->JSON: it loads a
+hidb and re-serialises it, with the output compression chosen by the output
+extension (.json = plain, .json.xz = xz, .json.br = brotli).
+
+  hidb-convert hidb5.h3.json.xz hidb5.h3.json      # decompress
+  hidb-convert hidb5.h3.json    hidb5.h3.json.xz   # compress
+"""
+
+import sys
+import os
+import argparse
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _hidb_boot
+
+
+def main():
+    parser = argparse.ArgumentParser(description="reformat/recompress a hidb")
+    parser.add_argument("source", help="input hidb file")
+    parser.add_argument("output", help="output hidb file (format by extension)")
+    args = parser.parse_args()
+
+    ae_backend = _hidb_boot.load_ae_backend()
+    db = ae_backend.hidb.HiDb(args.source)
+    db.save(args.output)
+    print(f"wrote {args.output}  (antigens: {db.number_of_antigens()}, sera: {db.number_of_sera()}, tables: {db.number_of_tables()})")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,49 @@
+#! /usr/bin/env python3
+"""List the reference antigens of every table in a hidb, as CSV.
+
+Port of AD's hidb5-reference-antigens-in-tables. A reference antigen is an
+antigen whose name matches a serum name in the same table.
+
+Requires $HIDB_V5 and $LOCDB_V2 (see bin/_hidb_boot.py).
+
+  hidb-reference-antigens-in-tables A(H3N2) > refs.csv
+  hidb-reference-antigens-in-tables --since 20200101 A(H3N2)
+"""
+
+import sys
+import os
+import csv
+import argparse
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _hidb_boot
+
+
+def assay_type(table):
+    # HI tables are distinguished by their rbc species; others just by assay
+    if table.assay == "HI" and table.rbc:
+        return f"HI:{table.rbc}"
+    return table.assay
+
+
+def main():
+    parser = argparse.ArgumentParser(description="reference antigens in hidb tables (CSV)")
+    parser.add_argument("virus_type", help='virus type, e.g. "A(H3N2)", "H3", "B"')
+    parser.add_argument("--since", default="", help="only tables with date >= this (YYYYMMDD)")
+    args = parser.parse_args()
+
+    ae_backend = _hidb_boot.load_ae_backend()
+    db = _hidb_boot.open_hidb(ae_backend, args.virus_type)
+
+    writer = csv.writer(sys.stdout)
+    writer.writerow(["table", "lab", "assay", "date", "reference_antigen"])
+    for ti in range(db.number_of_tables()):
+        table = db.table(ti)
+        if args.since and table.date < args.since:
+            continue
+        for ag_index in db.reference_antigens(ti):
+            writer.writerow([table.name(), table.lab, assay_type(table), table.date, db.antigen(ag_index).name()])
+
+
+if __name__ == "__main__":
+    main()

@@ -18,6 +18,7 @@ namespace ae::py
     void chart_v2(pybind11::module_& mdl);
     void utils(pybind11::module_& mdl);
     void tal(pybind11::module_& mdl); // --- tal (subsystem #3) ---
+    void hidb(pybind11::module_& mdl); // --- hidb (subsystem #2) ---
 
 } // namespace acmacs_py
 
