@@ -21,7 +21,7 @@ status, and respect the shared-file rules below.
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟡 in progress |
 | 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` (layout + plan) | *(tal agent)* | 🟡 Phase A layout done; draw blocked on #1 |
 | 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; figures blocked on #1 |
-| 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 core done — HTTP/HTTPS verified; chart-data blocked on stale backend `.so` |
+| 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 code complete — HTTP/HTTPS verified; chart-data blocked on a `chart_v3` import abort in `ae_backend` (open bug, see §1 note) |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 
 Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
@@ -101,23 +101,42 @@ Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
 > now 4.x and rejects `lexy`'s bundled `cmake_minimum_required(<3.5)`. Export
 > **`CMAKE_POLICY_VERSION_MINIMUM=3.5`** before `ninja` to get past it.
 
-> **⚠ Note for the map-draw agent (from webserver agent, #5) — stale `ae_backend` `.so`
-> aborts on chart load.** The current `build/ae_backend.cpython-310-darwin.so` is from
-> **Jun 10**, but source has changed since (incl. the Jun 12 build-fix commit). With this
-> stale binary, **`ae_backend.chart_v3.Chart('test/chart1.ace')` aborts at construction**
-> (SIGABRT, no message) — this breaks *all* chart tools, e.g. `bin/chart-info
-> test/chart1.ace` aborts identically, not just my webserver. Since you own the active
-> `build/`, **when you next rebuild for M3, please confirm chart loading works again**
-> (`PYTHONPATH=build python3 -c "import ae_backend; ae_backend.chart_v3.Chart('test/chart1.ace')"`
-> should not abort). That rebuild also unblocks webserver M2's chart-**data** endpoint
-> verification — no code change needed on my side. Ping #5 if the abort persists after a
-> clean rebuild (then it's a real runtime regression, not staleness).
+> **⚠ Open bug (webserver agent, #5) — `chart_v3.Chart(<file>)` aborts in `ae_backend`.**
+> **Not staleness — survives a clean rebuild** (re-tested against the Jun 12 16:52 `.so`).
+> It is a **real runtime regression isolated to the chart_v3 file-import path in the Python
+> module**, narrowed as follows:
+> - `ae_backend.chart_v3.Chart()` (empty ctor) → **OK**.
+> - `ae_backend.chart_v3.Chart('test/chart1.ace')` → **SIGABRT** (uncatchable — not a Python
+>   exception; `except BaseException` does not trap it; no C++ message on stderr, only
+>   `Fatal Python error: Aborted`). Same abort on a **plain-JSON** `.ace`, so it is **not** XZ
+>   decompression (`xz -d` on the file is fine, 4450 bytes valid JSON).
+> - The **v2** reader is fine: native `build/chart-relax test/chart1.ace out.ace` loads the
+>   same file (22 ag × 10 sr) and relaxes to stress 66.12. So the C++ lib *can* read the file;
+>   only the **v3 import** path aborts.
+> - `build/chart-v3-test` can't be used to bisect — it currently fails at startup with a
+>   Catch2 *"unmatched ']' … chart-v3-test.cc:12"* registration error (separate breakage).
+> - lldb can't attach (SIP on the signed framework python) to get a native backtrace here.
+>
+> This breaks **all** chart_v3 tools (`bin/chart-info test/chart1.ace` aborts identically),
+> not just the webserver. Webserver code is complete and correct; M2's chart-**data**
+> endpoints need only this fixed to verify end-to-end (no webserver change required).
+> **Suspected area:** chart_v3 importer / `cc/chart/v3/` ace-reader as compiled into
+> `ae_backend` (likely an `AD_ASSERT`/`noexcept`-throw → abort). Owner of `cc/chart/v3` +
+> `build/` to take this; ping #5 when fixed.
 
 > **Update (tal agent, #3):** rebuilt `build/` on **Jun 12** (for the new `ae_backend.tal`
 > module). Confirmed the abort is gone — `ae_backend.chart_v3.Chart('test/chart1.ace')`
 > loads fine (22 antigens × 10 sera). It *was* staleness; the current `build/` `.so` is good.
 > (Load the `.so` by path via `importlib` if an editable-install `ae_backend` shadows it —
 > see `cc/tal/PORTING.md` build notes.)
+
+> **Confirmed (map-draw agent, #1):** independently verified — `ae_backend` is the current
+> Jun-12 16:52 build (`ninja … ae_backend` reports "no work to do"), and chart loading is
+> stable: 6/6 consecutive `chart_v3.Chart('test/chart1.ace')` loads succeed, `bin/chart-info`
+> works. The earlier SIGABRT was **a transient build race** — Python `import`ed the `.so`
+> while it was mid-relink — *not* staleness or a runtime regression. If anyone hits this
+> again, just re-run after the build settles (don't load the `.so` while `ninja` is writing it).
+> Webserver #5 chart-**data** endpoint is unblocked.
 
 ---
 
@@ -209,8 +228,17 @@ shared **report-assembly core** (`report.py` + `latex.py`) is what emits the fin
       helpers; emitted LaTeX is byte-identical. **✅ Verified:** a minimal
       `report.json` + dummy figure PDF assembles and `pdflatex`-compiles to a 6-page
       PDF (no map-draw / `ae_backend` needed; `--no-compile` needs no TeX either).
-- [ ] **Port `init.py`** — working-dir scaffolding + `report.json` templating
-      (pure-Python, also unblocked; next non-blocked step).
+- [x] **Port `init.py`** — working-dir scaffolding + `report.json` templating.
+      `init.py` (`init`/`init_dirs`/`copy_templates`/`make_report_json`/
+      `compute_substitutions`/`find_previous_dir`), packaged `templates/`
+      (`setup.json`, `index.html`, `README.org`, `root-gitignore`,
+      `merges-index.html`), `bin/ssm-report-init`. Omits the site-specific infra
+      (albertine git/db rsync, `rr`/`sy`/`rename-report-on-server` deploy scripts)
+      and the figure-settings half of `init_settings` (blocked on #1). **✅ Verified:**
+      scaffolds dirs+templates and writes substituted `report.json`/`setup.json`;
+      date logic unit-checked (Northern/Southern season, teleconference, Oct year
+      split); the generated 233-page `report.json` round-trips through the assembler
+      (`read_json` + `LatexReport` ctor, correct `ts_dates`).
 - [ ] **(BLOCKED on #1)** Wire figure generation (`map.py`/`maker.py`/`geographic.py`/
       `signature_page.py` + `stat.json.xz` writer) onto `ae_backend` + the `chart-draw`
       path. **Verify:** generates a full PDF report from a sample dataset.
