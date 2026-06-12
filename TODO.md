@@ -310,11 +310,17 @@ lineage output.
 - **Depends on:** the Cairo backend from subsystem #1 (shares the draw surface). Best
   started after map-draw M1–M3 land, or coordinate on the `cc/draw/` surface API.
 
-**⚠ Blocker (confirmed during M1):** every TAL `LayoutElement::draw()` is built on AD's
-rich `acmacs::surface::Surface` (lines/paths/Pango text/sub-surfaces). ae currently
-provides only `ae::draw::CairoPdf` (`background`/`circle`/`square` — map-draw **M1**). The
-*drawing half* of TAL cannot compile until subsystem #1 reaches ~**M3** and exposes a
-reusable surface API. `AntigenicMaps` additionally needs the map renderer + **hidb (#2)**.
+**✅ Blocker RESOLVED — and TAL now *owns* the C++ draw surface.** The original blocker
+(TAL drawing needs a surface) is moot: TAL Phase B M1 already renders trees → PDF using
+`ae::draw::CairoPdf` directly (`cc/tal/draw-tree.cc` includes `draw/cairo-surface.hh` and
+calls `pdf.line()/text()/background()`). Crucially, the **map-draw subsystem #1 is shelved**
+(maps live in kateri — see §1), so **`cc/draw/cairo-surface.*` is now shared infrastructure
+that TAL is the primary consumer of, not a map-draw deliverable.** TAL should drive any future
+surface additions it needs (Phase B M2+ wants *filled rectangle* and *rotated text* — add them
+to `cc/draw/cairo-surface.*` directly; no map-draw coordination required since #1 is dormant).
+The `ae::draw::Surface` abstraction remains optional/deferred. NOTE: `AntigenicMaps`
+signature-page panels still need *map* rendering — get those map PDFs from **kateri**, not a
+C++ renderer; TAL composes them with the tree.
 
 **Milestones:**
 - [x] **Explore `acmacs-tal`; identify the tree-layout + draw entry points.** →
