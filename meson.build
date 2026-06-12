@@ -85,6 +85,18 @@ endif
 
 catch2 = dependency('catch2')
 
+# --- map-draw: Cairo (see TODO.md subsystem #1) ---
+cairo = dependency('cairo', required: false)
+if not cairo.found() and host_machine.system() == 'darwin'
+  # pkg_config_libdir is pinned to brotli in the arm64 native file, so cairo
+  # may be invisible to pkg-config; fall back to the Homebrew formula prefix.
+  cairo_prefix = run_command('brew', '--prefix', 'cairo', check: true).stdout().strip()
+  cairo = declare_dependency(
+    compile_args : ['-I' + cairo_prefix + '/include/cairo'],
+    link_args    : ['-L' + cairo_prefix + '/lib', '-lcairo'],
+  )
+endif
+
 # mylib = meson.get_compiler('cpp').find_library('omp', dirs: '/opt/homebrew/lib')
 message(host_machine.system())
 
@@ -253,6 +265,19 @@ chart_relax = executable(
   sources : ['cc/chart/v2/chart-relax.cc'],
   include_directories : include_cc,
   dependencies : [fmt, range_v3, simdjson],
+  link_with : [libae],
+  install : true)
+
+# ----------------------------------------------------------------------
+# map-draw (see TODO.md subsystem #1) — minimal chart -> PDF renderer.
+# Cairo is linked only into this target, not into libae or ae_backend.
+# ----------------------------------------------------------------------
+
+chart_draw = executable(
+  'chart-draw',
+  sources : ['cc/map-draw/chart-draw-main.cc', 'cc/map-draw/draw.cc', 'cc/draw/cairo-surface.cc'],
+  include_directories : include_cc,
+  dependencies : [fmt, range_v3, simdjson, cairo],
   link_with : [libae],
   install : true)
 

@@ -41,6 +41,41 @@ ae/
 
 ---
 
+## Porting from AD (Acmacs-D) — status & coordination
+
+`ae` is the rewrite/successor of the older `AD` tree at `~/AC/eu/AD` (the `acmacs-*` C++
+family). The core is ported, but several whole subsystems are **not yet implemented** and
+exist only as empty stub directories. **Multiple agents may be porting different
+subsystems in parallel** — the master plan, priority order, ownership table, and
+coordination rules live in [`TODO.md`](TODO.md). **Read `TODO.md` and claim a subsystem
+there before starting any porting work.**
+
+**Already ported:** core chart engine (relax/optimize, merge, grid-test, procrustes,
+serum circles, stress), sequences/seqdb, virus name/passage parsing, locationdb, tree
+manipulation, WHO CC XLSX/TSV ingestion. Exposed via `ae_backend` submodules: `chart_v3`,
+`chart_v2`, `seqdb`, `tree`, `virus`, `whocc`, `locdb_v3`, `utils`.
+
+**Not yet ported (priority order — see `TODO.md` for detail):**
+
+| # | Subsystem | AD source | ae stub | State |
+|---|-----------|-----------|---------|-------|
+| 1 | Map drawing (Cairo + map-draw) | `acmacs-draw`, `acmacs-map-draw` | `cc/draw/` (primitives only), `cc/map-draw/` (empty) | in progress |
+| 2 | hidb (historical influenza DB) | `hidb-5` | `cc/hidb/` (empty) | not started |
+| 3 | TAL (phylo tree drawing) | `acmacs-tal` | `cc/tal/` (empty) | not started |
+| 4 | ssm-report (seasonal report) | `ssm-report` | — | not started |
+| 5 | webserver | `acmacs-webserver` | — | not started |
+| 6 | CLI wrappers over `chart_v3` | various `bin/chart-*` | — | not started |
+
+**Coordination essentials (full rules in `TODO.md`):**
+- `meson.build` is the main conflict risk — keep edits in a commented `# --- <subsystem> ---`
+  block and append rather than reflow.
+- Python bindings: add a `cc/py/<name>.cc` file and register it in
+  [`cc/py/module.cc`](cc/py/module.cc) + [`cc/py/module.hh`](cc/py/module.hh) without
+  reordering existing entries.
+- AD source to reference for each subsystem is under `~/AC/eu/AD/sources/<package>`.
+- Build with the native-arm64 Apple-Clang-16 procedure below (not `./mk`, not Homebrew
+  LLVM). New drawing deps (Cairo, Pango) come from arm64 Homebrew at `/opt/homebrew`.
+
 ## Current build state (Apple Silicon)
 
 **`build/` → `build-arm64/`** — The active build is **native arm64**, compiled with Apple Clang 16 and arm64 Homebrew dependencies at `/opt/homebrew`. No Rosetta 2 needed.
@@ -127,6 +162,15 @@ ln -s build-arm64 build
 Apple Clang **inherits the architecture of its parent process**. Running clang from an x86_64 process (even on an arm64 Mac) produces x86_64 binaries silently — `file` on the output will confirm the architecture. The pip-installed `~/Library/Python/3.10/bin/ninja` is a universal binary that runs as arm64 natively, ensuring the entire toolchain spawns arm64 clang.
 
 `/usr/local/bin/ninja` (from x86_64 Homebrew) must NOT be used — it spawns x86_64 clang.
+
+### CMake 4.x / lexy reconfigure failure (after any `meson.build` edit)
+
+Editing `meson.build` forces a full meson regenerate, which re-runs the vendored `lexy`
+CMake subproject. arm64 Homebrew CMake is now **4.x**, which removed compatibility with the
+`cmake_minimum_required(VERSION < 3.5)` that lexy's bundled doctest declares — the
+regenerate fails with *"Compatibility with CMake < 3.5 has been removed."* Work around it by
+exporting **`CMAKE_POLICY_VERSION_MINIMUM=3.5`** in the environment before running `ninja`
+(or `meson setup`). This does not affect builds that don't reconfigure.
 
 ### Verifying the build architecture
 
