@@ -104,6 +104,16 @@ namespace ae::draw
         cairo_show_text(context_, str.c_str());
     }
 
+    std::pair<double, double> CairoPdf::text_size(std::string_view utf8, double font_size)
+    {
+        const std::string str{utf8};
+        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        cairo_text_extents_t ext;
+        cairo_text_extents(context_, str.c_str(), &ext);
+        return {ext.width, ext.height};
+    }
+
 } // namespace ae::draw
 
 // ----------------------------------------------------------------------

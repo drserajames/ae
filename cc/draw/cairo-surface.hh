@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string_view>
+#include <utility>
 
 #include "ad/color.hh"
 
@@ -37,6 +38,8 @@ namespace ae::draw
         // Draw UTF-8 text via Cairo's built-in font API. When center is true the text's
         // bounding box is centred on (x, y); otherwise (x, y) is the box's top-left.
         void text(double x, double y, std::string_view utf8, double font_size, Color color, bool center = true);
+        // Measure a string at the given font size: returns {width, height} in device units.
+        std::pair<double, double> text_size(std::string_view utf8, double font_size);
 
       private:
         _cairo_surface* surface_{nullptr};

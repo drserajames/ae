@@ -1,8 +1,10 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ext/fmt.hh"
@@ -180,8 +182,20 @@ namespace ae::map_draw
             }
         }
 
-        // --- point labels (on top of all points) ---
+        // --- point labels (on top of all points), with basic collision avoidance ---
+        // For each label, try its specified position first, then a ring of fallback
+        // positions around the point, and pick the first that doesn't overlap a label
+        // already placed. Greedy heuristic — not AD's force-directed layout, but it
+        // markedly reduces overlap in dense regions.
         const double label_base_font = image_size / 55.0;
+        std::vector<std::array<double, 4>> placed; // x0, y0, x1, y1 of placed label boxes
+        const auto overlaps = [&placed](double x0, double y0, double x1, double y1) {
+            constexpr double pad = 1.0;
+            for (const auto& p : placed)
+                if (!(x1 + pad <= p[0] || x0 - pad >= p[2] || y1 + pad <= p[1] || y0 - pad >= p[3]))
+                    return true;
+            return false;
+        };
         for (const auto point_no : order) {
             if (point_no >= layout.number_of_points())
                 continue;
@@ -203,9 +217,30 @@ namespace ae::map_draw
 
             const double radius = base_radius * style.size().value_or(1.0);
             const double font = label_base_font * (static_cast<double>(lbl.size) / 16.0);
-            const double lx = to_device_x(coords[DIMX]) + static_cast<double>(lbl.offset.x) * font;
-            const double ly = to_device_y(coords[DIMY]) + radius + static_cast<double>(lbl.offset.y) * font;
-            pdf.text(lx, ly, text, font, resolve_color(lbl.color, BLACK), /*center=*/true);
+            const auto [tw, th] = pdf.text_size(text, font);
+            const double px = to_device_x(coords[DIMX]);
+            const double py = to_device_y(coords[DIMY]);
+            const double gap = font * 0.35;
+            const double rx = radius + gap + tw / 2.0;
+            const double ry = radius + gap + th / 2.0;
+
+            // candidate box-centre offsets from the point; the label's own offset first
+            const std::array<std::pair<double, double>, 9> candidates{{
+                {static_cast<double>(lbl.offset.x) * font, radius + static_cast<double>(lbl.offset.y) * font},
+                {0.0, ry}, {0.0, -ry}, {rx, 0.0}, {-rx, 0.0},
+                {rx * 0.7, ry * 0.7}, {-rx * 0.7, ry * 0.7}, {rx * 0.7, -ry * 0.7}, {-rx * 0.7, -ry * 0.7},
+            }};
+            double cx = px + candidates[0].first, cy = py + candidates[0].second;
+            for (const auto& [ox, oy] : candidates) {
+                const double bx = px + ox, by = py + oy;
+                if (!overlaps(bx - tw / 2.0, by - th / 2.0, bx + tw / 2.0, by + th / 2.0)) {
+                    cx = bx;
+                    cy = by;
+                    break;
+                }
+            }
+            placed.push_back({cx - tw / 2.0, cy - th / 2.0, cx + tw / 2.0, cy + th / 2.0});
+            pdf.text(cx, cy, text, font, resolve_color(lbl.color, BLACK), /*center=*/true);
         }
 
         // --- title (chart name) at top centre ---

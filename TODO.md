@@ -18,7 +18,7 @@ status, and respect the shared-file rules below.
 | # | Subsystem | AD source | ~LOC | ae target | Owner | Status |
 |---|-----------|-----------|-----:|-----------|-------|--------|
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | 🟡 in progress |
-| 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — JSON reader + bindings + bin/ tools, verified |
+| 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟡 read side done + verified; authoring (make/convert/stat) in progress |
 | 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` (layout + plan) | *(tal agent)* | 🟡 Phase A layout done; draw blocked on #1 |
 | 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; figures blocked on #1 |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 code complete — HTTP/HTTPS verified; chart-data blocked on a `chart_v3` import abort in `ae_backend` (open bug, see §1 note) |
@@ -113,9 +113,18 @@ Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
       scaled to device. Sera with no homologous antigen are skipped (logged by the core).
       **✅ Verified:** `chart-draw --serum-circles chart1-opt.ace` — grid + border + title +
       navy serum circles centred on sera with points on top; rasterised and eyeballed.
-- [ ] **M4 (extras) — still to port:** legend, connection lines (procrustes arrows),
-      stress/error blobs, and **label collision avoidance** (labels currently overlap in
-      dense regions, M3 limitation).
+- [~] **M4 (extras):**
+      - [x] **Label collision avoidance (basic).** Surface gained `text_size()`
+            (cairo_text_extents). The label pass now tries each label's specified position
+            first, then a ring of 8 fallback positions around the point, picking the first
+            that doesn't overlap an already-placed label box. Greedy near-point heuristic —
+            **not** AD's force-directed layout. **✅ Verified:** dense `--labels` render is
+            markedly less cluttered than M3; upper/mid labels fully separated. *Limitation:*
+            very dense sub-clusters (≈6 points in a tiny area) still overlap — full fix needs
+            force-directed placement + leader lines (future).
+      - [ ] legend (better suited to M5 once semantic styles/config exist),
+            connection lines (procrustes arrows — needs a 2nd chart + procrustes match),
+            stress/error blobs (need bootstrap/triangulation data).
 - [ ] **M5 — `mapi` settings DSL:** the JSON-driven mod-applicator pipeline.
 - [ ] **M6 — SVG/PNG surfaces** in addition to PDF.
 
@@ -211,9 +220,38 @@ ported; only the reader + query surface.
 different checkout; `bin/_hidb_boot.py` defeats this by loading this repo's `build/`
 `.so` by explicit path (same workaround the tal/webserver agents hit).
 
-**Not ported (out of scope, low demand):** `hidb5-stat` (hourly table statistics),
-`hidb5-first-table-date`, `hidb5-make`/`hidb5-convert` (binary DB authoring). The core
-query surface they share is in place if these are wanted later.
+### Authoring tools (now in scope — the DB needs to be *built* within `ae`)
+
+The reader above consumes a pre-built hidb. These tools *produce / maintain* it. AD source:
+`hidb-make.cc` + `hidb-maker.{hh,cc}` (build), `hidb5-convert.cc` (reformat),
+`hidb5-stat.cc` (statistics).
+
+- **`hidb-make`** — build a hidb from a set of charts. Algorithm (faithful to AD
+  `HidbMaker`): for each chart add one **Table** (dedup by virus/virus_type/subset/lineage/
+  assay/lab/rbc/date; reject exact duplicates); add each non-`DISTINCT` **antigen**/**serum**
+  to a global ordered set (antigen key = location/isolation/year/host/annotations/reassortant/
+  passage; serum key = …/serum_id), accumulating dates, lab_ids and lineage; link
+  antigen↔table and serum↔table; record each serum's homologous antigens (via
+  `chart.antigens().homologous(serum)`) as global antigen indexes. Then assign sorted
+  indexes and emit the v5 JSON (`set_field_if_not_empty` semantics). Ported in **C++**
+  (`cc/hidb/hidb-maker.{hh,cc}`) over `chart::v3`, exposed via the binding + `bin/hidb-make`.
+  *ae note:* `ae::chart::v3::Info` has no `subset()` → the table `s` (subset) field is
+  omitted; homologous is computed on demand (ae stores it computed, not on the serum).
+- **`hidb-convert`** — load a hidb and re-`save()` it (e.g. recompress, or normalise). Since
+  this port has no binary `.hidb5b` layout, "convert" = JSON→JSON via `HiDb::save()`
+  (compression chosen by output extension). `bin/hidb-convert`.
+- **`hidb-stat`** — table statistics (counts by lab / assay / rbc / date). Light; Python over
+  the binding. `bin/hidb-stat`.
+
+**Authoring milestones:**
+- [ ] `cc/hidb/hidb-maker.{hh,cc}` + `HiDb::save()`; wire into `meson.build` (libae).
+- [ ] pybind: `hidb.make(chart_files, output)` (+ `HidbMaker`); `bin/hidb-make`, `bin/hidb-convert`.
+- [ ] `bin/hidb-stat`. **Verify:** build a small hidb from a couple of real charts, reload it
+      with the reader, and round-trip through `hidb-convert` — counts and a spot-checked
+      antigen/serum match the source charts.
+
+**Not ported (low demand):** `hidb5-first-table-date` (a niche per-antigen CSV). The shared
+query surface is in place if it's wanted later.
 
 ---
 
@@ -248,9 +286,16 @@ reusable surface API. `AntigenicMaps` additionally needs the map renderer + **hi
       the arm64 build. *(Found: JSON/Newick tree I/O + ladderize-by-leaves already exist in
       `cc/tree/`, so no re-port needed; deep-newick load segfaults in `cc/tree/` — pre-existing,
       not TAL — see PORTING.md.)*
-- [ ] **Phase A (remaining, headless):** time-series bucketing (`time-series.cc`) and clade
-      *sections* (`clades.cc::make_clade_sections`); reconcile aa-transition labelling with
-      `cc/tree/aa-transitions.cc`. Verifiable against AD `tal` `.json`/`.names`.
+- [x] **Phase A — clade sections.** `ae::tal::compute_clade_sections(Tree&)` in
+      [`cc/tal/clades.cc`](cc/tal/clades.cc) (port of `Tree::make_clade_sections()`;
+      reuses `Leaf::clades`). **Verify:** `python3 cc/tal/test/test-clades.py` → `OK …`.
+- [x] **Phase A — time series (date bucketing).** `ae::tal::compute_time_series(Tree&,
+      interval, start?, end?)` in [`cc/tal/time-series.cc`](cc/tal/time-series.cc)
+      (year/month/week/day slots + per-slot counts; ports the data side of `time-series.cc`
+      using `ae::date` + C++20 `<chrono>`, no `acmacs-base/time-series` dependency; reuses
+      `Leaf::date`). **Verify:** `python3 cc/tal/test/test-time-series.py` → `OK …`.
+- [ ] **Phase A (remaining, headless):** reconcile aa-transition labelling with
+      `cc/tree/aa-transitions.cc`; hz-section detection (`hz-sections.cc`).
 - [ ] **Phase B (BLOCKED on #1 ≈M3):** agree a shared `ae::draw::Surface`, then port
       `DrawTree` → column elements → title/legend/aa-transition draw paths.
 - [ ] Signature-page composition (`AntigenicMaps` — also needs map render + hidb #2).
