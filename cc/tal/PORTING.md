@@ -152,11 +152,25 @@ the `cc/draw/` surface API."*
    reconcile with acmacs-tal's versioned algorithms when richer labelling is needed.
    Remaining Phase-A: hz-section detection (`hz-sections.cc`).
 
-**Phase B — drawing (BLOCKED on #1 → ~M3):**
-5. Agree a shared `ae::draw::Surface` interface with the map-draw agent; grow `CairoPdf`
-   to implement it (lines/paths first, then Pango text).
-6. Port `DrawTree`, then the column elements (time-series, clades, dash-bars, hz-sections),
-   then `Title`/`Legend`/`DrawAATransitions`.
+**Phase B — drawing (unblocked by subsystem #1 reaching M3):**
+5. **M1 — tree → PDF — DONE.** [`draw-tree.hh`](draw-tree.hh)/[`draw-tree.cc`](draw-tree.cc),
+   `ae::tal::export_tree_pdf(Tree&, output, image_size, labels)` + the **`tal-draw`** CLI
+   ([`tal-draw-main.cc`](tal-draw-main.cc)). Port of the leaf/inode loop in acmacs-tal
+   `DrawTree::draw`: each node's horizontal edge segment (scaled by cumulative edge) + the
+   vertical connector under each inode; optional leaf-name labels. Reuses `compute_layout`
+   (Phase A) and the `ae::draw::CairoPdf` surface from subsystem #1. Cairo is linked **only**
+   into the `tal-draw` executable (like `chart-draw`), never into libae/ae_backend.
+   **Verify:** `sh cc/tal/test/test-draw-tree.sh` → `OK: tal-draw renders valid PDFs`
+   (a 20-leaf tree was also rasterised and eyeballed — correct topology, branch-length
+   scaling, labels).
+   - *Used the existing concrete `CairoPdf` directly rather than first extracting an abstract
+     `ae::draw::Surface` — lowest-conflict path while map-draw is actively evolving `CairoPdf`.
+     The surface-abstraction extraction is still worthwhile (shared with map-draw, alongside
+     SVG/PNG); revisit when adding the rotated/sub-surface primitives the column elements need.*
+6. **M2+ (next):** leaf coloring (reuse `compute_clade_sections`/continent), then the column
+   elements — `Clades` bars (have the sections), `TimeSeries` dashes (have the slots) drawn
+   to the right of the tree — then `Title`/`Legend`/`DrawAATransitions`. These need a couple
+   more surface primitives (filled rectangle, rotated text); coordinate with map-draw.
 7. `AntigenicMaps` last — also gated on map-draw render + hidb (#2).
 
 **Phase C — settings DSL & CLI:**
@@ -178,9 +192,16 @@ the `cc/draw/` surface API."*
   `~/AC/projects/ae-backend/build/cp310/ae_backend…so` ahead of `build/` regardless of
   `PYTHONPATH` / `sys.path.insert(0, …)`. Load the exact `.so` by path via
   `importlib.util.spec_from_file_location` (see `test/test-layout.py`).
-- **Deep newick trees (≳1000-node caterpillar) segfault inside `ae.tree.load()`** —
-  a pre-existing recursion limit in `cc/tree/` (parser / cumulative / node_id), unrelated
-  to TAL. `compute_layout` itself is iterative and safe. Worth fixing in `cc/tree/`.
+- **Deep newick trees (≳1000-node caterpillar) — FIXED.** The Newick parser in
+  `cc/tree/newick.cc` was a lexy recursive-descent grammar whose real C++ recursion was
+  capped at `max_recursion_depth=1000`; deeper trees aborted the parse, `load_newick()`
+  returned `nullptr`, and `ae::tree::load()` then segfaulted dereferencing it inside
+  `calculate_cumulative`. Replaced the recursive grammar with a hand-written iterative
+  scanner driving the existing explicit-stack `tree_builder_t`, so parse depth no longer
+  consumes C++ call-stack (verified: 5000-leaf caterpillar loads). Added a `nullptr` guard
+  in `load()` so genuinely malformed input raises a clean `RuntimeError` instead of
+  crashing. `calculate_cumulative` / `set_node_id` were already iterative and were only
+  victims of the null deref. `compute_layout` was always iterative and safe.
 
 ## 6. Conf / format docs to mine next
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-conf.org` — the settings DSL reference.

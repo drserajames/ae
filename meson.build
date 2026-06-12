@@ -290,6 +290,15 @@ chart_draw = executable(
   link_with : [libae],
   install : true)
 
+# --- tal (subsystem #3) — Phase B M1: tree -> PDF renderer. Cairo linked only here. ---
+tal_draw = executable(
+  'tal-draw',
+  sources : ['cc/tal/tal-draw-main.cc', 'cc/tal/draw-tree.cc', 'cc/draw/cairo-surface.cc'],
+  include_directories : include_cc,
+  dependencies : [fmt, range_v3, simdjson, cairo],
+  link_with : [libae],
+  install : true)
+
 # ----------------------------------------------------------------------
 # tests ae
 # ----------------------------------------------------------------------
