@@ -129,6 +129,8 @@ sources_py = [
 # --- tal (subsystem #3) — headless tree layout; see cc/tal/PORTING.md ---
 sources_tal = [
   'cc/tal/layout.cc',
+  'cc/tal/clades.cc',
+  'cc/tal/time-series.cc',
 ]
 
 sources_tree = [

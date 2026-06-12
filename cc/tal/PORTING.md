@@ -135,9 +135,22 @@ the `cc/draw/` surface API."*
    complete it when needed).
 4. AA-transition labelling — `cc/tree/aa-transitions.cc` already ports a consensus method;
    reconcile with acmacs-tal's versioned algorithms when richer labelling is needed.
-5. Time-series bucketing and clade *sections* (the layout data, not the bars) — still to
-   port from `time-series.cc` / `clades.cc::make_clade_sections`. Next Phase-A targets.
-   Verifiable headless against AD `tal` `.json` / `.names` output.
+5. **Clade sections — DONE.** [`clades.hh`](clades.hh)/[`clades.cc`](clades.cc),
+   `ae::tal::compute_clade_sections(Tree&)` → `[Clade{name, sections[]}]`. Port of
+   `Tree::make_clade_sections()`: shown leaves grouped into per-clade vertically-contiguous
+   runs (a gap starts a new section). Reuses `ae::tree::Leaf::clades`. Exposed as
+   `ae_backend.tal.compute_clade_sections`. Verified by
+   [`test/test-clades.py`](test/test-clades.py).
+6. **Time series (date bucketing) — DONE.** [`time-series.hh`](time-series.hh)/[`time-series.cc`](time-series.cc),
+   `ae::tal::compute_time_series(Tree&, interval, start?, end?)` → `TimeSeries{slots[], …}`
+   for year/month/week/day intervals. Ports the *data* side of `time-series.cc` (slot
+   generation + per-slot leaf counts) using `ae::date` + C++20 `<chrono>` instead of porting
+   `acmacs-base/time-series`. Reuses `ae::tree::Leaf::date`. Exposed as
+   `ae_backend.tal.compute_time_series`. Verified by
+   [`test/test-time-series.py`](test/test-time-series.py).
+7. AA-transition labelling — `cc/tree/aa-transitions.cc` already ports a consensus method;
+   reconcile with acmacs-tal's versioned algorithms when richer labelling is needed.
+   Remaining Phase-A: hz-section detection (`hz-sections.cc`).
 
 **Phase B — drawing (BLOCKED on #1 → ~M3):**
 5. Agree a shared `ae::draw::Surface` interface with the map-draw agent; grow `CairoPdf`
