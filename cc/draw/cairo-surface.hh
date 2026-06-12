@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string_view>
 
 #include "ad/color.hh"
 
@@ -33,6 +34,9 @@ namespace ae::draw
         void square(double cx, double cy, double side, Color outline, double outline_width, Color fill);
         void triangle(double cx, double cy, double radius, Color outline, double outline_width, Color fill); // equilateral, point up
         void line(double x1, double y1, double x2, double y2, Color color, double width);
+        // Draw UTF-8 text via Cairo's built-in font API. When center is true the text's
+        // bounding box is centred on (x, y); otherwise (x, y) is the box's top-left.
+        void text(double x, double y, std::string_view utf8, double font_size, Color color, bool center = true);
 
       private:
         _cairo_surface* surface_{nullptr};

@@ -19,7 +19,7 @@ namespace ae::map_draw
     // square) to a PDF. No labels, legend, serum circles or the mapi settings
     // DSL yet — those are later milestones.
     void export_pdf(const ae::chart::v3::Chart& chart, ae::projection_index projection_no,
-                    const std::filesystem::path& output, double image_size = 800.0);
+                    const std::filesystem::path& output, double image_size = 800.0, bool label_points = false);
 
 } // namespace ae::map_draw
 

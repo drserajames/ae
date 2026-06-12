@@ -51,7 +51,7 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 
 ---
 
-## 1. Map drawing  *(owner: map-draw agent — M1–M2 done, M3 next)*
+## 1. Map drawing  *(owner: map-draw agent — M1–M3 done, M4 next)*
 
 The single biggest gap. As of M1, `ae` **can render a basic antigenic map to PDF**.
 `cc/draw/` previously held only geometry/color *primitive headers*; it now also has a
@@ -60,7 +60,10 @@ Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
 - **AD source:** `~/AC/eu/AD/sources/acmacs-draw` (Cairo backend) and
   `~/AC/eu/AD/sources/acmacs-map-draw` (map render + the `mapi` settings DSL).
 - **Build deps:** Cairo (`/opt/homebrew/opt/cairo`) — linked into the `chart-draw` target
-  only (not libae/ae_backend). Pango (`/opt/homebrew/opt/pango`) needed at M3 for text.
+  only (not libae/ae_backend). **Pango is NOT used** — arm64 pango isn't installed
+  (`/opt/homebrew/opt/pango` has no `lib/pkgconfig`/dylib; pkg-config resolves the x86_64
+  `/usr/local` copy, which can't link arm64). M3 text uses Cairo's built-in font API
+  instead. If advanced typography is ever needed, `brew install pango` (arm64) first.
 - **Files added (M1):** [`cc/draw/cairo-surface.hh`](cc/draw/cairo-surface.hh)/`.cc`
   (`ae::draw::CairoPdf`), [`cc/map-draw/draw.hh`](cc/map-draw/draw.hh)/`.cc`
   (`ae::map_draw::export_pdf`), `cc/map-draw/chart-draw-main.cc` (CLI), `meson.build`
@@ -91,8 +94,19 @@ Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
       `ae::draw::Surface` — it's a concrete PDF class with `background/circle/square/
       triangle/line`. TAL (#3) Phase B should drive the surface-abstraction extraction
       (likely alongside **M6** SVG/PNG); coordinate on the primitive set then.
-- [ ] **M3 — Text:** Pango integration for point labels and titles (unblocks TAL labels).
-- [ ] **M4 — Decorations:** legends, serum circles, connection lines, blobs.
+- [x] **M3 — Text (Cairo built-in, not Pango).** Surface gained `text(x, y, utf8, font,
+      color, center)` using Cairo's toy font API (no new build dep — arm64 pango absent, see
+      Build deps above). `export_pdf()` now draws a **title** from `chart.name()` (top centre)
+      and **per-point labels**: explicit `PointStyle::label().text` always, plus an
+      opt-in `--labels` CLI flag that labels every point by name (`chart.antigens()/sera()
+      [i].name()`) — AD's `add-all-labels` behaviour. Label position honours the label
+      offset/size/colour. **✅ Verified:** rendered the styled chart with `--labels` —
+      title "AC A(H3N2) guinea-pig 20181111" + per-point names (A(H3N2)/WUPPERTAL/17/2018,
+      …) over the correct shapes; rasterised and eyeballed. **Note:** no label collision
+      avoidance yet (labels overlap in dense regions) — deferred to M4.
+      **For TAL:** the surface now has the `text()` primitive TAL labels will need.
+- [ ] **M4 — Decorations:** legends, serum circles, connection lines, blobs; label
+      collision avoidance.
 - [ ] **M5 — `mapi` settings DSL:** the JSON-driven mod-applicator pipeline.
 - [ ] **M6 — SVG/PNG surfaces** in addition to PDF.
 

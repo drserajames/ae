@@ -1,4 +1,5 @@
 #include <numbers>
+#include <string>
 
 #include <cairo.h>
 #include <cairo-pdf.h>
@@ -85,6 +86,22 @@ namespace ae::draw
         set_source(context_, color);
         cairo_set_line_width(context_, width);
         cairo_stroke(context_);
+    }
+
+    void CairoPdf::text(double x, double y, std::string_view utf8, double font_size, Color color, bool center)
+    {
+        const std::string str{utf8};
+        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        cairo_text_extents_t ext;
+        cairo_text_extents(context_, str.c_str(), &ext);
+        // cairo_show_text places the text origin at the baseline-left; shift so the glyph
+        // box lands where we want (centred on, or top-left at, (x, y)).
+        const double tx = center ? (x - ext.width / 2.0 - ext.x_bearing) : (x - ext.x_bearing);
+        const double ty = center ? (y - ext.height / 2.0 - ext.y_bearing) : (y - ext.y_bearing);
+        set_source(context_, color);
+        cairo_move_to(context_, tx, ty);
+        cairo_show_text(context_, str.c_str());
     }
 
 } // namespace ae::draw

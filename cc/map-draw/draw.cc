@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
+#include "ext/fmt.hh"
 #include "map-draw/draw.hh"
 #include "draw/cairo-surface.hh"
 #include "ad/color.hh"
@@ -29,7 +31,7 @@ namespace ae::map_draw
         }
     } // namespace
 
-    void export_pdf(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, const std::filesystem::path& output, double image_size)
+    void export_pdf(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, const std::filesystem::path& output, double image_size, bool label_points)
     {
         using namespace ae::chart::v3;
 
@@ -81,6 +83,20 @@ namespace ae::map_draw
 
         const auto& styles = plot_spec.styles();
         const auto& style_for_point = plot_spec.style_for_point();
+        const auto number_of_antigens = chart.antigens().size().get();
+
+        const auto style_of = [&](point_index pn) {
+            PointStyle style;
+            if (const auto idx = pn.get(); idx < style_for_point.size() && style_for_point[idx] < styles.size())
+                style = styles[style_for_point[idx]];
+            return style;
+        };
+        const auto point_name = [&](point_index pn) -> std::string {
+            const auto idx = pn.get();
+            if (idx < number_of_antigens)
+                return fmt::format("{}", chart.antigens()[to_antigen_index(pn)].name());
+            return fmt::format("{}", chart.sera()[serum_index{idx - number_of_antigens}].name());
+        };
 
         // Draw in the plot spec's order (typically sera, then reference, then test antigens
         // so test antigens land on top); otherwise fall back to point-index order.
@@ -94,16 +110,14 @@ namespace ae::map_draw
                 order.push_back(point_no);
         }
 
+        // --- points ---
         for (const auto point_no : order) {
             if (point_no >= layout.number_of_points())
                 continue;
             const auto coords = layout[point_no];
             if (!coords.exists())
                 continue;
-
-            PointStyle style;
-            if (const auto idx = point_no.get(); idx < style_for_point.size() && style_for_point[idx] < styles.size())
-                style = styles[style_for_point[idx]];
+            const auto style = style_of(point_no);
             if (!style.shown().value_or(true))
                 continue;
 
@@ -122,11 +136,45 @@ namespace ae::map_draw
                     pdf.triangle(dx, dy, radius, outline, outline_width, fill);
                     break;
                 case point_shape::Circle:
-                case point_shape::Egg:     // egg shapes approximated as circles until M3
+                case point_shape::Egg:     // egg shapes approximated as circles
                 case point_shape::UglyEgg:
                     pdf.circle(dx, dy, radius, outline, outline_width, fill);
                     break;
             }
+        }
+
+        // --- point labels (on top of all points) ---
+        const double label_base_font = image_size / 55.0;
+        for (const auto point_no : order) {
+            if (point_no >= layout.number_of_points())
+                continue;
+            const auto coords = layout[point_no];
+            if (!coords.exists())
+                continue;
+            const auto style = style_of(point_no);
+            if (!style.shown().value_or(true))
+                continue;
+
+            const auto& lbl = style.label();
+            std::string text;
+            if (lbl.text.has_value() && !lbl.text->empty())
+                text = *lbl.text;
+            else if (label_points)
+                text = point_name(point_no);
+            if (text.empty())
+                continue;
+
+            const double radius = base_radius * style.size().value_or(1.0);
+            const double font = label_base_font * (static_cast<double>(lbl.size) / 16.0);
+            const double lx = to_device_x(coords[DIMX]) + static_cast<double>(lbl.offset.x) * font;
+            const double ly = to_device_y(coords[DIMY]) + radius + static_cast<double>(lbl.offset.y) * font;
+            pdf.text(lx, ly, text, font, resolve_color(lbl.color, BLACK), /*center=*/true);
+        }
+
+        // --- title (chart name) at top centre ---
+        if (const std::string title = chart.name(); !title.empty()) {
+            const double title_font = image_size / 30.0;
+            pdf.text(image_size / 2.0, title_font, title, title_font, BLACK, /*center=*/true);
         }
     }
 
