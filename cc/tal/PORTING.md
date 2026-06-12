@@ -167,11 +167,23 @@ the `cc/draw/` surface API."*
      `ae::draw::Surface` — lowest-conflict path while map-draw is actively evolving `CairoPdf`.
      The surface-abstraction extraction is still worthwhile (shared with map-draw, alongside
      SVG/PNG); revisit when adding the rotated/sub-surface primitives the column elements need.*
-6. **M2+ (next):** leaf coloring (reuse `compute_clade_sections`/continent), then the column
-   elements — `Clades` bars (have the sections), `TimeSeries` dashes (have the slots) drawn
-   to the right of the tree — then `Title`/`Legend`/`DrawAATransitions`. These need a couple
-   more surface primitives (filled rectangle, rotated text); coordinate with map-draw.
-7. `AntigenicMaps` last — also gated on map-draw render + hidb (#2).
+6. **M2 — coloring + aligned columns — DONE.** `export_tree_pdf` now takes a
+   `TreeDrawParameters` and draws, aligned to the tree's leaf rows: **leaf coloring by
+   clade** (palette keyed on `compute_clade_sections` order), a **clades column** (one bar
+   per section, spanning `first_node..last_node`, with the clade name), and a **time-series
+   dash column** (per-leaf dash placed in the `compute_time_series` slot whose `[first,
+   after_last)` contains the leaf's date, via canonical-ISO string compare; grey slot
+   separators). CLI flags: `--color-by-clade --clades --time-series --interval=…`. Done with
+   only the existing `line()`/`text()` primitives (thick lines as bars/dashes, horizontal
+   labels) — **no `CairoPdf` change**, so no map-draw coordination needed yet. **Verify:**
+   `sh cc/tal/test/test-draw-tree.sh`; a 24-leaf 3-clade tree (`--labels --color-by-clade
+   --clades --time-series --interval=year`) was rasterised & eyeballed — coloring, clade
+   bars and per-year dashes all align to rows correctly.
+   - *Deferred to a later pass (need new surface primitives): rotated month/year slot
+     labels and clade arrows (rotated text), filled slot backgrounds (filled rect).*
+7. **M3+ (next):** `Title`/`Legend`/`DrawAATransitions` draw paths; then `AntigenicMaps`
+   (also gated on map-draw render + hidb (#2)). Rotated text / filled-rect primitives would
+   unlock slot labels + nicer clade arrows — coordinate with map-draw when adding them.
 
 **Phase C — settings DSL & CLI:**
 8. Port the `Settings`/`apply_built_in` mod pipeline (`settings.cc`) and `bin/tal`.

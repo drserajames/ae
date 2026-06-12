@@ -17,22 +17,34 @@ int main(int argc, char* const argv[])
     int exit_code = 0;
     try {
         std::vector<std::string_view> positional;
-        bool labels = false;
+        ae::tal::TreeDrawParameters params;
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg{argv[i]};
             if (arg == "--labels")
-                labels = true;
+                params.labels = true;
+            else if (arg == "--color-by-clade")
+                params.color_by_clade = true;
+            else if (arg == "--clades")
+                params.clades = true;
+            else if (arg == "--time-series")
+                params.time_series = true;
+            else if (arg.substr(0, 11) == "--interval=")
+                params.time_series_interval = std::string{arg.substr(11)};
             else
                 positional.push_back(arg);
         }
         if (positional.size() < 2) {
-            fmt::print(stderr, "Usage: {} [--labels] <tree.newick|tree.json[.xz]> <output.pdf> [image-size-px]\n", argv[0]);
+            fmt::print(stderr,
+                       "Usage: {} [--labels] [--color-by-clade] [--clades] [--time-series] [--interval=year|month|week|day]\n"
+                       "          <tree.newick|tree.json[.xz]> <output.pdf> [image-size-px]\n",
+                       argv[0]);
             return 1;
         }
         const double image_size = positional.size() > 2 ? std::stod(std::string{positional[2]}) : 1000.0;
         const auto tree = ae::tree::load(std::filesystem::path{positional[0]});
-        ae::tal::export_tree_pdf(*tree, std::filesystem::path{positional[1]}, image_size, labels);
-        fmt::print("Wrote {} ({:.0f}x{:.0f}, {} leaves{})\n", positional[1], image_size, image_size, tree->number_of_leaves(), labels ? ", labelled" : "");
+        ae::tal::export_tree_pdf(*tree, std::filesystem::path{positional[1]}, image_size, params);
+        fmt::print("Wrote {} ({:.0f}x{:.0f}, {} leaves{}{}{})\n", positional[1], image_size, image_size, tree->number_of_leaves(), params.labels ? ", labelled" : "",
+                   params.clades ? ", clades" : "", params.time_series ? ", time-series" : "");
     }
     catch (std::exception& err) {
         fmt::print(stderr, "ERROR: {}\n", err.what());

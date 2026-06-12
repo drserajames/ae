@@ -29,4 +29,8 @@ check "tree-small.newick" "$tmp/small.pdf"
 "$bin" --labels "$here/tree-clades.json" "$tmp/clades.pdf" 600 >/dev/null
 check "tree-clades.json (--labels)" "$tmp/clades.pdf"
 
+# M2: leaf coloring + clades column + time-series dash column
+"$bin" --labels --color-by-clade --clades --time-series "$here/tree-clades.json" "$tmp/m2.pdf" 600 >/dev/null
+check "tree-clades.json (M2: color/clades/time-series)" "$tmp/m2.pdf"
+
 echo "OK: tal-draw renders valid PDFs"
