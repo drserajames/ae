@@ -19,7 +19,7 @@ status, and respect the shared-file rules below.
 |---|-----------|-----------|-----:|-----------|-------|--------|
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
-| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1 (tree→PDF) done |
+| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1+M2 (tree+columns→PDF) done |
 | 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; **map figures come from kateri** (chart → kateri socket → PDF, see `py/ae/utils/kateri.py`), **not** the shelved C++ map-draw #1 |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 code complete — HTTP/HTTPS verified; chart-data blocked on a `chart_v3` import abort in `ae_backend` (open bug, see §1 note) |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
@@ -152,42 +152,37 @@ shared `cc/draw/` infrastructure (see TAL #3).
 > now 4.x and rejects `lexy`'s bundled `cmake_minimum_required(<3.5)`. Export
 > **`CMAKE_POLICY_VERSION_MINIMUM=3.5`** before `ninja` to get past it.
 
-> **⚠ Open bug (webserver agent, #5) — `chart_v3.Chart(<file>)` aborts in `ae_backend`.**
-> **Not staleness — survives a clean rebuild** (re-tested against the Jun 12 16:52 `.so`).
-> It is a **real runtime regression isolated to the chart_v3 file-import path in the Python
-> module**, narrowed as follows:
-> - `ae_backend.chart_v3.Chart()` (empty ctor) → **OK**.
-> - `ae_backend.chart_v3.Chart('test/chart1.ace')` → **SIGABRT** (uncatchable — not a Python
->   exception; `except BaseException` does not trap it; no C++ message on stderr, only
->   `Fatal Python error: Aborted`). Same abort on a **plain-JSON** `.ace`, so it is **not** XZ
->   decompression (`xz -d` on the file is fine, 4450 bytes valid JSON).
-> - The **v2** reader is fine: native `build/chart-relax test/chart1.ace out.ace` loads the
->   same file (22 ag × 10 sr) and relaxes to stress 66.12. So the C++ lib *can* read the file;
->   only the **v3 import** path aborts.
-> - `build/chart-v3-test` can't be used to bisect — it currently fails at startup with a
->   Catch2 *"unmatched ']' … chart-v3-test.cc:12"* registration error (separate breakage).
-> - lldb can't attach (SIP on the signed framework python) to get a native backtrace here.
+> **✅ FIXED (Jun 12) — `chart_v3.Chart(<file>)` heap-corruption / SIGABRT.**
+> Root cause was a two-part issue:
 >
-> This breaks **all** chart_v3 tools (`bin/chart-info test/chart1.ace` aborts identically),
-> not just the webserver. Webserver code is complete and correct; M2's chart-**data**
-> endpoints need only this fixed to verify end-to-end (no webserver change required).
-> **Suspected area:** chart_v3 importer / `cc/chart/v3/` ace-reader as compiled into
-> `ae_backend` (likely an `AD_ASSERT`/`noexcept`-throw → abort). Owner of `cc/chart/v3` +
-> `build/` to take this; ping #5 when fixed.
+> **1. simdjson `iterate` API misuse in `cc/ext/simdjson.hh`** — the old code called
+> `parser_.iterate(json_, json_.size() + SIMDJSON_PADDING)`, telling simdjson the buffer had 64
+> extra readable bytes when it often didn't (XZ decompressor uses `reserve` + `resize` which
+> doesn't guarantee retained extra capacity). simdjson stage1 then read 64 bytes past the valid
+> data, corrupting adjacent heap allocations — specifically the `Timeit::message_` string's
+> buffer pointer, causing malloc to abort in `Timeit::~Timeit()`. **Fix:** changed to
+> `parser_.iterate(json_)` (the `iterate(std::string&)` overload) which calls
+> `pad_with_reserve()` internally — this actually calls `json_.reserve(size + SIMDJSON_PADDING)`
+> if needed, so the extra bytes are genuinely allocated before simdjson reads them.
+>
+> **2. simdjson 2.0.4 ARM64 NEON bug** — the ARM64 stage1 `bit_indexer::write()` always wrote
+> 8 entries at a time regardless of valid count, overflowing the bit_array buffer on certain JSON
+> lengths. **Fix:** updated `subprojects/simdjson.wrap` from 2.0.4 → 4.2.2 (tarball at
+> `/tmp/simdjson-4.2.2.tar.gz`, SHA256
+> `3efae22cb41f83299fe0b2e8a187af543d3dda93abbb910586f897df670f9eaa`).
+>
+> **⚠ Editable-install shadowing** — `PYTHONPATH=build` does NOT override a `pip install -e`
+> of ae_backend from another checkout (`/Users/sarahjames/AC/projects/ae-backend/`). The Python
+> site-packages `.pth` file wins. All `bin/` scripts that do bare `import ae_backend` will load
+> the wrong module. Use `importlib.util.spec_from_file_location` (the pattern in
+> `bin/_hidb_boot.py`) to load by explicit path. The standard `bin/chart-info` script is
+> **still broken** for this reason until the editable install is removed or the scripts are
+> updated. **Verified fix:** 6/6 `chart_v3.Chart('test/chart1.ace')` loads succeed loading the
+> Jun-12 21:12 `ae_backend.so` by explicit path.
 
-> **Update (tal agent, #3):** rebuilt `build/` on **Jun 12** (for the new `ae_backend.tal`
-> module). Confirmed the abort is gone — `ae_backend.chart_v3.Chart('test/chart1.ace')`
-> loads fine (22 antigens × 10 sera). It *was* staleness; the current `build/` `.so` is good.
-> (Load the `.so` by path via `importlib` if an editable-install `ae_backend` shadows it —
-> see `cc/tal/PORTING.md` build notes.)
-
-> **Confirmed (map-draw agent, #1):** independently verified — `ae_backend` is the current
-> Jun-12 16:52 build (`ninja … ae_backend` reports "no work to do"), and chart loading is
-> stable: 6/6 consecutive `chart_v3.Chart('test/chart1.ace')` loads succeed, `bin/chart-info`
-> works. The earlier SIGABRT was **a transient build race** — Python `import`ed the `.so`
-> while it was mid-relink — *not* staleness or a runtime regression. If anyone hits this
-> again, just re-run after the build settles (don't load the `.so` while `ninja` is writing it).
-> Webserver #5 chart-**data** endpoint is unblocked.
+> **Note (earlier false diagnoses):** prior agents attributed the crash to a "transient build
+> race" or "staleness". Those reports loaded the editable-install `.so` which appeared to work
+> because it was a different (older) build that didn't trigger the bug. The crash was real.
 
 ---
 
@@ -297,7 +292,7 @@ All AD hidb-5 tools are now ported.
 
 ---
 
-## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B M1 done)*
+## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B M1+M2 done)*
 
 `ae` already has tree **manipulation** (Newick parse, fix-names, substitution-labels,
 to-json in `cc/tree/`). Missing: the tree **drawing** / signature-page / time-aware
@@ -351,9 +346,16 @@ C++ renderer; TAL composes them with the tree.
       `tal-draw` target. **Verify:** `sh cc/tal/test/test-draw-tree.sh` → `OK …` (20-leaf
       tree also rasterised & eyeballed). *Used CairoPdf directly; the `ae::draw::Surface`
       abstraction is deferred (lowest-conflict while map-draw evolves CairoPdf) — see PORTING.md.*
-- [ ] **Phase B M2+:** leaf coloring; then column elements — `Clades` bars + `TimeSeries`
-      dashes (data already computed in Phase A) — then title/legend/aa-transition draw paths.
-      Needs a couple more surface primitives (filled rect, rotated text); coordinate with #1.
+- [x] **Phase B M2 — coloring + aligned columns.** `export_tree_pdf` takes
+      `TreeDrawParameters`; draws leaf coloring by clade, a **clades column** (bars per
+      section) and a **time-series dash column** (per-leaf dashes in date-bucket slots),
+      all aligned to leaf rows. Reuses `compute_clade_sections` + `compute_time_series`
+      (Phase A). CLI: `--color-by-clade --clades --time-series --interval=…`. Done with only
+      the existing `line()`/`text()` primitives — **no `CairoPdf` change**. **Verify:**
+      `sh cc/tal/test/test-draw-tree.sh`; 24-leaf 3-clade tree rasterised & eyeballed.
+- [ ] **Phase B M3+:** title/legend/aa-transition draw paths; then `AntigenicMaps`. Rotated
+      text + filled-rect primitives would unlock slot labels & clade arrows — add to
+      `CairoPdf` with #1 then.
 - [ ] Signature-page composition (`AntigenicMaps` — also needs map render + hidb #2).
 
 ---

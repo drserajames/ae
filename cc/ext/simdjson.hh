@@ -43,17 +43,17 @@ namespace ae::simdjson
     class Parser
     {
       public:
-        Parser(const std::filesystem::path& filename)                    //
-            : parser_{},                                                 //
-              json_{file::read(filename, ::simdjson::SIMDJSON_PADDING)}, //
-              doc_{parser_.iterate(json_, json_.size() + ::simdjson::SIMDJSON_PADDING)}
+        Parser(const std::filesystem::path& filename)     //
+            : parser_{},                                 //
+              json_{file::read(filename)},               //
+              doc_{parser_.iterate(json_)}               // pad_with_reserve ensures capacity >= size + SIMDJSON_PADDING
         {
         }
 
         Parser(std::string_view data)                    //
-            : parser_{},                                                 //
-              json_{file::decompress_if_necessary(data, ::simdjson::SIMDJSON_PADDING)}, //
-              doc_{parser_.iterate(json_, json_.size() + ::simdjson::SIMDJSON_PADDING)}
+            : parser_{},                                 //
+              json_{file::decompress_if_necessary(data)}, //
+              doc_{parser_.iterate(json_)}               // pad_with_reserve ensures capacity >= size + SIMDJSON_PADDING
         {
         }
 
@@ -65,7 +65,7 @@ namespace ae::simdjson
       private:
         ::simdjson::ondemand::parser parser_;
         std::string json_;
-        decltype(parser_.iterate(json_, json_.capacity())) doc_;
+        decltype(parser_.iterate(json_)) doc_;
     };
 } // namespace ae::simdjson
 
