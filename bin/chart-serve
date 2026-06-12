@@ -1,0 +1,60 @@
+#! /usr/bin/env python3
+"""Serve ae charts over HTTP(S).
+
+Replacement for the AD `acmacs-webserver`: a zero-dependency Python service on
+top of `ae_backend` that lists and inspects `.ace` charts under a directory.
+Requires PYTHONPATH=build (for `ae_backend`).
+
+Examples:
+    PYTHONPATH=build bin/chart-serve test/            # http://127.0.0.1:8000/
+    PYTHONPATH=build bin/chart-serve -p 9000 --host 0.0.0.0 charts/
+    PYTHONPATH=build bin/chart-serve --cert ssl/self-signed.crt \\
+                                     --key ssl/self-signed.key test/   # HTTPS
+"""
+import sys, argparse, traceback
+from pathlib import Path
+
+try:
+    from ae.webserver import serve
+except ModuleNotFoundError:
+    # Running from a source checkout where `ae` is not (yet) installed with the
+    # webserver submodule — load it directly from this repo's py/ tree. (In this
+    # environment `import ae` is served by a meson editable install of the synced
+    # ae-backend package, which only exposes submodules registered in its build.)
+    import importlib.util
+    _server = Path(__file__).resolve().parent.parent / "py" / "ae" / "webserver" / "server.py"
+    _spec = importlib.util.spec_from_file_location("ae_webserver_server", _server)
+    _mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    serve = _mod.serve
+
+# ----------------------------------------------------------------------
+
+def main(args: argparse.Namespace):
+    serve(
+        root=args.root,
+        host=args.host,
+        port=args.port,
+        certfile=args.cert,
+        keyfile=args.key,
+        quiet=args.quiet,
+    )
+
+# ----------------------------------------------------------------------
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("root", nargs="?", type=Path, default=Path("."), help="directory of charts to serve (default: cwd)")
+    parser.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1; use 0.0.0.0 for all interfaces)")
+    parser.add_argument("-p", "--port", type=int, default=8000, help="port (default: 8000)")
+    parser.add_argument("--cert", default=None, help="TLS certificate chain file (enables HTTPS)")
+    parser.add_argument("--key", default=None, help="TLS private key file (defaults to --cert if combined)")
+    parser.add_argument("-q", "--quiet", action="store_true", default=False, help="suppress per-request logging")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

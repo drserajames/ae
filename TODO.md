@@ -19,7 +19,7 @@ status, and respect the shared-file rules below.
 |---|-----------|-----------|-----:|-----------|-------|--------|
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | 🟡 in progress |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟡 in progress |
-| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` (port plan only) | *(tal agent)* | ⚪ blocked on #1 — M1 explore done |
+| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` (layout + plan) | *(tal agent)* | 🟡 Phase A layout done; draw blocked on #1 |
 | 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; figures blocked on #1 |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 core done — HTTP/HTTPS verified; chart-data blocked on stale backend `.so` |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
@@ -113,6 +113,12 @@ Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
 > verification — no code change needed on my side. Ping #5 if the abort persists after a
 > clean rebuild (then it's a real runtime regression, not staleness).
 
+> **Update (tal agent, #3):** rebuilt `build/` on **Jun 12** (for the new `ae_backend.tal`
+> module). Confirmed the abort is gone — `ae_backend.chart_v3.Chart('test/chart1.ace')`
+> loads fine (22 antigens × 10 sera). It *was* staleness; the current `build/` `.so` is good.
+> (Load the `.so` by path via `importlib` if an editable-install `ae_backend` shadows it —
+> see `cc/tal/PORTING.md` build notes.)
+
 ---
 
 ## 2. hidb — historical influenza database  *(owner: hidb agent — 🟡 in progress)*
@@ -159,13 +165,19 @@ reusable surface API. `AntigenicMaps` additionally needs the map renderer + **hi
 - [x] **Explore `acmacs-tal`; identify the tree-layout + draw entry points.** →
       [`cc/tal/PORTING.md`](cc/tal/PORTING.md). Pipeline, `Node` data model, the full
       `LayoutElement`→source-file map, and the Surface dependency are documented there.
-- [ ] **Phase A (unblocked, headless):** port JSON tree I/O, layout numbering/ladderize,
-      aa-transition labelling, time-series/clade computation — reusing `cc/tree/`.
-      Verifiable against AD `tal` `.json`/`.names` output without Cairo.
+- [x] **Phase A — tree layout (node positions).** `ae::tal::compute_layout(Tree&)` in
+      [`cc/tal/layout.cc`](cc/tal/layout.cc), exposed as `ae_backend.tal`
+      ([`cc/py/tal.cc`](cc/py/tal.cc)). Port of `compute_cumulative_vertical_offsets()`
+      (iterative post-order → safe on deep trees). **Verify:**
+      `python3 cc/tal/test/test-layout.py` → `OK: layout verified …`. Builds & links in
+      the arm64 build. *(Found: JSON/Newick tree I/O + ladderize-by-leaves already exist in
+      `cc/tree/`, so no re-port needed; deep-newick load segfaults in `cc/tree/` — pre-existing,
+      not TAL — see PORTING.md.)*
+- [ ] **Phase A (remaining, headless):** time-series bucketing (`time-series.cc`) and clade
+      *sections* (`clades.cc::make_clade_sections`); reconcile aa-transition labelling with
+      `cc/tree/aa-transitions.cc`. Verifiable against AD `tal` `.json`/`.names`.
 - [ ] **Phase B (BLOCKED on #1 ≈M3):** agree a shared `ae::draw::Surface`, then port
       `DrawTree` → column elements → title/legend/aa-transition draw paths.
-- [ ] Port tree layout (node positions) reusing `cc/tree/`.  *(folded into Phase A)*
-- [ ] Port the draw path onto the shared Cairo surface.  *(Phase B)*
 - [ ] Signature-page composition (`AntigenicMaps` — also needs map render + hidb #2).
 
 ---
