@@ -132,7 +132,7 @@ template <> struct fmt::formatter<ae::draw::v1::Size> : public fmt::formatter<ae
 {
     template <typename FormatContext> auto format(const ae::draw::v1::Size& size, FormatContext& ctx) const
     {
-        return format_to(ctx.out(), "[{}, {}]", format_val(size.width), format_val(size.height));
+        return fmt::format_to(ctx.out(), "[{}, {}]", format_val(size.width), format_val(size.height));
     }
 };
 

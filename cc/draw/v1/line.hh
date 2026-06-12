@@ -78,7 +78,7 @@ template <> struct fmt::formatter<ae::draw::v1::LineDefinedByEquation> : public 
 {
     template <typename FormatContext> auto format(const ae::draw::v1::LineDefinedByEquation& line, FormatContext& ctx) const
     {
-        return format_to(ctx.out(), "Line(slope:{}, intercept:{})", format_val(line.slope()), format_val(line.intercept()));
+        return fmt::format_to(ctx.out(), "Line(slope:{}, intercept:{})", format_val(line.slope()), format_val(line.intercept()));
     }
 };
 

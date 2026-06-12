@@ -92,13 +92,13 @@ namespace ae::chart::v2
 
 template <> struct fmt::formatter<ae::chart::v2::ColumnBases> : fmt::formatter<ae::fmt_helper::float_formatter> {
     template <typename FormatCtx> auto format(const ae::chart::v2::ColumnBases& cb, FormatCtx& ctx) const {
-        format_to(ctx.out(), "[");
+        fmt::format_to(ctx.out(), "[");
         for (size_t sr_no{0}; sr_no < cb.size(); ++sr_no) {
             if (sr_no)
                 fmt::format_to(ctx.out(), " ");
             format_val(cb.column_basis(sr_no), ctx);
         }
-        return format_to(ctx.out(), "]");
+        return fmt::format_to(ctx.out(), "]");
     }
 };
 
@@ -107,7 +107,7 @@ template <> struct fmt::formatter<std::shared_ptr<ae::chart::v2::ColumnBases>> :
         if (cb)
             return fmt::formatter<ae::chart::v2::ColumnBases>::format(*cb, ctx);
         else
-            return format_to(ctx.out(), "<none>");
+            return fmt::format_to(ctx.out(), "<none>");
     }
 };
 

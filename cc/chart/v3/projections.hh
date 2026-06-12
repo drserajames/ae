@@ -174,7 +174,7 @@ template <> struct fmt::formatter<ae::chart::v3::Projection> : fmt::formatter<ae
 {
     template <typename FormatCtx> auto format(const ae::chart::v3::Projection& projection, FormatCtx& ctx) const
         {
-            return format_to(ctx.out(), "{:.4f}", projection.stress());
+            return fmt::format_to(ctx.out(), "{:.4f}", projection.stress());
         }
 };
 

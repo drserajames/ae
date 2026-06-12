@@ -191,7 +191,7 @@ template <> struct fmt::formatter<ae::chart::v2::CommonAntigensSera::common_t> :
 {
     template <typename FormatContext> auto format(const ae::chart::v2::CommonAntigensSera::common_t& common, FormatContext& ctx) const
     {
-        return format_to(ctx.out(), "{{{},{}}}", common.primary, common.secondary);
+        return fmt::format_to(ctx.out(), "{{{},{}}}", common.primary, common.secondary);
     }
 };
 

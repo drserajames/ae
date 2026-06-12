@@ -253,7 +253,7 @@ namespace ae::tree
 
 template <> struct fmt::formatter<ae::tree::transition_t> : fmt::formatter<ae::fmt_helper::default_formatter>
 {
-    template <typename FormatCtx> constexpr auto format(const ae::tree::transition_t& tr, FormatCtx& ctx) const { return format_to(ctx.out(), "{}{}{}", tr.left, tr.pos, tr.right); }
+    template <typename FormatCtx> constexpr auto format(const ae::tree::transition_t& tr, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "{}{}{}", tr.left, tr.pos, tr.right); }
 };
 
 // "{}" - format all
@@ -274,7 +274,7 @@ template <> struct fmt::formatter<ae::tree::transitions_t> : fmt::formatter<ae::
     //     return std::find(it, ctx.end(), '}');
     // }
 
-    template <typename FormatCtx> constexpr auto format(const ae::tree::transitions_t& tr, FormatCtx& ctx) const { return format_to(ctx.out(), "{}", fmt::join(tr.transitions, " ")); }
+    template <typename FormatCtx> constexpr auto format(const ae::tree::transitions_t& tr, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "{}", fmt::join(tr.transitions, " ")); }
 
   private:
     // size_t most_important_{0};

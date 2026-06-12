@@ -322,7 +322,7 @@ template <> struct fmt::formatter<ae::chart::v2::Area> : public fmt::formatter<a
 {
     template <typename FormatContext> auto format(const ae::chart::v2::Area& area, FormatContext& ctx) const
     {
-        return format_to(ctx.out(), "Area{{min:{}, max:{}}}", format_val(area.min), format_val(area.max));
+        return fmt::format_to(ctx.out(), "Area{{min:{}, max:{}}}", format_val(area.min), format_val(area.max));
     }
 };
 
@@ -332,10 +332,10 @@ template <> struct fmt::formatter<ae::chart::v2::Layout> : public fmt::formatter
 {
     template <typename FormatContext> auto format(const ae::chart::v2::Layout& layout, FormatContext& ctx) const
     {
-        format_to(ctx.out(), "Layout {}d ({})\n", layout.number_of_dimensions(), layout.number_of_points());
+        fmt::format_to(ctx.out(), "Layout {}d ({})\n", layout.number_of_dimensions(), layout.number_of_points());
         const auto num_digits_in_point_no = static_cast<int>(std::log10(layout.number_of_points())) + 1;
         for (size_t no = 0; no < layout.number_of_points(); ++no)
-            format_to(ctx.out(), "  {:{}d} {}\n", no, num_digits_in_point_no, format_val(layout[no]));
+            fmt::format_to(ctx.out(), "  {:{}d} {}\n", no, num_digits_in_point_no, format_val(layout[no]));
         return ctx.out();
     }
 };

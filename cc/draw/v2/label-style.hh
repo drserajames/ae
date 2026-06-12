@@ -149,9 +149,9 @@ template <> struct fmt::formatter<ae::draw::v2::font_slant_t> : fmt::formatter<a
     {
         switch (slant.get()) {
             case ae::draw::v2::font_slant_t::Normal:
-                return format_to(ctx.out(), "normal");
+                return fmt::format_to(ctx.out(), "normal");
             case ae::draw::v2::font_slant_t::Italic:
-                return format_to(ctx.out(), "italic");
+                return fmt::format_to(ctx.out(), "italic");
         }
         return ctx.out();
     }
@@ -163,9 +163,9 @@ template <> struct fmt::formatter<ae::draw::v2::font_weight_t> : fmt::formatter<
     {
         switch (weight.get()) {
             case ae::draw::v2::font_weight_t::Normal:
-                return format_to(ctx.out(), "normal");
+                return fmt::format_to(ctx.out(), "normal");
             case ae::draw::v2::font_weight_t::Bold:
-                return format_to(ctx.out(), "bold");
+                return fmt::format_to(ctx.out(), "bold");
         }
         return ctx.out();
     }
@@ -175,7 +175,7 @@ template <> struct fmt::formatter<ae::draw::v2::text_style> : fmt::formatter<ae:
 {
     template <typename FormatCtx> constexpr auto format(const ae::draw::v2::text_style& style, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "shown:{}, color:\"{}\", slant:{}, weight:{} family:\"{}\", rotation:{}, interline:{}", style.shown, style.color, style.slant, style.weight, style.font_family,
+        return fmt::format_to(ctx.out(), "shown:{}, color:\"{}\", slant:{}, weight:{} family:\"{}\", rotation:{}, interline:{}", style.shown, style.color, style.slant, style.weight, style.font_family,
                          style.rotation, style.interline);
     }
 };
@@ -184,7 +184,7 @@ template <> struct fmt::formatter<ae::draw::v2::text_data> : fmt::formatter<ae::
 {
     template <typename FormatCtx> constexpr auto format(const ae::draw::v2::text_data& data, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "{}, text:{}", static_cast<const ae::draw::v2::text_style&>(data), data.text);
+        return fmt::format_to(ctx.out(), "{}, text:{}", static_cast<const ae::draw::v2::text_style&>(data), data.text);
     }
 };
 
@@ -192,7 +192,7 @@ template <> struct fmt::formatter<ae::draw::v2::offset_t> : fmt::formatter<ae::f
 {
     template <typename FormatCtx> constexpr auto format(const ae::draw::v2::offset_t& offset, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "[{}, {}]", offset.x, offset.y);
+        return fmt::format_to(ctx.out(), "[{}, {}]", offset.x, offset.y);
     }
 };
 
@@ -200,7 +200,7 @@ template <> struct fmt::formatter<ae::draw::v2::text_and_offset> : fmt::formatte
 {
     template <typename FormatCtx> constexpr auto format(const ae::draw::v2::text_and_offset& to, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "{}, offset:{}", static_cast<const ae::draw::v2::text_data&>(to), to.offset);
+        return fmt::format_to(ctx.out(), "{}, offset:{}", static_cast<const ae::draw::v2::text_data&>(to), to.offset);
     }
 };
 

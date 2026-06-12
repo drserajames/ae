@@ -89,7 +89,7 @@ template <> struct fmt::formatter<ae::chart::v3::SemanticAttributes> : fmt::form
 {
     template <typename FormatCtx> constexpr auto format(const ae::chart::v3::SemanticAttributes& attr, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "{}", attr.data());
+        return fmt::format_to(ctx.out(), "{}", attr.data());
     }
 };
 

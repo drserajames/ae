@@ -380,19 +380,19 @@ template <> struct fmt::formatter<score_t> : fmt::formatter<acmacs::fmt_helper::
     {
         switch (value) {
             case score_t::no_match:
-                format_to(ctx.out(), "no-match");
+                fmt::format_to(ctx.out(), "no-match");
                 break;
             case score_t::passage_serum_id_ignored:
-                format_to(ctx.out(), "passage-serum-id-mismatch");
+                fmt::format_to(ctx.out(), "passage-serum-id-mismatch");
                 break;
             case score_t::egg:
-                format_to(ctx.out(), "egg");
+                fmt::format_to(ctx.out(), "egg");
                 break;
             case score_t::without_date:
-                format_to(ctx.out(), "without-date");
+                fmt::format_to(ctx.out(), "without-date");
                 break;
             case score_t::full_match:
-                format_to(ctx.out(), "full");
+                fmt::format_to(ctx.out(), "full");
                 break;
         }
         return ctx.out();

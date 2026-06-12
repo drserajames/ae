@@ -624,7 +624,7 @@ template <> struct fmt::formatter<rjson::v3::value>
         return it;
     }
 
-    template <typename FormatCtx> auto format(const rjson::v3::value& value, FormatCtx& ctx) const { return format_to(ctx.out(), "{}", rjson::v3::format(value, output_, indent_)); }
+    template <typename FormatCtx> auto format(const rjson::v3::value& value, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "{}", rjson::v3::format(value, output_, indent_)); }
 
   private:
     rjson::v3::output output_{rjson::v3::output::compact_with_spaces};
@@ -637,32 +637,32 @@ template <> struct fmt::formatter<rjson::v3::value_read> : fmt::formatter<rjson:
 
 template <> struct fmt::formatter<rjson::v3::detail::null> : fmt::formatter<ae::fmt_helper::default_formatter>
 {
-    template <typename FormatCtx> auto format(const rjson::v3::detail::null&, FormatCtx& ctx) const { return format_to(ctx.out(), "null"); }
+    template <typename FormatCtx> auto format(const rjson::v3::detail::null&, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "null"); }
 };
 
 template <> struct fmt::formatter<rjson::v3::detail::object> : fmt::formatter<ae::fmt_helper::default_formatter>
 {
-    template <typename FormatCtx> auto format(const rjson::v3::detail::object& /*value*/, FormatCtx& ctx) const { return format_to(ctx.out(), "object"); }
+    template <typename FormatCtx> auto format(const rjson::v3::detail::object& /*value*/, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "object"); }
 };
 
 template <> struct fmt::formatter<rjson::v3::detail::array> : fmt::formatter<ae::fmt_helper::default_formatter>
 {
-    template <typename FormatCtx> auto format(const rjson::v3::detail::array& /*value*/, FormatCtx& ctx) const { return format_to(ctx.out(), "array"); }
+    template <typename FormatCtx> auto format(const rjson::v3::detail::array& /*value*/, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "array"); }
 };
 
 template <> struct fmt::formatter<rjson::v3::detail::string> : fmt::formatter<ae::fmt_helper::default_formatter>
 {
-    template <typename FormatCtx> auto format(const rjson::v3::detail::string& value, FormatCtx& ctx) const { return format_to(ctx.out(), "\"{}\"", value._content()); }
+    template <typename FormatCtx> auto format(const rjson::v3::detail::string& value, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "\"{}\"", value._content()); }
 };
 
 template <> struct fmt::formatter<rjson::v3::detail::number> : fmt::formatter<ae::fmt_helper::default_formatter>
 {
-    template <typename FormatCtx> auto format(const rjson::v3::detail::number& value, FormatCtx& ctx) const { return format_to(ctx.out(), "{}", value.to<double>()); }
+    template <typename FormatCtx> auto format(const rjson::v3::detail::number& value, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "{}", value.to<double>()); }
 };
 
 template <> struct fmt::formatter<rjson::v3::detail::boolean> : fmt::formatter<ae::fmt_helper::default_formatter>
 {
-    template <typename FormatCtx> auto format(const rjson::v3::detail::boolean& value, FormatCtx& ctx) const { return format_to(ctx.out(), "{}", value.to<bool>()); }
+    template <typename FormatCtx> auto format(const rjson::v3::detail::boolean& value, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "{}", value.to<bool>()); }
 };
 
 // ----------------------------------------------------------------------

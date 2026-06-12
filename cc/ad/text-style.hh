@@ -126,11 +126,11 @@ template <> struct fmt::formatter<acmacs::FontSlant> : fmt::formatter<ae::fmt_he
     {
         switch (slant.get()) {
             case acmacs::FontSlant::Normal:
-                return format_to(ctx.out(), "normal");
+                return fmt::format_to(ctx.out(), "normal");
             case acmacs::FontSlant::Italic:
-                return format_to(ctx.out(), "italic");
+                return fmt::format_to(ctx.out(), "italic");
         }
-        return format_to(ctx.out(), "normal");
+        return fmt::format_to(ctx.out(), "normal");
     }
 };
 
@@ -139,24 +139,24 @@ template <> struct fmt::formatter<acmacs::FontWeight> : fmt::formatter<ae::fmt_h
     {
         switch (weight.get()) {
             case acmacs::FontWeight::Normal:
-                return format_to(ctx.out(), "normal");
+                return fmt::format_to(ctx.out(), "normal");
             case acmacs::FontWeight::Bold:
-                return format_to(ctx.out(), "bold");
+                return fmt::format_to(ctx.out(), "bold");
         }
-        return format_to(ctx.out(), "normal");
+        return fmt::format_to(ctx.out(), "normal");
     }
 };
 
 template <> struct fmt::formatter<acmacs::TextStyle> : fmt::formatter<ae::fmt_helper::default_formatter> {
     template <typename FormatCtx> auto format(const acmacs::TextStyle& style, FormatCtx& ctx) const {
-        return format_to(ctx.out(), R"({{"slant": {}, "weight": {}, "family": {}}})", style.slant, style.weight, style.font_family);
+        return fmt::format_to(ctx.out(), R"({{"slant": {}, "weight": {}, "family": {}}})", style.slant, style.weight, style.font_family);
     }
 };
 
 template <> struct fmt::formatter<acmacs::LabelStyle> : fmt::formatter<ae::fmt_helper::default_formatter> {
     template <typename FormatCtx> auto format(const acmacs::LabelStyle& style, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), R"({{"shown": {}, "offset": {}, "size": {}, "color": {}, "rotation": {}, "interline": {:.2f}, "style": {}}})", style.shown, style.offset, style.size, style.color,
+        return fmt::format_to(ctx.out(), R"({{"shown": {}, "offset": {}, "size": {}, "color": {}, "rotation": {}, "interline": {:.2f}, "style": {}}})", style.shown, style.offset, style.size, style.color,
                          style.rotation, style.interline, style.style);
     }
 };

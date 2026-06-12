@@ -133,28 +133,28 @@ template <> struct fmt::formatter<ae::sequences::issue> : fmt::formatter<ae::fmt
         using namespace ae::sequences;
         switch (issue) {
             case issue::not_translated:
-                format_to(ctx.out(), "{}", "not_translated");
+                fmt::format_to(ctx.out(), "{}", "not_translated");
                 break;
             case issue::not_aligned:
-                format_to(ctx.out(), "{}", "not_aligned");
+                fmt::format_to(ctx.out(), "{}", "not_aligned");
                 break;
             case issue::prefix_x:
-                format_to(ctx.out(), "{}", "prefix_x");
+                fmt::format_to(ctx.out(), "{}", "prefix_x");
                 break;
             case issue::too_short:
-                format_to(ctx.out(), "{}", "too_short");
+                fmt::format_to(ctx.out(), "{}", "too_short");
                 break;
             case issue::too_long:
-                format_to(ctx.out(), "{}", "too_long");
+                fmt::format_to(ctx.out(), "{}", "too_long");
                 break;
             case issue::too_many_x:
-                format_to(ctx.out(), "{}", "too_many_x");
+                fmt::format_to(ctx.out(), "{}", "too_many_x");
                 break;
             case issue::too_many_deletions:
-                format_to(ctx.out(), "{}", "too_many_deletions");
+                fmt::format_to(ctx.out(), "{}", "too_many_deletions");
                 break;
             case issue::garbage_at_the_end:
-                format_to(ctx.out(), "{}", "garbage_at_the_end");
+                fmt::format_to(ctx.out(), "{}", "garbage_at_the_end");
                 break;
             case issue::size_:
                 break;
@@ -166,7 +166,7 @@ template <> struct fmt::formatter<ae::sequences::issue> : fmt::formatter<ae::fmt
 template <> struct fmt::formatter<ae::sequences::seqdb_issues_t> : fmt::formatter<ae::fmt_helper::default_formatter> {
     template <typename FormatCtx> auto format(const ae::sequences::seqdb_issues_t& seqdb_issues, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "{{{}}}", seqdb_issues.data_);
+        return fmt::format_to(ctx.out(), "{{{}}}", seqdb_issues.data_);
     }
 };
 

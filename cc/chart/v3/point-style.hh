@@ -66,14 +66,14 @@ template <> struct fmt::formatter<ae::chart::v3::PointStyle> : fmt::formatter<ae
         using namespace std::string_view_literals;
         const auto out = [&ctx](std::string_view key, const auto& value, std::string_view format, bool comma) -> bool {
             if (value.has_value()) {
-                format_to(ctx.out(), R"({}"{}": {})", comma ? ", " : "", key, fmt::format(format, *value));
+                fmt::format_to(ctx.out(), R"({}"{}": {})", comma ? ", " : "", key, fmt::format(format, *value));
                 return true;
             }
             else
                 return comma;
         };
 
-        format_to(ctx.out(), "{{");
+        fmt::format_to(ctx.out(), "{{");
         auto comma = out("shape"sv, style.shape(), "{}", false);
         comma = out("shown"sv, style.shown(), "{}", comma);
         comma = out("fill"sv, style.fill(), "\"{}\"", comma);
@@ -83,7 +83,7 @@ template <> struct fmt::formatter<ae::chart::v3::PointStyle> : fmt::formatter<ae
         comma = out("aspect"sv, style.aspect(), "{}", comma);
         comma = out("rotation"sv, style.rotation(), "{}", comma);
         comma = out("label"sv, style.label(), "{}", comma);
-        return format_to(ctx.out(), "}}");
+        return fmt::format_to(ctx.out(), "}}");
     }
 };
 

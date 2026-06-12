@@ -224,12 +224,12 @@ template <> struct fmt::formatter<ae::draw::v1::Transformation> : public fmt::fo
     {
         switch (*transformation.number_of_dimensions) {
             case 2:
-                return format_to(ctx.out(), "[{}, {}, {}, {}]", transformation.a(), transformation.b(), transformation.c(), transformation.d());
+                return fmt::format_to(ctx.out(), "[{}, {}, {}, {}]", transformation.a(), transformation.b(), transformation.c(), transformation.d());
             case 3:
-                return format_to(ctx.out(), "[[{}, {}, {}], [{}, {}, {}], [{}, {}, {}]]", transformation._x(0, 0), transformation._x(0, 1), transformation._x(0, 2), transformation._x(1, 0),
+                return fmt::format_to(ctx.out(), "[[{}, {}, {}], [{}, {}, {}], [{}, {}, {}]]", transformation._x(0, 0), transformation._x(0, 1), transformation._x(0, 2), transformation._x(1, 0),
                                  transformation._x(1, 1), transformation._x(1, 2), transformation._x(2, 0), transformation._x(2, 1), transformation._x(2, 2));
         }
-        return format_to(ctx.out(), "");
+        return fmt::format_to(ctx.out(), "");
     }
 };
 

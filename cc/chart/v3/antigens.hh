@@ -264,7 +264,7 @@ template <> struct fmt::formatter<ae::chart::v3::Antigen> : fmt::formatter<ae::f
 {
     template <typename FormatCtx> auto format(const ae::chart::v3::Antigen& /*antigen*/, FormatCtx& ctx) const
         {
-            format_to(ctx.out(), "AG");
+            fmt::format_to(ctx.out(), "AG");
             return ctx.out();
         }
 };
@@ -273,7 +273,7 @@ template <> struct fmt::formatter<ae::chart::v3::Serum> : fmt::formatter<ae::fmt
 {
     template <typename FormatCtx> auto format(const ae::chart::v3::Serum& /*serum*/, FormatCtx& ctx) const
         {
-            format_to(ctx.out(), "SR");
+            fmt::format_to(ctx.out(), "SR");
             return ctx.out();
         }
 };

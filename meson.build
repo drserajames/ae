@@ -61,11 +61,26 @@ bzip2 = meson.get_compiler('cpp').find_library('bz2', required : false)
 
 alglib = dependency('alglib')
 
-omp = dependency('openmp')
+omp = dependency('openmp', required: false)
 if host_machine.system() == 'darwin'
-  libomp_dir = ['-L' + run_command('brew', '--prefix', check: true).stdout().strip() + '/lib']
+  # Use 'brew --prefix libomp' so keg-only installs are found correctly on
+  # both x86_64 (/usr/local) and arm64 (/opt/homebrew) Homebrew prefixes.
+  libomp_prefix = run_command('brew', '--prefix', 'libomp', check: true).stdout().strip()
+  libomp_dir = ['-L' + libomp_prefix + '/lib']
+  if not omp.found()
+    # Apple Clang requires -Xclang -fopenmp (not plain -fopenmp); fall back
+    # to a manual dependency when the meson OpenMP detector doesn't find it.
+    omp = declare_dependency(
+      compile_args : ['-Xclang', '-fopenmp',
+                      '-I' + libomp_prefix + '/include'],
+      link_args    : ['-L' + libomp_prefix + '/lib', '-lomp'],
+    )
+  endif
 else
   libomp_dir = []
+endif
+if not omp.found()
+  error('OpenMP not found and no Apple Clang fallback applies')
 endif
 
 catch2 = dependency('catch2')

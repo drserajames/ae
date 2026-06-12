@@ -199,13 +199,13 @@ template <typename Storage> struct fmt::formatter<ae::chart::v3::point_coordinat
 {
     template <typename FormatContext> auto format(const ae::chart::v3::point_coordinates_with_storage<Storage>& coord, FormatContext& ctx) const
     {
-        format_to(ctx.out(), "[");
+        fmt::format_to(ctx.out(), "[");
         for (const auto dim : coord.number_of_dimensions()) {
             if (dim != ae::number_of_dimensions_t{0})
-                format_to(ctx.out(), ", ");
+                fmt::format_to(ctx.out(), ", ");
             format_val(coord[dim], ctx);
         }
-        return format_to(ctx.out(), "]");
+        return fmt::format_to(ctx.out(), "]");
     }
 };
 

@@ -8,7 +8,16 @@
 
 // ----------------------------------------------------------------------
 
-#ifndef __cpp_lib_three_way_comparison
+// Apple's libc++ (macOS 13+ SDK / Xcode 14+) ships std::vector::operator<=>
+// but does NOT define __cpp_lib_three_way_comparison, causing a duplicate.
+// Suppress the fallback on macOS 13+ where the SDK already provides it.
+#if defined(__APPLE__) && defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 130000
+#  define AE_STDLIB_HAS_VECTOR_SPACESHIP 1
+#else
+#  define AE_STDLIB_HAS_VECTOR_SPACESHIP 0
+#endif
+
+#if !defined(__cpp_lib_three_way_comparison) && !AE_STDLIB_HAS_VECTOR_SPACESHIP
 
 namespace std
 {
@@ -65,7 +74,7 @@ namespace std
 
 } // namespace std
 
-#endif
+#endif // !__cpp_lib_three_way_comparison && !AE_STDLIB_HAS_VECTOR_SPACESHIP
 
 // ----------------------------------------------------------------------
 

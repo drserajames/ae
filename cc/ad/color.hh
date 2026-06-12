@@ -101,24 +101,24 @@ template <> struct fmt::formatter<Color>
         switch (format_code_) {
           case 'X':
           case '#':
-              return format_to(ctx.out(), "#{:06X}", val.raw_value());
+              return fmt::format_to(ctx.out(), "#{:06X}", val.raw_value());
           case 'x':
-              return format_to(ctx.out(), "#{:06x}", val.raw_value());
+              return fmt::format_to(ctx.out(), "#{:06x}", val.raw_value());
           case 'c':
           case 'n':
               if (const auto name = val.name(); !name.empty())
-                  return format_to(ctx.out(), "{}", name);
+                  return fmt::format_to(ctx.out(), "{}", name);
               else if (val.is_transparent())
-                  return format_to(ctx.out(), "rgba({},{},{},{:.3f})", val.redI(), val.greenI(), val.blueI(), val.opacity());
-              return format_to(ctx.out(), "#{:06x}", val.raw_value());
+                  return fmt::format_to(ctx.out(), "rgba({},{},{},{:.3f})", val.redI(), val.greenI(), val.blueI(), val.opacity());
+              return fmt::format_to(ctx.out(), "#{:06x}", val.raw_value());
           case 'a':
           case 'r':
-              return format_to(ctx.out(), "rgba({},{},{},{:.3f})", val.redI(), val.greenI(), val.blueI(), val.opacity());
+              return fmt::format_to(ctx.out(), "rgba({},{},{},{:.3f})", val.redI(), val.greenI(), val.blueI(), val.opacity());
           default:
               fmt::print(stderr, "WARNING unrecognized Color format code '{}', 'X' assumed\n", format_code_);
-              return format_to(ctx.out(), "#{:06X}", val.raw_value());
+              return fmt::format_to(ctx.out(), "#{:06X}", val.raw_value());
         }
-        return format_to(ctx.out(), "#{:06x}", val.raw_value()); // to avoid compiler warning
+        return fmt::format_to(ctx.out(), "#{:06x}", val.raw_value()); // to avoid compiler warning
     }
 
   protected:

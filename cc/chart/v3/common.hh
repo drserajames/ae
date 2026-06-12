@@ -153,7 +153,7 @@ namespace ae::chart::v3
 // {
 //     template <typename FormatContext> auto format(const ae::chart::v3::CommonAntigensSera::common_t& common, FormatContext& ctx) const
 //     {
-//         return format_to(ctx.out(), "{{{},{}}}", common.primary, common.secondary);
+//         return fmt::format_to(ctx.out(), "{{{},{}}}", common.primary, common.secondary);
 //     }
 // };
 

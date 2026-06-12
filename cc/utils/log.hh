@@ -134,7 +134,7 @@ template <> struct fmt::formatter<ae::log::source_location> : fmt::formatter<ae:
     template <typename FormatCtx> auto format(const ae::log::source_location& sl, FormatCtx& ctx) const
     {
         if (sl.file)
-            return format_to(ctx.out(), " @@ {}:{}", sl.file, sl.line);
+            return fmt::format_to(ctx.out(), " @@ {}:{}", sl.file, sl.line);
         else
             return ctx.out();
     }
@@ -257,7 +257,7 @@ template <typename... Ts> AD_FORMAT(fmt::format_string<Ts...>, Ts&&...) -> AD_FO
 template <typename... Ts> struct fmt::formatter<AD_FORMAT<Ts...>> : fmt::formatter<ae::fmt_helper::default_formatter> {
     template <typename FormatCtx> auto format(const AD_FORMAT<Ts...>& value, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "{}", value.text);
+        return fmt::format_to(ctx.out(), "{}", value.text);
     }
 };
 

@@ -112,13 +112,13 @@ namespace ae::chart::v3
 
 template <> struct fmt::formatter<ae::chart::v3::column_bases> : fmt::formatter<ae::fmt_helper::float_formatter> {
     template <typename FormatCtx> auto format(const ae::chart::v3::column_bases& cb, FormatCtx& ctx) const {
-        format_to(ctx.out(), "[");
+        fmt::format_to(ctx.out(), "[");
         for (const auto sr_no : cb.size()) {
             if (sr_no != ae::serum_index{0})
                 fmt::format_to(ctx.out(), " ");
             format_val(cb[sr_no], ctx);
         }
-        return format_to(ctx.out(), "]");
+        return fmt::format_to(ctx.out(), "]");
     }
 };
 
@@ -127,7 +127,7 @@ template <> struct fmt::formatter<std::shared_ptr<ae::chart::v3::column_bases>> 
         if (cb)
             return fmt::formatter<ae::chart::v3::column_bases>::format(*cb, ctx);
         else
-            return format_to(ctx.out(), "<none>");
+            return fmt::format_to(ctx.out(), "<none>");
     }
 };
 

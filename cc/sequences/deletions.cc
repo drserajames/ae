@@ -63,7 +63,7 @@ struct deletions_insertions_t
 template <> struct fmt::formatter<deletions_insertions_t::pos_num_t> : fmt::formatter<ae::fmt_helper::default_formatter> {
     template <typename FormatCtx> auto format(const deletions_insertions_t::pos_num_t& value, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "{}:{}", value.pos, value.num);
+        return fmt::format_to(ctx.out(), "{}:{}", value.pos, value.num);
     }
 };
 
@@ -72,13 +72,13 @@ template <> struct fmt::formatter<deletions_insertions_t> : fmt::formatter<ae::f
     {
         if (!value.empty()) {
             if (!value.deletions.empty())
-                format_to(ctx.out(), "del:{}", value.deletions);
+                fmt::format_to(ctx.out(), "del:{}", value.deletions);
             if (!value.insertions.empty())
-                format_to(ctx.out(), "ins:{}", value.insertions);
+                fmt::format_to(ctx.out(), "ins:{}", value.insertions);
             return ctx.out();
         }
         else
-            return format_to(ctx.out(), "{}", "{}");
+            return fmt::format_to(ctx.out(), "{}", "{}");
     }
 };
 

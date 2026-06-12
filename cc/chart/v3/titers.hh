@@ -437,7 +437,7 @@ template <> struct fmt::formatter<ae::chart::v3::Titers::iterator::ref> : fmt::f
 {
     template <typename FormatCtx> constexpr auto format(const ae::chart::v3::Titers::iterator::ref& value, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "ag:{} sr:{} t:{}", value.antigen, value.serum, value.titer);
+        return fmt::format_to(ctx.out(), "ag:{} sr:{} t:{}", value.antigen, value.serum, value.titer);
     }
 };
 

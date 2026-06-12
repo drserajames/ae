@@ -1032,7 +1032,7 @@ namespace ae::chart::v2
 // ----------------------------------------------------------------------
 
 template <> struct fmt::formatter<ae::chart::v2::BLineage> : fmt::formatter<ae::fmt_helper::default_formatter> {
-    template <typename FormatCtx> auto format(const ae::chart::v2::BLineage& lineage, FormatCtx& ctx) const { return format_to(ctx.out(), "{}", lineage.to_string()); }
+    template <typename FormatCtx> auto format(const ae::chart::v2::BLineage& lineage, FormatCtx& ctx) const { return fmt::format_to(ctx.out(), "{}", lineage.to_string()); }
 };
 
 template <> struct fmt::formatter<ae::chart::v2::Antigen> : fmt::formatter<ae::fmt_helper::default_formatter> {

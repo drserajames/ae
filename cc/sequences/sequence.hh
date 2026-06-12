@@ -132,7 +132,7 @@ namespace ae::sequences
 template <> struct fmt::formatter<ae::sequences::insertion_t> : fmt::formatter<ae::fmt_helper::default_formatter> {
     template <typename FormatCtx> auto format(const ae::sequences::insertion_t& value, FormatCtx& ctx) const
     {
-        return format_to(ctx.out(), "[{}, \"{}\"]", value.pos, value.insertion);
+        return fmt::format_to(ctx.out(), "[{}, \"{}\"]", value.pos, value.insertion);
     }
 };
 
