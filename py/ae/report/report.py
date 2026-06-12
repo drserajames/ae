@@ -497,8 +497,8 @@ class LatexSerumCoverageAddendum (LatexReport):
             "meeting_date": self.settings["cover"]["meeting_date"],
             })
 
-#    {"type": "maps", "arraystretch": 1.0, "images": ["h3-hi/serumcoverage-ANTANANARIVO_2018-007.empirical.all-cdc.pdf", "h3-hi/serumcoverage-ANTANANARIVO_2018-007.theoretical.all-cdc.pdf"],
-#     "title": "CDC HI A(H3N2)/ANTANANARIVO/1067/2016 SIAT3 (2017-10-01) CDC 2018-007"},
+#    {"type": "maps", "arraystretch": 1.0, "images": ["<subtype>-hi/serumcoverage-<SERUM_ID>.empirical.all-<lab>.pdf", "<subtype>-hi/serumcoverage-<SERUM_ID>.theoretical.all-<lab>.pdf"],
+#     "title": "<LAB> HI <VIRUS_NAME> <PASSAGE> (<DATE>) <SERUM_ID>"},
 
     def make_serum_coverage_map_set(self, page):
         reviewed = sorted(Path(".").glob("serumcoverage-reviewed-{lab}-{virus_type}-{assay}.*.json".format(**page).lower()))[-1:]
