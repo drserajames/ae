@@ -18,7 +18,7 @@ status, and respect the shared-file rules below.
 | # | Subsystem | AD source | ~LOC | ae target | Owner | Status |
 |---|-----------|-----------|-----:|-----------|-------|--------|
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | 🟡 in progress |
-| 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟡 in progress |
+| 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — JSON reader + bindings + bin/ tools, verified |
 | 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` (layout + plan) | *(tal agent)* | 🟡 Phase A layout done; draw blocked on #1 |
 | 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; figures blocked on #1 |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 code complete — HTTP/HTTPS verified; chart-data blocked on a `chart_v3` import abort in `ae_backend` (open bug, see §1 note) |
@@ -51,7 +51,7 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 
 ---
 
-## 1. Map drawing  *(owner: map-draw agent — M1–M3 done, M4 next)*
+## 1. Map drawing  *(owner: map-draw agent — M1–M4 core done; M4 extras + M5/M6 remain)*
 
 The single biggest gap. As of M1, `ae` **can render a basic antigenic map to PDF**.
 `cc/draw/` previously held only geometry/color *primitive headers*; it now also has a
@@ -100,13 +100,22 @@ Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
       and **per-point labels**: explicit `PointStyle::label().text` always, plus an
       opt-in `--labels` CLI flag that labels every point by name (`chart.antigens()/sera()
       [i].name()`) — AD's `add-all-labels` behaviour. Label position honours the label
-      offset/size/colour. **✅ Verified:** rendered the styled chart with `--labels` —
-      title "AC A(H3N2) guinea-pig 20181111" + per-point names (A(H3N2)/WUPPERTAL/17/2018,
-      …) over the correct shapes; rasterised and eyeballed. **Note:** no label collision
+      offset/size/colour. **✅ Verified:** rendered the test chart with `--labels` — the
+      chart title plus per-point virus-name labels appear over the correctly-styled shapes;
+      rasterised and eyeballed. **Note:** no label collision
       avoidance yet (labels overlap in dense regions) — deferred to M4.
       **For TAL:** the surface now has the `text()` primitive TAL labels will need.
-- [ ] **M4 — Decorations:** legends, serum circles, connection lines, blobs; label
-      collision avoidance.
+- [x] **M4 (core) — Background + serum circles.** Surface gained a `rectangle`/border via
+      `line()`. `export_pdf()` now draws (before points) an antigenic-unit **grid** (grey,
+      1 AU spacing) and a black **viewport border** (AD `BackgroundBorderGrid`), and an
+      opt-in **`--serum-circles`** overlay using `chart/v3 serum_circles(chart, projection,
+      fold=2.0)` — a navy circle per serum at its empirical (else theoretical) radius in AU,
+      scaled to device. Sera with no homologous antigen are skipped (logged by the core).
+      **✅ Verified:** `chart-draw --serum-circles chart1-opt.ace` — grid + border + title +
+      navy serum circles centred on sera with points on top; rasterised and eyeballed.
+- [ ] **M4 (extras) — still to port:** legend, connection lines (procrustes arrows),
+      stress/error blobs, and **label collision avoidance** (labels currently overlap in
+      dense regions, M3 limitation).
 - [ ] **M5 — `mapi` settings DSL:** the JSON-driven mod-applicator pipeline.
 - [ ] **M6 — SVG/PNG surfaces** in addition to PDF.
 
@@ -154,7 +163,7 @@ Cairo PDF surface, and `cc/map-draw/` has the renderer + CLI.
 
 ---
 
-## 2. hidb — historical influenza database  *(owner: hidb agent — 🟡 in progress)*
+## 2. hidb — historical influenza database  *(owner: hidb agent — 🟢 done)*
 
 Needed for reference-antigen and vaccine identification, and is a dependency for several
 chart tools (e.g. `chart-find-chart-with-antigens`, vaccine styling in map-draw M4).
@@ -163,15 +172,48 @@ chart tools (e.g. `chart-find-chart-with-antigens`, vaccine styling in map-draw 
 - **AD tools to reach parity with:** `hidb5-find`, `hidb5-vaccines-of-chart`,
   `hidb5-reference-antigens-in-tables`, `hidb5-dates`, `hidb5-first-table-date`,
   `hidb5-antigens-sera-of-chart`, `hidb5-stat`, `hidb5-make`, `hidb5-convert`.
-- **ae target:** `cc/hidb/` (empty stub) + a `hidb` submodule in `ae_backend`.
+- **ae target:** `cc/hidb/` + a `hidb` submodule in `ae_backend`.
+
+**Design note — JSON reader, not the binary `.hidb5b`.** AD mmaps an optimised binary
+layout (`hidb-bin.*`, `.hidb5b`) for speed. This port instead parses the hidb-v5 **JSON**
+(`hidb5.{h1,h3,b}.json.xz`) directly with `ae::simdjson` into plain in-memory vectors —
+much simpler, and fast enough for the tools that consume it (a few hundred ms to load a
+type). Consequently the AD DB-*maker*/*convert*/binary tooling is intentionally **not**
+ported; only the reader + query surface.
+
+**Files added:**
+- [`cc/hidb/hidb.hh`](cc/hidb/hidb.hh) / [`cc/hidb/hidb.cc`](cc/hidb/hidb.cc) —
+  `ae::hidb` namespace: `Antigen` / `Serum` / `Table` model, `HiDb` (load + lookup),
+  name reconstruction (incl. cdc-name handling), `find_antigens`/`find_sera`
+  (name parsed via `ae::virus::name::parse` with cdc/slash fallbacks),
+  `find_antigens_by_labid`, `reference_antigens(table)`, `most_recent_table`/`oldest`,
+  and a `get(virus_type)` singleton cached per type. Data dir from `set_dir()` or `$HIDB_V5`.
+- [`cc/py/hidb.cc`](cc/py/hidb.cc) — `ae_backend.hidb` submodule (registered in
+  `cc/py/module.{hh,cc}`); `meson.build` `sources_hidb` + `cc/py/hidb.cc` in `sources_py`.
+- `bin/hidb-find`, `bin/hidb-dates`, `bin/hidb-reference-antigens-in-tables`,
+  `bin/hidb-antigens-sera-of-chart`, `bin/hidb-vaccines-of-chart`, and shared
+  `bin/_hidb_boot.py`. Data files are located **only** via the environment
+  (`$HIDB_V5`, `$LOCDB_V2`, `$VACCINES_JSON`) — none are bundled in the repo.
 
 **Milestones:**
-- [ ] First task: explore `hidb-5` and document the on-disk DB format + the data files
-      it reads (where AD finds them via `$HIDB_V5`).
-- [ ] Port the DB reader (load + lookup antigen/serum by name).
-- [ ] Port "find tables containing antigen", "dates", "vaccines of chart".
-- [ ] pybind binding + `bin/` wrappers. **Verify:** identify reference antigens and
-      vaccine strains in a known chart, matching AD output.
+- [x] Explore `hidb-5`; document the on-disk DB format + the data files it reads. The
+      runtime data dir comes from `$HIDB_V5` (override via `hidb.set_dir()` / `hidb::set_dir`).
+- [x] Port the DB reader (load + lookup antigen/serum by name).
+- [x] Port "find tables containing antigen" (each record carries its table index list),
+      "dates" (`hidb-dates`), and "vaccines of chart" (`hidb-vaccines-of-chart`, which
+      ports the whocc `vaccines.json` name-list logic in Python over the binding).
+- [x] pybind binding + `bin/` wrappers. **✅ Verified** (arm64 build) against real
+      type/lineage data: counts load correctly; `reference_antigens` flags the expected
+      reference strains in known tables; `hidb-vaccines-of-chart` finds the current
+      vaccine strains in a real WHO CC chart, grouped by passage type with table counts.
+
+**Build note:** the `ae_backend` `.so` may be shadowed by an editable install from a
+different checkout; `bin/_hidb_boot.py` defeats this by loading this repo's `build/`
+`.so` by explicit path (same workaround the tal/webserver agents hit).
+
+**Not ported (out of scope, low demand):** `hidb5-stat` (hourly table statistics),
+`hidb5-first-table-date`, `hidb5-make`/`hidb5-convert` (binary DB authoring). The core
+query surface they share is in place if these are wanted later.
 
 ---
 

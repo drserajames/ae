@@ -15,20 +15,24 @@ int main(int argc, char* const argv[])
     try {
         std::vector<std::string_view> positional;
         bool label_points = false;
+        bool serum_circles = false;
         for (int i = 1; i < argc; ++i) {
-            if (const std::string_view arg{argv[i]}; arg == "--labels")
+            const std::string_view arg{argv[i]};
+            if (arg == "--labels")
                 label_points = true;
+            else if (arg == "--serum-circles")
+                serum_circles = true;
             else
                 positional.push_back(arg);
         }
         if (positional.size() < 2) {
-            fmt::print(stderr, "Usage: {} [--labels] <input.ace> <output.pdf> [image-size-px]\n", argv[0]);
+            fmt::print(stderr, "Usage: {} [--labels] [--serum-circles] <input.ace> <output.pdf> [image-size-px]\n", argv[0]);
             return 1;
         }
         const double image_size = positional.size() > 2 ? std::stod(std::string{positional[2]}) : 800.0;
         const ae::chart::v3::Chart chart{std::filesystem::path{positional[0]}};
-        ae::map_draw::export_pdf(chart, ae::projection_index{0}, std::filesystem::path{positional[1]}, image_size, label_points);
-        fmt::print("Wrote {} ({:.0f}x{:.0f}{})\n", positional[1], image_size, image_size, label_points ? ", labelled" : "");
+        ae::map_draw::export_pdf(chart, ae::projection_index{0}, std::filesystem::path{positional[1]}, image_size, label_points, serum_circles);
+        fmt::print("Wrote {} ({:.0f}x{:.0f}{}{})\n", positional[1], image_size, image_size, label_points ? ", labelled" : "", serum_circles ? ", serum-circles" : "");
     }
     catch (std::exception& err) {
         fmt::print(stderr, "ERROR: {}\n", err.what());

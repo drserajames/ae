@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -9,6 +10,7 @@
 #include "draw/cairo-surface.hh"
 #include "ad/color.hh"
 #include "chart/v3/chart.hh"
+#include "chart/v3/serum-circles.hh"
 
 // ----------------------------------------------------------------------
 
@@ -31,7 +33,7 @@ namespace ae::map_draw
         }
     } // namespace
 
-    void export_pdf(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, const std::filesystem::path& output, double image_size, bool label_points)
+    void export_pdf(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, const std::filesystem::path& output, double image_size, bool label_points, bool draw_serum_circles)
     {
         using namespace ae::chart::v3;
 
@@ -40,7 +42,8 @@ namespace ae::map_draw
         if (projection_no >= chart.projections().size())
             throw std::runtime_error{"cannot draw map: projection index out of range"};
 
-        const auto layout = chart.projections()[projection_no].transformed_layout();
+        const auto& projection = chart.projections()[projection_no];
+        const auto layout = projection.transformed_layout();
 
         // Use the chart's plot spec, or synthesise the standard defaults (test antigen =
         // green filled circle, reference = open circle, serum = open box) when absent.
@@ -80,6 +83,40 @@ namespace ae::map_draw
 
         ae::draw::CairoPdf pdf{output, image_size, image_size};
         pdf.background(WHITE);
+
+        // --- background grid (1 antigenic-unit spacing) + viewport border (AD BackgroundBorderGrid) ---
+        {
+            const double vp_max_x = vp_min_x + padded;
+            const double vp_min_y = vp_max_y - padded;
+            const ::Color grid_color{0xCCCCCC};
+            const double grid_width = line_scale;
+            for (double gx = std::ceil(vp_min_x); gx <= vp_max_x; gx += 1.0)
+                pdf.line(to_device_x(gx), 0.0, to_device_x(gx), image_size, grid_color, grid_width);
+            for (double gy = std::ceil(vp_min_y); gy <= vp_max_y; gy += 1.0)
+                pdf.line(0.0, to_device_y(gy), image_size, to_device_y(gy), grid_color, grid_width);
+            const double bw = 1.5 * line_scale;
+            const double b = bw / 2.0;
+            pdf.line(b, b, image_size - b, b, BLACK, bw);                         // top
+            pdf.line(image_size - b, b, image_size - b, image_size - b, BLACK, bw); // right
+            pdf.line(image_size - b, image_size - b, b, image_size - b, BLACK, bw); // bottom
+            pdf.line(b, image_size - b, b, b, BLACK, bw);                         // left
+        }
+
+        // --- serum circles (opt-in) drawn under the points ---
+        if (draw_serum_circles) {
+            const ::Color sc_color{0x000080}; // navy
+            const double sc_width = 1.5 * line_scale;
+            for (const auto& sc : serum_circles(chart, projection, serum_circle_fold{2.0})) {
+                const double radius_au = sc.empirical().value_or(sc.theoretical().value_or(0.0));
+                if (radius_au <= 0.0)
+                    continue;
+                const point_index pt = chart.antigens().size() + sc.serum_no;
+                if (pt >= layout.number_of_points())
+                    continue;
+                if (const auto coords = layout[pt]; coords.exists())
+                    pdf.circle(to_device_x(coords[DIMX]), to_device_y(coords[DIMY]), radius_au * scale, sc_color, sc_width, TRANSPARENT);
+            }
+        }
 
         const auto& styles = plot_spec.styles();
         const auto& style_for_point = plot_spec.style_for_point();
