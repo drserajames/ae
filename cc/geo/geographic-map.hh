@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string_view>
 #include <vector>
 
 #include "ad/color.hh"
@@ -18,6 +19,9 @@ namespace ae::geo
         Color outline{0}; // black
         double radius{6.0};
     };
+
+    // Continent fill color (ported from AD acmacs-base/color-continent.cc); grey for unknown.
+    Color continent_color(std::string_view continent);
 
     // Render the equirectangular world base map (land filled + coastline) to a PDF and
     // plot `points` at their lon/lat. `image_width` is the PDF width in device units; the

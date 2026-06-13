@@ -1,5 +1,8 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -12,6 +15,21 @@
 
 namespace ae::geo
 {
+    Color continent_color(std::string_view continent)
+    {
+        // Ported from AD acmacs-base/color-continent.cc (primary palette).
+        static const std::unordered_map<std::string_view, uint32_t> colors{
+            {"EUROPE", 0x00FF00},          {"CENTRAL-AMERICA", 0xAAF9FF}, {"MIDDLE-EAST", 0x8000FF},
+            {"NORTH-AMERICA", 0x00008B},   {"AFRICA", 0xFF8000},          {"ASIA", 0xFF0000},
+            {"RUSSIA", 0xB03060},          {"AUSTRALIA-OCEANIA", 0xFF69B4}, {"SOUTH-AMERICA", 0x40E0D0},
+            {"ANTARCTICA", 0x808080},      {"CHINA-SOUTH", 0xFF0000},     {"CHINA-NORTH", 0x6495ED},
+            {"CHINA-UNKNOWN", 0x808080},   {"UNKNOWN", 0x808080},
+        };
+        if (const auto found = colors.find(continent); found != colors.end())
+            return Color{found->second};
+        return Color{0x808080}; // grey fallback
+    }
+
     void export_geographic_pdf(const std::filesystem::path& output, double image_width, const std::vector<GeoPoint>& points)
     {
         const auto [first, last] = geographic_map_path();

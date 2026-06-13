@@ -5,6 +5,7 @@
 
 #include "ext/fmt.hh"
 #include "geo/geographic-map.hh"
+#include "locdb/v3/locdb.hh"
 
 // ----------------------------------------------------------------------
 
@@ -43,12 +44,26 @@ int main(int argc, char* const argv[])
                     throw std::runtime_error{fmt::format("bad --point (expected lon,lat): {}", argv[i])};
                 points.push_back(pt);
             }
+            else if (arg == "--location" && (i + 1) < argc) {
+                const std::string_view name{argv[++i]};
+                const auto& db = ae::locdb::v3::get();
+                if (const auto [resolved, loc] = db.find(name); loc) {
+                    ae::geo::GeoPoint pt;
+                    pt.lon = loc->longitude;
+                    pt.lat = loc->latitude;
+                    pt.fill = ae::geo::continent_color(db.continent(loc->country));
+                    points.push_back(pt);
+                }
+                else {
+                    fmt::print(stderr, "WARNING: location not found: {}\n", name);
+                }
+            }
             else {
                 positional.push_back(arg);
             }
         }
         if (positional.empty()) {
-            fmt::print(stderr, "Usage: {} [--point lon,lat ...] <output.pdf> [image-width-px]\n", argv[0]);
+            fmt::print(stderr, "Usage: {} [--point lon,lat] [--location NAME] ... <output.pdf> [image-width-px]\n", argv[0]);
             return 1;
         }
         const double image_width = positional.size() > 1 ? std::stod(std::string{positional[1]}) : 1000.0;
