@@ -251,13 +251,21 @@ same either way.
 
 - [x] **Phase 0 — preserve.** Branch `report-shelved` from `ad-port` HEAD, pushed to
       `drserajames` (`503e8c3`). All AD-faithful report work recoverable.
-- [ ] **Phase 1 — bring vcm library tier into `ae`.** Copy the library modules from
-      `2026-0119-tc2/py/vcm/v2`, rename `vcm.v2.*` → `ae.report.*`, split `stat.py`'s
-      tabs/csv/html into `stat_tables.py`, resolve `semantic_clades`/`semantic_vaccines`.
-      Ship per-report files as `templates/`.
-- [ ] **Phase 2 — de-AD the stat path.** Point vcm stat at `ae.report.stat.make_stat_json`.
-- [ ] **Phase 3 — remove the AD-faithful port** from `ad-port` (keep `stat.py` +
-      `bin/ssm-report-stat`); rewrite `README.md`.
+- [x] **Phase 1a — decoupled engine.** Landed `latex`, `dirs`, `main_loop`, `modules`,
+      `download`, `stat_tables` (`vcm.v2.*`→`ae.report.*`); removed the AD-faithful assembler
+      stack (`report.py`/`cli.py`/`jsonio.py`/`labs.py`/`bin/ssm-report` — on `report-shelved`);
+      kept `stat.py`. All import clean (Py3.10 + `ae_backend`).
+- [x] **Phase 1b — ConferenceData-coupled engine.** Landed `chart_modifier`, `geographic`,
+      `commander` + a thin `conference_data_base.ConferenceData(VcmDirs)` base. `chart_modifier`
+      inherits the base; `make_geo` takes an injected ConferenceData; `semantic_clades`/
+      `semantic_vaccines`/`serology` are guarded imports so `ae.report` imports standalone.
+      Per-report adaptation: the report's concrete `conference_data.py` subclasses
+      `ae.report.conference_data_base.ConferenceData`. (`conference_data.py`, `serology.py`,
+      subtype modifiers stay per-report.)
+- [ ] **Phase 2 — de-AD the stat path.** Point `stat_tables._compute_stat` at
+      `ae.report.stat.make_stat_json` (drop the `hidb5-stat` shell).
+- [ ] **Phase 3 — remove the remaining AD scaffolding** (`init.py`, `templates/`,
+      `bin/ssm-report-init`); finish `README.md`. End-to-end test a report dir against `ae.report`.
 - [ ] **Phase 4 — (separate) port `zero_do`** interactive adjustment AD→ae.
 
 ---

@@ -33,13 +33,21 @@ the subtype `chart_modifier`s (`h1`/`h3`/`b` — season clades), and the report-
 scripts (`report.py`, the `addendum-*.py`, `data.py`, the top-level and per-map `0do`
 runners). These encode season-specific scientific decisions and are edited every report.
 
-## Pending — Phase 1b refactor (awaiting review)
+## Landed (Phase 1b — the ConferenceData-coupled engine)
 
-The `ConferenceData`-coupled engine modules are **not yet landed**: `chart_modifier.py`
-(base `ChartModifier(ConferenceData)`), `geographic.py`, `commander.py`. Bringing them
-in cleanly needs a small refactor — `ae.report` defines a thin `ConferenceData` base
-(interface + defaults), and each report's concrete `conference_data.py` subclasses it.
-See MIGRATION.md → "The one knot to resolve".
+| module | role |
+|--------|------|
+| `conference_data_base.py` | thin base `class ConferenceData(dirs.VcmDirs)` — the per-report interface (`conferencence_date`/`time_series`/`current_vaccine_years`/`geographic_*`) as `NotImplementedError` stubs. The report's concrete `conference_data.py` subclasses it. |
+| `chart_modifier.py` | base `class ChartModifier(conference_data_base.ConferenceData)` — semantic styling. `semantic_clades`/`semantic_vaccines` (acmacs-data) and per-report `serology` are **guarded imports** (resolved at report runtime), so `ae.report` imports standalone. |
+| `geographic.py` | geo settings + maps; `make_geo(conference_data, geo_dir, …)` now takes the **injected** ConferenceData instead of instantiating it. |
+| `commander.py` | the `@command` surface (`download`/`populate`/`prestyle`/`style`/`export`). |
+
+**Per-report adaptations a report needs** (one-time, in the report dir — not in `ae`):
+- `conference_data.py`: `class ConferenceData(ae.report.conference_data_base.ConferenceData)`.
+- whatever calls `make_geo`: pass the ConferenceData instance: `make_geo(ConferenceData(), geo_dir)`.
+- `serology.py` and `semantic_clades`/`semantic_vaccines` must be on the report's path.
+
+All 11 engine modules import clean under Python 3.10 + `ae_backend`.
 
 Also pending: **Phase 2** — point `stat_tables.py`'s `_compute_stat` at
 `ae.report.stat.make_stat_json` (it currently still shells the AD `hidb5-stat` binary);

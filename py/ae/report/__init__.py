@@ -12,12 +12,14 @@ tier** has landed here:
     download      — chart download / relax / orient / merge (ae_backend.chart_v3)
     stat_tables   — stat.json.xz → tabs / csv / html
     stat          — stat.json.xz writer (ae_backend.hidb; replaces AD hidb5-stat)
+    conference_data_base — base ConferenceData(VcmDirs); the report subclasses it
+    chart_modifier       — base ChartModifier(ConferenceData); semantic styling
+    geographic           — geo settings/maps; make_geo(conference_data, …) injected
+    commander            — the @command surface (download/populate/prestyle/style/export)
 
-Still per-report (live in each report working dir, not here): conference_data,
-serology, the subtype chart_modifiers, report.py + the addenda + 0do scripts.
-
-Still pending (Phase 1b refactor — see MIGRATION.md): the ConferenceData-coupled
-modules `chart_modifier`, `geographic`, `commander`.
+Still per-report (live in each report working dir, not here): the concrete
+`conference_data.py` (subclasses `ae.report.conference_data_base.ConferenceData`),
+`serology.py`, the subtype chart_modifiers, report.py + the addenda + 0do scripts.
 
 Import the submodules explicitly, e.g. `from ae.report import latex, download`.
 The engine submodules require `ae_backend` (Python 3.10) and, at runtime, the
