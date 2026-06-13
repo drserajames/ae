@@ -30,12 +30,19 @@ int main(int argc, char* const argv[])
                 params.time_series = true;
             else if (arg.substr(0, 11) == "--interval=")
                 params.time_series_interval = std::string{arg.substr(11)};
+            else if (arg == "--legend")
+                params.legend = true;
+            else if (arg == "--aa-transitions")
+                params.aa_transitions = true;
+            else if (arg.substr(0, 8) == "--title=")
+                params.title = std::string{arg.substr(8)};
             else
                 positional.push_back(arg);
         }
         if (positional.size() < 2) {
             fmt::print(stderr,
                        "Usage: {} [--labels] [--color-by-clade] [--clades] [--time-series] [--interval=year|month|week|day]\n"
+                       "          [--legend] [--aa-transitions] [--title=TEXT]\n"
                        "          <tree.newick|tree.json[.xz]> <output.pdf> [image-size-px]\n",
                        argv[0]);
             return 1;

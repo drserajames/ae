@@ -33,4 +33,9 @@ check "tree-clades.json (--labels)" "$tmp/clades.pdf"
 "$bin" --labels --color-by-clade --clades --time-series "$here/tree-clades.json" "$tmp/m2.pdf" 600 >/dev/null
 check "tree-clades.json (M2: color/clades/time-series)" "$tmp/m2.pdf"
 
+# M3: title + legend + aa-transitions + rotated slot labels
+"$bin" --title="test" --legend --aa-transitions --color-by-clade --clades --time-series --interval=year \
+       "$here/tree-clades.json" "$tmp/m3.pdf" 700 >/dev/null
+check "tree-clades.json (M3: title/legend/aa-transitions)" "$tmp/m3.pdf"
+
 echo "OK: tal-draw renders valid PDFs"

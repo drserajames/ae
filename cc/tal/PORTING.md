@@ -181,9 +181,19 @@ the `cc/draw/` surface API."*
    bars and per-year dashes all align to rows correctly.
    - *Deferred to a later pass (need new surface primitives): rotated month/year slot
      labels and clade arrows (rotated text), filled slot backgrounds (filled rect).*
-7. **M3+ (next):** `Title`/`Legend`/`DrawAATransitions` draw paths; then `AntigenicMaps`
-   (also gated on map-draw render + hidb (#2)). Rotated text / filled-rect primitives would
-   unlock slot labels + nicer clade arrows — coordinate with map-draw when adding them.
+7. **M3 — title + legend + aa-transitions + rotated slot labels — DONE.** Added two
+   primitives to the shared surface — `CairoPdf::rectangle()` (filled/outlined) and
+   `text_rotated()` — then: a centred **title** (`--title=`), a **clade legend** row
+   (`--legend`, filled-rect swatches), **aa-transition labels** at inodes
+   (`--aa-transitions`, ports `DrawAATransitions`, reads `Inode::aa_transitions` from the
+   phylo-tree-v3 `"A"` field), and **rotated year/month slot labels** under the time-series
+   column. **Verify:** `sh cc/tal/test/test-draw-tree.sh`; a 24-leaf 3-clade tree with
+   inode aa-transitions rendered as a full signature-page-style figure (title + tree +
+   aa labels + clade bars + time-series with rotated year labels + legend) — rasterised &
+   eyeballed.
+8. **M4+ (next):** the `mapi`/settings-DSL-driven configuration of these elements (Phase C),
+   label collision avoidance, and `AntigenicMaps` (embed kateri-rendered map PDFs per the
+   §1 course-correction, + hidb (#2) for vaccine/reference marks) for the full signature page.
 
 **Phase C — settings DSL & CLI:**
 8. Port the `Settings`/`apply_built_in` mod pipeline (`settings.cc`) and `bin/tal`.

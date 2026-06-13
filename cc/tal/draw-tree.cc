@@ -75,7 +75,7 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
     // --- clade sections + clade colour map (first-seen order) ---
     std::vector<Clade> clade_sections;
     std::unordered_map<std::string, std::size_t> clade_rank; // clade name -> palette/slot index
-    if (params.clades || params.color_by_clade) {
+    if (params.clades || params.color_by_clade || params.legend) {
         clade_sections = compute_clade_sections(tree);
         for (std::size_t k = 0; k < clade_sections.size(); ++k)
             clade_rank.emplace(clade_sections[k].name, k);
@@ -112,19 +112,30 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
     if (clade_w > 0.0) { cursor += gap; x_clade0 = cursor; cursor += clade_w; }
     if (ts_w > 0.0)    { cursor += gap; x_ts0 = cursor;    cursor += ts_w; }
 
+    // --- vertical reserves: title (top), legend + time-series slot labels (bottom) ---
+    const bool want_legend = params.legend && !clade_sections.empty();
+    const double top_reserve = params.title.empty() ? 0.0 : 0.05 * image_size;
+    const double bottom_reserve = (want_legend || ts_w > 0.0) ? 0.07 * image_size : 0.0;
+
     // --- vertical (shared) + tree horizontal transforms ---
     const double height_units = layout.height > 0.0 ? layout.height : 1.0;
     const double max_cum = layout.max_cumulative > 0.0 ? layout.max_cumulative : 1.0;
-    const double vstep = (image_size - 2.0 * margin) / height_units;
+    const double vstep = (image_size - 2.0 * margin - top_reserve - bottom_reserve) / height_units;
     const double hstep = tree_w / max_cum;
     const auto dev_x = [&](double cumulative) { return margin + cumulative * hstep; };
-    const auto dev_y = [&](double vertical_offset) { return margin + (vertical_offset - 0.5) * vstep; };
+    const auto dev_y = [&](double vertical_offset) { return margin + top_reserve + (vertical_offset - 0.5) * vstep; };
 
     const double line_width = std::clamp(vstep * 0.5, 0.2, 3.0);
     const double font_size = std::clamp(vstep * 0.8, 3.0, 14.0);
 
     ae::draw::CairoPdf pdf{output, image_size, image_size};
     pdf.background(WHITE);
+
+    // --- title (top, centred) ---
+    if (!params.title.empty()) {
+        const double title_fs = std::clamp(top_reserve * 0.45, 8.0, 26.0);
+        pdf.text(image_size / 2.0, margin + top_reserve * 0.5, params.title, title_fs, BLACK, /*center=*/true);
+    }
 
     // --- tree: leaf tip segments (coloured) + optional labels ---
     for (const auto& node : layout.leaves) {
@@ -154,6 +165,18 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
         }
         if (!std::isnan(first_child_y))
             pdf.line(dev_x(node.x), dev_y(first_child_y), dev_x(node.x), dev_y(last_child_y), BLACK, line_width);
+    }
+
+    // --- aa-transition labels at inodes (port of DrawAATransitions) ---
+    if (params.aa_transitions) {
+        const double aa_fs = std::clamp(vstep * 0.7, 4.0, 11.0);
+        for (const auto& node : layout.inodes) {
+            const Inode& inode = tree.inode(node_index_t{node.node});
+            if (inode.aa_transitions.empty())
+                continue;
+            const std::string label = fmt::format("{}", inode.aa_transitions);
+            pdf.text(dev_x(node.x) + aa_fs * 0.3, dev_y(node.y) - aa_fs * 0.55, label, aa_fs, Color{0x9400D3}, /*center=*/false);
+        }
     }
 
     // --- clades column: one vertical bar per section, at a per-clade slot ---
@@ -200,6 +223,32 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
                     break;
                 }
             }
+        }
+
+        // slot labels (rotated, reading upward) below the column
+        const bool yearly = params.time_series_interval == "year";
+        const double slot_fs = std::clamp(slot_w * 0.7, 5.0, 10.0);
+        const double label_anchor_y = bottom + bottom_reserve * 0.9;
+        for (std::size_t i = 0; i < n_slots; ++i) {
+            const std::string& slot_first = time_series.slots[i].first;
+            const std::string label = yearly ? slot_first.substr(0, 4) : slot_first.substr(0, 7);
+            pdf.text_rotated(x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + slot_fs * 0.35, label_anchor_y, label, slot_fs, GREY50, -90.0);
+        }
+    }
+
+    // --- legend: clade colour swatches (bottom-left row) ---
+    if (want_legend) {
+        const double legend_fs = std::clamp(bottom_reserve * 0.28, 7.0, 12.0);
+        const double swatch_w = legend_fs * 1.4;
+        const double swatch_h = legend_fs * 0.9;
+        const double ly = image_size - margin - bottom_reserve * 0.35;
+        double lx = margin;
+        for (std::size_t k = 0; k < clade_sections.size(); ++k) {
+            const Color color = clade_palette(k);
+            pdf.rectangle(lx, ly - swatch_h / 2.0, swatch_w, swatch_h, color, 0.5, color);
+            const double tw = pdf.text_size(clade_sections[k].name, legend_fs).first;
+            pdf.text(lx + swatch_w + 4.0 + tw / 2.0, ly, clade_sections[k].name, legend_fs, BLACK, /*center=*/true);
+            lx += swatch_w + 4.0 + tw + 16.0;
         }
     }
 

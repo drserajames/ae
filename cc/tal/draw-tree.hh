@@ -33,6 +33,9 @@ namespace ae::tal
         bool clades{false};          // draw the clade-sections column
         bool time_series{false};     // draw the time-series dash column
         std::string time_series_interval{"month"}; // year | month | week | day
+        std::string title{};         // page title (top, centred); empty = none
+        bool legend{false};          // draw a clade colour legend (bottom row)
+        bool aa_transitions{false};  // label inodes with their aa-substitution transitions
     };
 
     // Render `tree` to a square PDF of side `image_size` device units. Takes

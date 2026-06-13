@@ -88,6 +88,39 @@ namespace ae::draw
         cairo_stroke(context_);
     }
 
+    void CairoPdf::rectangle(double x, double y, double width, double height, Color outline, double outline_width, Color fill)
+    {
+        cairo_new_path(context_);
+        cairo_rectangle(context_, x, y, width, height);
+        const bool stroke = outline_width > 0.0 && !outline.is_transparent();
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            if (stroke)
+                cairo_fill_preserve(context_);
+            else
+                cairo_fill(context_);
+        }
+        if (stroke) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+    }
+
+    void CairoPdf::text_rotated(double x, double y, std::string_view utf8, double font_size, Color color, double angle_degrees)
+    {
+        const std::string str{utf8};
+        cairo_save(context_);
+        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        set_source(context_, color);
+        cairo_translate(context_, x, y);
+        cairo_rotate(context_, angle_degrees * std::numbers::pi / 180.0);
+        cairo_move_to(context_, 0.0, 0.0);
+        cairo_show_text(context_, str.c_str());
+        cairo_restore(context_);
+    }
+
     void CairoPdf::text(double x, double y, std::string_view utf8, double font_size, Color color, bool center)
     {
         const std::string str{utf8};
