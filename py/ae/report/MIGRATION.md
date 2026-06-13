@@ -192,14 +192,46 @@ H1/H3 hidb. (⚠ B is currently skipped — open hidb-side B-load bug, `STRING_E
 
 ---
 
-## Stage B — interactive map adjustment (still AD)
+## Stage B — interactive map adjustment (still AD) — port plan
 
 The per-map fine-tuning in each `<map>/adjust/0do` script (select outlier antigens, `move`,
 `relax`, `procrustes`) runs on **AD `acmacs` + `acmacs_py.zero_do_5`**
-(`AD/sources/acmacs-py/py/acmacs_py/zero_do_5.py`). vcm does *programmatic* relax/orient via
-`ae_backend`, but the *interactive by-hand* adjustment has **not** moved to `ae`. Porting
-`zero_do` onto `ae_backend` + kateri is the one genuinely-unstarted piece and a sizable
-effort of its own — **out of scope for this consolidation; track separately.**
+(`AD/sources/acmacs-py/py/acmacs_py/zero_do_5.py`, 534 lines). This is the **one genuinely
+AD-dependent piece** left in the whole report workflow (`download`/`prestyle`/`style`/`export`
+are all ae now). Investigated — here is the port plan.
+
+**What it is.** A **scripted** (not live-GUI) geometry editor: the analyst writes a `0do`
+Python script (`slot.select_antigens(…inside(path)…)`, `slot.move(ags, to=[…])`, `slot.relax()`),
+runs it, reviews a rendered snapshot, iterates. Output: `adjusted.ace`. `Slot` is a thin wrapper
+— almost every method delegates to AD's **`acmacs.ChartDraw`** (chart manipulation + rendering).
+
+**Operation inventory vs ae:**
+
+| op | ae status |
+|----|-----------|
+| relax / grid / disconnect, procrustes, rotate, flip e-w/n-s, select(predicate), merge / orient_to / relax_chart / populate_from_seqdb, stress, modify styles | ✅ already in `ae_backend.chart_v3` / `ae.report.download` / `ae.semantic` |
+| **move points to coords** | ❌ Layout is read-only (`__getitem__`, no `__setitem__`) |
+| **geometric select (`figure` + `ag.inside`)** | ❌ but the predicate ctx exposes `point_no` and the layout is readable → Python point-in-polygon is feasible |
+| **flip_over_line** | ❌ reflect points over a line (pure-Python geometry on layout) |
+| render / snapshot | AD `ChartDraw` → in ae use **kateri** (review only; not needed to produce `adjusted.ace`) |
+
+**The real gap is one primitive.** All three missing ops are geometry on the layout, and all
+are enabled by **writing layout coordinates** (currently read-only). With a coordinate setter:
+move = set selected coords + mark `unmovable` (the getter exists; needs a setter) + relax;
+flip_over_line = reflect coords; geometric select = point-in-polygon over the layout via `point_no`.
+
+**Recommended approach (two layers, mostly Python):**
+1. **One small `chart_v3` primitive** (C++/pybind, ~30–60 LOC, **chart-engine subsystem — flagged
+   to that owner**): a Layout/Projection coordinate **setter** (`set_coordinates(point_no, [x,y])`)
+   + ensure `unmovable` is settable from Python.
+2. **A pure-Python `zero_do` port** (new `py/ae/zero_do/` or `py/ae/report/`): reimplement
+   `Slot`/`Zd` (`move`/`flip`/`select-inside`/`relax`/`procrustes`/`final_ace`) on
+   `ae_backend.chart_v3`; snapshots via **kateri** (optional — the core `adjusted.ace` output
+   needs no renderer). No live-GUI editor required (workflow is scripted batch with review).
+
+**Effort:** modest — the chart-engine ops mostly exist; the new work is the coordinate-setter
+primitive + ~500-line thin-wrapper Python framework. **Sole dependency:** the `chart_v3`
+coordinate setter (flagged separately to the chart-engine owner).
 
 ---
 
