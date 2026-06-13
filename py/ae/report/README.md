@@ -93,8 +93,14 @@ resolving the symlink: `KATERI_EXE = os.path.realpath(shutil.which("kateri") or 
   polish). The continent-coloured monthly maps work today.
 - **Adjust stage** (the last AD dependency) — see `MIGRATION.md` Stage B; likely a kateri
   point-drag feature + `ae_backend` relax-with-pinned-points, a design call for kateri's owner.
-- A per-report **skeleton** (a `conference_data.py` subclass + subtype-modifier stubs)
-  so a new report can bootstrap against `ae.report` — optional, owner's call.
+
+## Bootstrapping a new report
+
+[`skeleton/`](skeleton/) has copy-and-edit templates (`conference_data.py`,
+`h1_chart_modifier.py`, `serology.py`, a per-map `0do`) + a guide encoding the validated
+per-report wiring — in particular the subtype-modifier mix-in
+`class H1_ChartModifier(ae.report.chart_modifier.ChartModifier, conference_data.ConferenceData)`.
+Use synthetic placeholders; real strain data stays in the report dir only.
 
 ## Verification
 
