@@ -221,17 +221,21 @@ move = set selected coords + mark `unmovable` (the getter exists; needs a setter
 flip_over_line = reflect coords; geometric select = point-in-polygon over the layout via `point_no`.
 
 **Recommended approach (two layers, mostly Python):**
-1. **One small `chart_v3` primitive** (C++/pybind, ~30–60 LOC, **chart-engine subsystem — flagged
-   to that owner**): a Layout/Projection coordinate **setter** (`set_coordinates(point_no, [x,y])`)
-   + ensure `unmovable` is settable from Python.
+1. ✅ **DONE — One small `chart_v3` primitive** (C++/pybind): a Layout/Projection coordinate
+   **setter** + settable `unmovable`. Now exposed in `ae_backend.chart_v3`:
+   `Projection.set_coordinates(point_no, [x,y])`, `Layout.__setitem__` (`layout[i] = [x,y]`,
+   negative index counts from the end), and `Projection.set_unmovable([i, j])` (pins points so a
+   subsequent `relax()` keeps them fixed). `Layout.__getitem__` (`layout[i]`) now also reads coords
+   by index. So **both** the scripted-Python and kateri-centric designs are unblocked on the
+   chart-engine side.
 2. **A pure-Python `zero_do` port** (new `py/ae/zero_do/` or `py/ae/report/`): reimplement
    `Slot`/`Zd` (`move`/`flip`/`select-inside`/`relax`/`procrustes`/`final_ace`) on
    `ae_backend.chart_v3`; snapshots via **kateri** (optional — the core `adjusted.ace` output
    needs no renderer). No live-GUI editor required (workflow is scripted batch with review).
 
 **Effort:** modest — the chart-engine ops mostly exist; the new work is the coordinate-setter
-primitive + ~500-line thin-wrapper Python framework. **Sole dependency:** the `chart_v3`
-coordinate setter (flagged separately to the chart-engine owner).
+primitive (✅ now done — see above) + ~500-line thin-wrapper Python framework. The sole
+chart-engine dependency (the `chart_v3` coordinate setter + settable `unmovable`) is **resolved**.
 
 **⚠ Revised after auditing kateri (likely the intended architecture).** kateri is built for
 *interactive* editing — it hit-tests points on hover (`pointLookupByCoordinates`), lets you
@@ -242,8 +246,8 @@ adjust stage is probably **not** a scripted-Python `zero_do` port but rather:
 1. **kateri grows antigen-point dragging** (small Dart change — it already has the point
    hit-test + `get_chart`; `dragStart`/`dragUpdate` just need a point branch that writes the
    layout), and
-2. **`ae_backend` adds relax-with-pinned-points** (settable `unmovable`) so a post-move relax
-   keeps dragged points fixed.
+2. ✅ **`ae_backend` relax-with-pinned-points** (settable `unmovable` via
+   `Projection.set_unmovable([...])`) so a post-move relax keeps dragged points fixed — **done**.
 
 In this (kateri-centric) design the `chart_v3` *coordinate setter* is **not** required (kateri
 edits the layout in Dart and returns it via `get_chart`); only settable `unmovable` is. The
@@ -329,9 +333,14 @@ same either way.
       `<geo_dir>/<subtype>-<YYYY-MM>.pdf` (continent-coloured, count-sized). Decoupled from
       `ConferenceData`. **✅ Verified** on real H3 hidb. (Clade/lineage colouring awaits
       geo-draw pies — continent colouring works now.)
-- [ ] **Remaining:** TAL `tal-draw` tree/signature-page integration; optional per-report
-      skeleton; geo clade/lineage colouring (geo-draw pies).
-- [ ] **Phase 4 — (separate) port `zero_do`** interactive adjustment AD→ae.
+- [x] **Trees wired to `tal-draw`.** `trees.make_trees` translates the report's settings-v3
+      `.tal` (`ae.tal.settings_v3`) → tal-draw schema and renders the tree `.tjz` → the embedded
+      `<subtype>.pdf` (replaces AD `tal -s …`). **✅ Verified** on a real H1 report tree (88 k
+      leaves, clades, time-series). A few `.tal` features the translator skips are TAL follow-ups;
+      signature-page composition is `bin/tal-signature-page` (TAL).
+- [ ] **Remaining:** geo clade/lineage colouring (geo-draw pies, map-draw); TAL `.tal`
+      translation fidelity (TAL); optional per-report skeleton; the **adjust stage** (Stage B —
+      likely a kateri point-drag feature, design call for kateri's owner).
 
 ---
 
