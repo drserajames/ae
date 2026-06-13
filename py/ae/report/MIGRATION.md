@@ -268,9 +268,15 @@ same either way.
       per-lab/subtype `*-tab.txt` + `stat.csv` + `index.html`, no AD/C++ binary.
 - [x] **Phase 3 — removed the remaining AD scaffolding** (`init.py`, `templates/`,
       `bin/ssm-report-init`) and refreshed `README.md`. `ae.report` is now just the engine.
-- [ ] **End-to-end validation** (next): repoint a real report dir at `ae.report` and run
-      `commander` download→populate→style→export. Needs `kateri` + env + TAL/`geo-draw`.
-      Also: `geographic.py` shells `geographic-draw` (AD name) — switch to ae's `geo-draw`.
+- [x] **End-to-end validated.** Real `2026-0119-tc2/h1-cdc` chart + adapted per-report classes:
+      `populate_for_style()` ran the full `ae.report.chart_modifier` styling (clades/vaccines/
+      serology via `ae.semantic`) and `ae.utils.kateri` drove kateri to export a styled
+      `clades` map — a 1-page 800×800 PDF **visually identical to the known-good
+      `out.1.clades.pdf`**. Surfaced + fixed a kateri-launcher bug (symlink → `@executable_path`
+      framework-load failure) in `ae.utils.kateri`. Per-report adaptation: the subtype modifier
+      mixes in the concrete `ConferenceData` (`class H1_ChartModifier(ChartModifier, ConferenceData)`).
+- [ ] **Remaining:** switch `geographic.py`'s `geographic-draw` shell to ae's `geo-draw`;
+      TAL `tal-draw` tree/signature-page integration; optional per-report skeleton.
 - [ ] **Phase 4 — (separate) port `zero_do`** interactive adjustment AD→ae.
 
 ---

@@ -44,10 +44,26 @@ runners). These encode season-specific scientific decisions and are edited every
 
 **Per-report adaptations a report needs** (one-time, in the report dir — not in `ae`):
 - `conference_data.py`: `class ConferenceData(ae.report.conference_data_base.ConferenceData)`.
+- the subtype modifier must **mix in the concrete ConferenceData** so its data is in the
+  MRO (since the engine's `ChartModifier` now inherits the *base*): e.g.
+  `class H1_ChartModifier(ae.report.chart_modifier.ChartModifier, conference_data.ConferenceData)`.
 - whatever calls `make_geo`: pass the ConferenceData instance: `make_geo(ConferenceData(), geo_dir)`.
 - `serology.py` and `semantic_clades`/`semantic_vaccines` must be on the report's path.
+- (working-dir-derived values like `title_lab`/`chart_name_prefix` come from the report
+  dir name automatically — only needed an override in the isolated `/tmp` test.)
 
 All 11 engine modules import clean under Python 3.10 + `ae_backend`.
+
+### ✅ End-to-end validated against a real report
+
+Using the real `2026-0119-tc2/h1-cdc` chart (`prestyled.ace`) with the adapted per-report
+classes above, `Downloaded_ChartModifier.populate_for_style()` ran the full
+`ae.report.chart_modifier` styling (clades, vaccine resolution, serology via `ae.semantic`),
+and `ae.utils.kateri` drove **kateri** to export the styled map PDFs. The `clades` map is a
+**1-page 800×800 pt PDF visually identical to the known-good `out.1.clades.pdf`** (same
+"CDC A(H1N1) by clade" title, clade legend, antigen cloud). This exercises the whole Phase 1a+1b
+engine end-to-end: `chart_modifier` + `conference_data_base` mixin + `commander`/kateri export.
+(Needs the kateri fix below.)
 
 ## Done — Phase 2 (de-AD the stat path) + Phase 3 (drop AD scaffolding)
 
@@ -57,14 +73,19 @@ All 11 engine modules import clean under Python 3.10 + `ae_backend`.
 - **Phase 3:** removed the leftover AD scaffolding — `init.py`, `templates/`,
   `bin/ssm-report-init`. The vcm world uses `dirs.py` conventions, not `report.json`.
 
+## kateri launcher fix
+
+End-to-end surfaced a real bug in [`ae.utils.kateri`](../utils/kateri.py): `KATERI_EXE = "kateri"`
+resolves to the `/usr/local/bin/kateri` **symlink**, and macOS dyld derives `@executable_path`
+from the launch path (not the resolved target), so kateri can't find its Flutter frameworks
+(`@executable_path/../Frameworks` → `/usr/local/Frameworks`, missing) and never connects. Fixed by
+resolving the symlink: `KATERI_EXE = os.path.realpath(shutil.which("kateri") or "kateri")`.
+
 ## What remains
 
-- **End-to-end validation:** repoint a real report dir (`conference_data.py` /
-  `0do` imports) at `ae.report` and run `commander` `download`→`populate`→`style`→
-  `export`; needs the `kateri` executable + env (`$HIDB_V5`/`$LOCDB_V2`/`$WHOCC_TABLES_DIR`)
-  and, for trees/geo, TAL `tal-draw` + the `geo-draw` renderer.
 - **Geo renderer name:** `geographic.py` shells `geographic-draw` (AD's name); ae's is
   `geo-draw` (map-draw `cc/geo`) — update the command + wire the `--data` JSON flow.
+- **Tree/signature-page integration** with TAL `tal-draw` (charts → maps already proven).
 - A per-report **skeleton** (a `conference_data.py` subclass + subtype-modifier stubs)
   so a new report can bootstrap against `ae.report` — optional, owner's call.
 

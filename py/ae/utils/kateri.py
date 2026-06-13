@@ -1,4 +1,4 @@
-import sys, os, asyncio, subprocess, json
+import sys, os, shutil, asyncio, subprocess, json
 from pathlib import Path
 from typing import Optional, Callable, Any
 
@@ -6,7 +6,13 @@ import ae_backend.chart_v3
 
 # ======================================================================
 
-KATERI_EXE = "kateri"
+# Resolve the symlink (e.g. /usr/local/bin/kateri) to the real in-bundle
+# executable. macOS dyld derives @executable_path from the path passed to exec,
+# NOT the resolved symlink, so launching via the symlink makes
+# @executable_path/../Frameworks point at a non-existent dir and kateri fails to
+# load its Flutter frameworks. Launching via the real bundle path fixes this.
+_kateri = shutil.which("kateri")
+KATERI_EXE = os.path.realpath(_kateri) if _kateri else "kateri"
 
 # ----------------------------------------------------------------------
 
