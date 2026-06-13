@@ -275,8 +275,13 @@ same either way.
       `out.1.clades.pdf`**. Surfaced + fixed a kateri-launcher bug (symlink → `@executable_path`
       framework-load failure) in `ae.utils.kateri`. Per-report adaptation: the subtype modifier
       mixes in the concrete `ConferenceData` (`class H1_ChartModifier(ChartModifier, ConferenceData)`).
-- [ ] **Remaining:** switch `geographic.py`'s `geographic-draw` shell to ae's `geo-draw`;
-      TAL `tal-draw` tree/signature-page integration; optional per-report skeleton.
+- [x] **Geographic wired to `geo-draw`.** `geographic.make_geo` now extracts per-month
+      `{location, count}` from hidb, writes geo-draw's `--data` records JSON, and renders
+      `<geo_dir>/<subtype>-<YYYY-MM>.pdf` (continent-coloured, count-sized). Decoupled from
+      `ConferenceData`. **✅ Verified** on real H3 hidb. (Clade/lineage colouring awaits
+      geo-draw pies — continent colouring works now.)
+- [ ] **Remaining:** TAL `tal-draw` tree/signature-page integration; optional per-report
+      skeleton; geo clade/lineage colouring (geo-draw pies).
 - [ ] **Phase 4 — (separate) port `zero_do`** interactive adjustment AD→ae.
 
 ---
