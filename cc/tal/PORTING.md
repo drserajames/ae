@@ -258,14 +258,26 @@ the `cc/draw/` surface API."*
     node-mods. `load_vaccine_names` + `match_leaves_by_name` in `signature_page.py` (the latter
     needs `ae_backend`). **Verify (committed, synthetic):**
     `python3 cc/tal/test/test-mark-vaccines.py` → matches A,E from a fake list. **Verify
-    (real, one-off):** the real 38,128-leaf `bvic.after-2021.tjz` + real BV vaccines matched 7
-    leaves (AUSTRIA/1359417/2021 passages, SINGAPORE/WUH4618/2021, CONNECTICUT/1/2021) and
-    rendered a signature page (tree with the vaccines red + kateri map) in ~2 s — rasterised &
-    eyeballed. *(hidb reference-antigen auto-marking would reuse the same `match_leaves_by_name`
-    path; not yet wired.)*
-15. **Remaining (low-value tail):** `if`/`then` conditionals, `-D` defines, `clades-whocc`
-    built-in; hidb reference-antigen auto-marking; finer signature-page layout (map grids,
-    captions); the unported `DashBar`/`HzSections`/continent-colouring layout elements.
+    (real, one-off):** a real ~38k-leaf B/Vic tree + the real BV vaccine list matched 7 leaves
+    and rendered a signature page (vaccines red on the tree + kateri map) in ~2 s — rasterised &
+    eyeballed. (Counts only; per rule #8 no real strain names go in the repo.)
+15. **`--mark-reference` (hidb reference antigens) — DONE (mechanism), 0 useful hits on
+    current trees.** `--mark-reference SUBTYPE [--hidb-dir DIR] [--reference-tables N]` unions
+    the reference antigens of the most recent N hidb tables (`get_reference_antigen_names`, via
+    `HiDb.reference_antigens(table)` → `antigen.name_without_subtype()` so the format matches
+    leaf seq_ids), matches them with the same `match_leaves_by_name`, and marks them **blue** (vs
+    red for vaccines) — multiple coloured node-mod groups assembled by `_settings_with_mark_groups`.
+    `match_leaves_by_name` skips the few real-tree leaves carrying non-UTF-8 bytes. **Honest
+    finding:** hidb reference antigens are established **older anchor strains** (kept across HI
+    tables for comparability), so on a current-season tree (recent tips) they match **0** leaves —
+    expected, not a bug (the same `match_leaves_by_name` matched 7 *vaccine* leaves because
+    vaccines are recent). `get_reference_antigen_names` is verified to return the real hidb
+    reference panel; the feature would mark references on a tree that spans their era. *(The more
+    useful related feature for a current signature page would be marking a chart's own
+    antigens/sera on the tree — not yet built.)*
+16. **Remaining (low-value tail):** `if`/`then` conditionals, `-D` defines, `clades-whocc`
+    built-in; finer signature-page layout (map grids, captions); the unported
+    `DashBar`/`HzSections`/continent-colouring layout elements.
 
 ---
 

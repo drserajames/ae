@@ -33,8 +33,9 @@ from typing import Optional, Sequence
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TAL_DRAW = REPO_ROOT / "build" / "tal-draw"
 
-# Default highlight style for marked (e.g. vaccine/reference) strains.
+# Highlight styles. Explicit --mark and vaccines are red; hidb reference antigens blue.
 DEFAULT_MARK_STYLE = {"edge_color": "#e31a1c", "label_color": "#e31a1c", "label_scale": 1.4}
+REFERENCE_MARK_STYLE = {"edge_color": "#1f78b4", "label_color": "#1f78b4", "label_scale": 1.3}
 
 
 class SignaturePageError(RuntimeError):
@@ -203,27 +204,72 @@ def match_leaves_by_name(tree, names: Sequence[str]) -> list:
     wanted = {n.strip().upper().replace(" ", "_") for n in names if n.strip()}
     matched = []
     for ref in loaded.select_leaves():
-        seq_id = ref.name()
+        try:
+            seq_id = ref.name()
+        except UnicodeDecodeError:
+            continue  # a few real-tree leaves carry non-UTF-8 bytes; they're never vaccine/reference names
         upper = seq_id.upper()
         if any(upper == w or upper.startswith(w + "_") for w in wanted):
             matched.append(seq_id)
     return matched
 
 
+def get_reference_antigen_names(hidb_dir, subtype: str, n_recent_tables: int = 20) -> list:
+    """Reference antigen names for `subtype` from hidb — the union of the reference
+    antigens of the most recent `n_recent_tables` tables (the current reference panel).
+    Needs ae_backend + the hidb DBs (set hidb_dir or $HIDB_V5)."""
+    try:
+        import ae_backend
+    except ImportError as err:
+        raise SignaturePageError(f"--mark-reference needs ae_backend ({err}); run under the arm64 python3.10") from err
+    if hidb_dir:
+        ae_backend.hidb.set_dir(str(hidb_dir))
+    db = ae_backend.hidb.hidb(subtype)
+    n_tables = db.number_of_tables()
+    names = set()
+    for table_index in range(max(0, n_tables - max(1, n_recent_tables)), n_tables):
+        for antigen_index in db.reference_antigens(table_index):
+            # name_without_subtype: tree leaf seq_ids drop the "B/"/"A(H3N2)/" prefix
+            names.add(db.antigen(antigen_index).name_without_subtype())
+    return sorted(names)
+
+
+def _settings_with_mark_groups(settings: Optional[str], groups, tmpdir: Path) -> str:
+    """Write a temp tal-draw settings file = (the given settings, or {}) plus one node-mod
+    per (names, style) group, so different categories (vaccines, references, …) can be
+    highlighted in different colours."""
+    config = json.loads(Path(settings).read_text()) if settings else {}
+    config.setdefault("labels", True)
+    nodes = config.setdefault("nodes", [])
+    for names, style in groups:
+        names = list(names)
+        if names:
+            nodes.append({"select": {"seq_id": names}, "apply": dict(style)})
+    path = tmpdir / "tree-settings.json"
+    path.write_text(json.dumps(config, indent=1, ensure_ascii=False), encoding="utf-8")
+    return str(path)
+
+
 def make_signature_page(tree, output, *, maps: Sequence[os.PathLike] = (), chart=None, size: int = 1000,
                         settings: Optional[str] = None, mark: Optional[Sequence[str]] = None, mark_style: Optional[dict] = None,
                         mark_vaccines: Optional[str] = None, vaccines_file=None,
+                        mark_reference: Optional[str] = None, hidb_dir=None, reference_tables: int = 20,
                         style: str = "-", map_width: float = 800.0, tal_draw_args: Sequence[str] = (), frame: bool = False,
                         keep_temp: bool = False) -> Path:
     """Render the tree, obtain the map(s), and compose them into `output`."""
     tmpdir = Path(tempfile.mkdtemp(prefix="tal-sig-"))
     try:
-        marks = list(mark or [])
+        groups = []  # (names, style) — drawn as node-mods, each its own colour
+        if mark:
+            groups.append((list(mark), dict(mark_style or DEFAULT_MARK_STYLE)))
         if mark_vaccines:
             if not vaccines_file:
                 raise SignaturePageError("--mark-vaccines needs --vaccines-file (acmacs-data/semantic_vaccines.py)")
-            marks += match_leaves_by_name(tree, load_vaccine_names(vaccines_file, mark_vaccines))
-        tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size, settings=settings, mark=marks or None, mark_style=mark_style,
+            groups.append((match_leaves_by_name(tree, load_vaccine_names(vaccines_file, mark_vaccines)), dict(DEFAULT_MARK_STYLE)))
+        if mark_reference:
+            groups.append((match_leaves_by_name(tree, get_reference_antigen_names(hidb_dir, mark_reference, reference_tables)), dict(REFERENCE_MARK_STYLE)))
+        merged_settings = _settings_with_mark_groups(settings, groups, tmpdir) if groups else settings
+        tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size, settings=merged_settings, mark=None,
                                    tal_draw_args=tal_draw_args, _tmpdir=tmpdir)
         map_pdfs = [Path(m) for m in maps]
         if chart:
