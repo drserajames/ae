@@ -19,9 +19,9 @@ status, and respect the shared-file rules below.
 |---|-----------|-----------|-----:|-----------|-------|--------|
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
-| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1+M2 (tree+columns→PDF) done |
+| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1-M3 (signature-page elements) done |
 | 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; **map figures come from kateri** (chart → kateri socket → PDF, see `py/ae/utils/kateri.py`), **not** the shelved C++ map-draw #1 |
-| 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟡 code complete — HTTP/HTTPS verified; chart-data blocked on a `chart_v3` import abort in `ae_backend` (open bug, see §1 note) |
+| 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data endpoints verified end-to-end |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 
 Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
@@ -292,7 +292,7 @@ All AD hidb-5 tools are now ported.
 
 ---
 
-## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B M1+M2 done)*
+## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B M1-M3 done)*
 
 `ae` already has tree **manipulation** (Newick parse, fix-names, substitution-labels,
 to-json in `cc/tree/`). Missing: the tree **drawing** / signature-page / time-aware
@@ -353,10 +353,15 @@ C++ renderer; TAL composes them with the tree.
       (Phase A). CLI: `--color-by-clade --clades --time-series --interval=…`. Done with only
       the existing `line()`/`text()` primitives — **no `CairoPdf` change**. **Verify:**
       `sh cc/tal/test/test-draw-tree.sh`; 24-leaf 3-clade tree rasterised & eyeballed.
-- [ ] **Phase B M3+:** title/legend/aa-transition draw paths; then `AntigenicMaps`. Rotated
-      text + filled-rect primitives would unlock slot labels & clade arrows — add to
-      `CairoPdf` with #1 then.
-- [ ] Signature-page composition (`AntigenicMaps` — also needs map render + hidb #2).
+- [x] **Phase B M3 — title + legend + aa-transitions + rotated slot labels.** Added
+      `CairoPdf::rectangle()` + `text_rotated()` to the shared surface, then drew a centred
+      title (`--title=`), a clade legend (`--legend`), inode aa-transition labels
+      (`--aa-transitions`, ports `DrawAATransitions`), and rotated year/month slot labels.
+      **Verify:** `sh cc/tal/test/test-draw-tree.sh`; 24-leaf aa-annotated tree rendered as a
+      full signature-page-style figure & eyeballed.
+- [ ] **Phase B M4+ / Phase C:** settings-DSL configuration of the elements; label collision
+      avoidance; `AntigenicMaps` = embed **kateri**-rendered map PDFs (per §1 course-correction)
+      + hidb (#2) marks → the full signature page.
 
 ---
 
@@ -369,9 +374,13 @@ shared **report-assembly core** (`report.py` + `latex.py`) is what emits the fin
 - **AD source:** `~/AC/eu/AD/sources/ssm-report` (Python + LaTeX templates).
 - **ae target:** `py/ae/report/` — see [`py/ae/report/README.md`](py/ae/report/README.md)
   (full page-type → data-input table + the dependency boundary, produced by milestone 1).
-- **Depends on:** map-draw (#1) for the figures it embeds. The *assembly* layer is
-  independent and is now ported; figure *generation* (`map.py`, `maker.py`,
-  `geographic.py`, `signature_page.py`, `stat.py` writer) is blocked on #1.
+- **Figures (corrected — NOT map-draw #1):** the antigenic-map figures the report
+  embeds come from **kateri** (Dart map viewer/PDF generator), driven over a socket
+  via [`py/ae/utils/kateri.py`](py/ae/utils/kateri.py) — **not** the shelved C++
+  map-draw #1. Trees come from **TAL** (`tal-draw`, #3). The *assembly* + *scaffolding*
+  layers are ported and renderer-independent; what remains is a report-figure
+  pipeline (`map.py`/`maker.py`/`geographic.py`/`signature_page.py` + `stat.json.xz`
+  writer) rebuilt on kateri + `ae_backend` + TAL.
 - **Pure Python, no `meson.build` change** — imported from the `py/` source tree
   (run with `PYTHONPATH=build:py`); zero conflict risk with other agents.
 
@@ -393,18 +402,25 @@ shared **report-assembly core** (`report.py` + `latex.py`) is what emits the fin
       (`setup.json`, `index.html`, `README.org`, `root-gitignore`,
       `merges-index.html`), `bin/ssm-report-init`. Omits the site-specific infra
       (albertine git/db rsync, `rr`/`sy`/`rename-report-on-server` deploy scripts)
-      and the figure-settings half of `init_settings` (blocked on #1). **✅ Verified:**
+      and the figure-settings half of `init_settings` (part of the not-yet-ported
+      figure pipeline). **✅ Verified:**
       scaffolds dirs+templates and writes substituted `report.json`/`setup.json`;
       date logic unit-checked (Northern/Southern season, teleconference, Oct year
       split); the generated 233-page `report.json` round-trips through the assembler
       (`read_json` + `LatexReport` ctor, correct `ts_dates`).
-- [ ] **(BLOCKED on #1)** Wire figure generation (`map.py`/`maker.py`/`geographic.py`/
-      `signature_page.py` + `stat.json.xz` writer) onto `ae_backend` + the `chart-draw`
-      path. **Verify:** generates a full PDF report from a sample dataset.
+- [ ] **Build the report-figure pipeline (kateri-based, not map-draw).** Load charts
+      via `ae_backend.chart_v3`, drive **kateri** through [`ae.utils.kateri`](py/ae/utils/kateri.py)
+      (`send_chart` → `set_style` → `get_pdf`) to emit the antigenic-map PDFs at the
+      filenames `report.py` expects (`<subtype>-<assay>/clade-<lab>.pdf`,
+      `ts-<lab>-<YYYY-MM>.pdf`, …); embed **TAL** tree PDFs (#3); port the `stat.json.xz`
+      counts writer. Open questions: geographic maps have no ae renderer yet (kateri does
+      maps, not geography); depends on `kateri` being installed and on the
+      `ae_backend.chart_v3.Chart(<file>)` import-abort bug (TODO.md §1). **Verify:**
+      generates a full PDF report from a sample dataset.
 
 ---
 
-## 5. webserver — HTTPS chart serving  *(owner: webserver agent — 🟡 core done)*
+## 5. webserver — HTTPS chart serving  *(owner: webserver agent — 🟢 done)*
 
 - **AD source:** `~/AC/eu/AD/sources/acmacs-webserver`.
 - **ae target:** **`py/ae/webserver/`** (Python rewrite over `ae_backend`) +
@@ -433,18 +449,19 @@ re-hosted behind FastAPI/ASGI later without changing clients.
 - [x] **M1 — Decide: port C++ server vs Python rewrite.** → Python rewrite over `ae_backend`
       (rationale above).
 - [x] **M2 — Implement chart-serving endpoint.** HTTP/HTTPS server, chart listing, info/table
-      JSON + HTML pages, path-traversal protection. **Verify:** ✅ HTTP layer end-to-end via the
-      real `bin/chart-serve` + `curl` (`PYTHONPATH=build bin/chart-serve test/`) —
-      `/healthz`→ok, `/api/charts` lists `test/chart1.ace`, `/`→index HTML 200, `/nope`→404,
-      missing-path→400, `../CLAUDE.md`→403; **HTTPS** verified with a self-signed cert
-      (`https://…/healthz`→200 over TLS). The chart **data** endpoints
-      (`/api/chart/info|table`) call `ae_backend.chart_v3.Chart(...)`, which currently
-      **aborts at construction** in this environment (SIGABRT, no message) — a **pre-existing**
-      issue: `bin/chart-info test/chart1.ace` aborts identically (build `.so` is from Jun 10,
-      stale vs source). Once the backend loads charts, these endpoints return data with no code
-      change (they use only documented `chart_v3` APIs).
-- [ ] **M3 (optional, future):** websocket/live-reload parity with AD, or FastAPI/ASGI host if
-      a production deployment model is chosen; serve rendered map PDFs once map-draw (#1) lands.
+      JSON + HTML pages, path-traversal protection. **✅ Verified end-to-end** (after the §1
+      `chart_v3` import-abort fix) via the real `bin/chart-serve` + `curl`
+      (`PYTHONPATH=build bin/chart-serve <dir>`):
+      - HTTP layer: `/healthz`→ok, `/api/charts` lists the dir's charts, `/`→index HTML 200,
+        `/nope`→404, missing-path→400, `../CLAUDE.md`→403; **HTTPS** with a self-signed cert
+        (`https://…/healthz`→200 over TLS).
+      - **Chart data (now working):** `/api/chart/info?path=chart1-relaxed.ace` → correct name,
+        22 ag / 10 sr / 10 proj, projection 0 stress **66.1247** (2d, mcb none), antigen/serum
+        metadata; `/api/chart/table` → full 22×10 titer matrix with encodings preserved
+        (`<40` kept as string, not coerced); `/chart` HTML page → 200.
+- [ ] **M3 (optional, future):** websocket/live-reload parity with AD, or FastAPI/ASGI host if a
+      production deployment model is chosen. **Map figures, if ever embedded, come from `kateri`**
+      (chart → kateri socket → PDF, see `py/ae/utils/kateri.py`), not the shelved C++ map-draw #1.
 
 ---
 
