@@ -7,7 +7,7 @@ import sys, re, subprocess, datetime, collections, itertools, pprint, json
 # (acmacs_base.json.read_json) and the lab-name dict (imported from the
 # figure-generation module .map) are replaced by the self-contained helpers in
 # this package, so the report-assembly core has no dependency on the
-# not-yet-ported map-draw subsystem.
+# figure-generation modules — it only embeds the PDFs they produce.
 from .jsonio import read_json
 from . import latex
 from .labs import sLabDisplayName

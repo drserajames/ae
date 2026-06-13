@@ -8,9 +8,11 @@ trees, geographic time series, signature pages) and assembles them into a single
 LaTeX document that is compiled with ``pdflatex`` into the final report PDF.
 
 The figure *generation* side of AD ssm-report (map.py, maker.py, commands.py,
-stat.py, geographic.py, signature_page.py) depends on the map-drawing subsystem
-(`cc/draw` + `cc/map-draw`, TODO.md item #1) and is therefore not yet ported —
-see README.md for the full status and the dependency boundary.
+stat.py, geographic.py, signature_page.py) is not yet ported. The figures it
+would produce now come from different places in ae: antigenic-map PDFs from
+**kateri** (the Dart map viewer/PDF generator, driven over a socket via
+``ae.utils.kateri``), phylogenetic trees from **TAL** (``tal-draw``, TODO.md #3).
+See README.md for the full status and the dependency boundary.
 
 Public entry points:
     make_report(...)        — build + compile + view a report from report.json

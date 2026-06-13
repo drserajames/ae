@@ -16,9 +16,10 @@ What is intentionally NOT ported here:
   (they invoke ``ssm-make`` / ``ssh i19`` / ``syput``).
 * The figure-generation settings templates (``h3-hi.json``, ``vaccines.*``,
   ``serology.*`` …) and the ``init_settings`` serum-coverage / geographic
-  sub-makers — these belong to the map/maker pipeline that is blocked on
-  map-draw (TODO.md #1). They are not copied because they reference ae tooling
-  that does not exist yet.
+  sub-makers — these belong to the map/maker pipeline, which is not yet ported.
+  In ae the antigenic-map figures come from kateri (driven via
+  ``ae.utils.kateri``) rather than the AD ``acmacs-map-draw`` settings, so these
+  templates are deliberately not copied until that pipeline is rebuilt.
 
 Usage:
 

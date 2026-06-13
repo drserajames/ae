@@ -6,8 +6,9 @@ subsystem **#4**.
 This package currently contains the **report-assembly core**: it takes a
 `report.json` settings file plus a directory of pre-generated figure PDFs and
 assembles them into one LaTeX document, compiled with `pdflatex` into the final
-report PDF. The figure-*generation* half of AD ssm-report is **not yet ported**
-because it depends on the map-drawing subsystem (TODO.md #1) — see
+report PDF. The figure-*generation* half of AD ssm-report is **not yet ported**;
+in ae the figures it produces come from elsewhere (antigenic maps from **kateri**,
+trees from **TAL**) rather than the AD `acmacs-map-draw` pipeline — see
 [Dependency boundary](#dependency-boundary) below.
 
 ## Usage
@@ -91,29 +92,34 @@ dispatches to a `LatexReport.make_<type>` method. A leading `?` on a `type` (or 
 ## Dependency boundary
 
 **Ported now (this package):** everything that turns a `report.json` + existing
-PDFs into the final report PDF. Verifiable with no map-draw present (see below).
+PDFs into the final report PDF — and the working-dir scaffolding that produces
+`report.json` / `setup.json`. Both halves are verifiable with no figure-renderer
+present (see below). The site-specific infra `init.py` omits (a bare git repo +
+hidb/seqdb/locationdb rsync from the CPE `albertine` host; the
+`rr`/`sy`/`rename-report-on-server` deploy scripts that shell out to
+`ssm-make`/`ssh i19`/`syput`) is left to the operator — see the `init.py`
+docstring.
 
-Also ported: the unblocked parts of AD `init.py` — working-dir scaffolding +
-`report.json` / `setup.json` templating (`init.py`, above). The site-specific
-infra steps it omits (a bare git repo + hidb/seqdb/locationdb rsync from the CPE
-`albertine` host; the `rr`/`sy`/`rename-report-on-server` deploy scripts that
-shell out to `ssm-make` / `ssh i19` / `syput`) are left to the operator, and the
-`init_settings` serum-coverage/geographic sub-makers wait on map-draw — see the
-`init.py` module docstring.
+**Not yet ported — the figure-*generation* modules** that produce the PDFs the
+assembler embeds. These do **not** depend on the (shelved) C++ map-draw subsystem;
+in ae the figures come from different renderers, so each needs rebuilding on the
+ae side rather than a straight AD port:
 
-**Not yet ported — blocked on map-draw (#1):** the modules that *produce* the
-figure PDFs the assembler embeds —
-- `map.py` / `maker.py` — antigenic maps & time series (needs `cc/map-draw`)
-- `signature_page.py` — tree + signature-page rendering (also needs TAL, #3)
-- `geographic.py` — geographic time-series maps
-- `stat.py` — `stat.json.xz` generation (counts; the *reader* is already ported
-  here in `StatisticsTableMaker`)
-- `serum_coverage.py`, the `commands.py` / `maker.py` orchestration, and the
-  figure-settings half of `init_settings`
+| AD module | produces | ae source of the figure |
+|-----------|----------|--------------------------|
+| `map.py` / `maker.py` | antigenic maps & time series | **kateri** — the Dart map viewer/PDF generator (`drserajames/kateri`), driven over a Unix socket via [`ae.utils.kateri`](../utils/kateri.py) (`send_chart` → `set_style` → `get_pdf`). Not yet wired into a report-figure pipeline. |
+| `signature_page.py` | trees + signature pages | **TAL** (`tal-draw`, TODO.md #3 — Phase B in progress) |
+| `geographic.py` | geographic time-series maps | no ae renderer yet — open question (kateri does maps, not geography) |
+| `stat.py` | `stat.json.xz` (counts) | needs `ae_backend` chart counting; the *reader* is already ported here in `StatisticsTableMaker` |
+| `serum_coverage.py`, `commands.py`/`maker.py` orchestration, the figure half of `init_settings` | per-serum coverage maps + the overall maker driver | depends on the above |
 
-These need `ae_backend` chart/map APIs that don't exist until map-draw lands.
-The natural next milestone is to wire figure generation onto `ae_backend` + the
-`chart-draw` path as map-draw M2+ matures.
+**Next milestone:** build a report-figure pipeline that loads charts via
+`ae_backend.chart_v3`, drives **kateri** through `ae.utils.kateri` to emit the
+antigenic-map PDFs at the filenames `report.py` expects
+(e.g. `<subtype>-<assay>/clade-<lab>.pdf`, `ts-<lab>-<YYYY-MM>.pdf`), and embeds
+TAL tree PDFs. (Caveat: this depends on the `kateri` executable being installed,
+and on the open `ae_backend.chart_v3.Chart(<file>)` import-abort bug noted in
+TODO.md §1.)
 
 ## Verification
 
@@ -121,8 +127,8 @@ The natural next milestone is to wire figure generation onto `ae_backend` + the
 (standing in for a real map/tree): a minimal `report.json` covering `cover`,
 `toc`, sections, descriptions, an embedded `pdf`, a `maps` grid and `raw`/`latex`
 blocks assembles and compiles cleanly to a **6-page PDF** via `pdflatex`. This
-requires a TeX installation (`pdflatex` on `PATH`) but **no** map-draw and **no**
-`ae_backend`. `--no-compile` produces just the `.tex` and needs neither.
+requires a TeX installation (`pdflatex` on `PATH`) but **no** figure renderer and
+**no** `ae_backend`. `--no-compile` produces just the `.tex` and needs neither.
 
 **Scaffolding (`init.py`)** — `bin/ssm-report-init --working-dir 2026-0219`
 creates the subdirs + static templates and writes a `report.json` / `setup.json`
@@ -131,5 +137,5 @@ The date logic is unit-checked against AD semantics (Northern/Southern season,
 teleconference selection, the October year split). The generated 233-page
 `report.json` round-trips through the assembler's `read_json` and constructs a
 `LatexReport` with the correct `ts_dates` — proving the init→assembly handoff
-with no figure data. (A *full* compile of that template still needs the blocked
-figure/stat PDFs.)
+with no figure data. (A *full* compile of that template still needs the figure
+and stat PDFs from the not-yet-ported figure-generation pipeline.)

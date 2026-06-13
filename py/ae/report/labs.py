@@ -3,8 +3,7 @@ Lab-name constants used by the report assembler.
 
 Extracted from AD ssm-report's ``map.py`` (sLabDisplayName) and ``stat.py``
 (sLabOrder) so that the report-assembly core (report.py) does not have to import
-the figure-generation modules, which depend on the not-yet-ported map-draw
-subsystem.
+the figure-generation modules.
 """
 
 # Mapping from internal lab code (upper-case) to the display name used in the
