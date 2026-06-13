@@ -238,8 +238,16 @@ the `cc/draw/` surface API."*
     `py/ae/utils/kateri.py`). **Verify:** `sh cc/tal/test/test-signature-page.sh` (skips if
     pdfjam/tal-draw absent); a 24-leaf tree + stand-in map with S5/S12/S20 marked was
     rasterised & eyeballed — tree left (marked strains red/enlarged), map right, one page.
-    - *kateri path is wired to the protocol but not runnable here (no `kateri` on PATH); the
-      `--map` (pre-rendered) path — how the report already consumes map PDFs — is verified.*
+    - **kateri path verified live.** `--chart CHART.ace` renders the antigenic map via kateri
+      and composes it beside the tree. **Verified end-to-end**: an optimized `test/chart1.ace`
+      → kateri PDF → signature page (tree left + the real antigenic map right: green test
+      antigens, open reference circles, serum squares; rasterised & eyeballed). Two launch
+      requirements found: (1) kateri is a Flutter **GUI** app that connects only after its
+      window builds, so on macOS it must be launched via **`open -n -a kateri.app --args
+      --socket …`** (a bare subprocess gets no Aqua session and never connects) —
+      `render_map_via_kateri` resolves the `.app` from the on-PATH `kateri` symlink and does
+      this; (2) the `--chart` path imports `ae_backend`, so run it under the arm64 **python3.10**
+      (the `--map` path is pure-stdlib and runs anywhere).
 14. **Remaining (low-value tail):** `if`/`then` conditionals, `-D` defines, WHOCC
     `clades-whocc`/`vaccines` built-ins; finer signature-page layout (map grids, captions).
 

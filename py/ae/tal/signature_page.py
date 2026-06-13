@@ -105,39 +105,63 @@ def compose_side_by_side(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, 
     return Path(out_pdf)
 
 
-def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 800.0) -> Path:
+def _kateri_app_bundle(kateri_exe: str) -> Optional[Path]:
+    """Resolve the .app bundle containing the kateri executable (the on-PATH `kateri`
+    is a symlink into kateri.app/Contents/MacOS/kateri)."""
+    resolved = Path(kateri_exe).resolve()
+    for parent in (resolved, *resolved.parents):
+        if parent.suffix == ".app":
+            return parent
+    return None
+
+
+def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 800.0, connect_timeout: float = 60.0) -> Path:
     """Render an antigenic map for `chart` to `out_pdf` using kateri over its unix socket.
 
-    Requires the `kateri` executable on PATH. Faithful to py/ae/utils/kateri.py's
-    protocol (start kateri --socket, run a unix-socket server, send CHRT, request a PDF),
-    but not runnable where kateri is absent — pass a pre-rendered PDF via `maps=` instead.
+    Requires the `kateri` executable on PATH. Implements py/ae/utils/kateri.py's protocol:
+    run a unix-socket server, launch kateri (which connects back as a client and sends
+    HELO), send the chart, request a PDF. kateri is a Flutter GUI app and connects only
+    after its window builds, so on macOS it is launched via `open` (which gives it a GUI
+    session) rather than as a bare subprocess.
     """
     import asyncio
 
-    _require("kateri", "install kateri (github.com/drserajames/kateri) or pass a pre-rendered map via --map")
-    import ae_backend  # noqa: F401 — needed to load the chart
-    from ae.utils import kateri as K
+    exe = _require("kateri", "install kateri (github.com/drserajames/kateri) or pass a pre-rendered map via --map")
+    try:
+        import ae_backend  # needed to load/export the chart
+        from ae.utils import kateri as K
+    except ImportError as err:
+        raise SignaturePageError(
+            f"the --chart/kateri path needs ae_backend ({err}); run under the Python that can import it "
+            "(e.g. the arm64 python3.10 with PYTHONPATH=build), or pass a pre-rendered map via --map") from err
+
+    app_bundle = _kateri_app_bundle(exe)
 
     async def _run() -> bytes:
         socket_dir = tempfile.mkdtemp(prefix="kateri-sock-")
         socket_name = os.path.join(socket_dir, "kateri.sock")
         server = await asyncio.start_unix_server(K.communicator.connected, socket_name)
-        proc = await asyncio.create_subprocess_exec(K.KATERI_EXE, "--socket", socket_name)
+        direct = None
         try:
-            for _ in range(600):  # wait up to ~60s for kateri to connect
-                if K.communicator.is_connected():
-                    break
+            if app_bundle is not None:  # macOS GUI app — launch via `open` for an Aqua session
+                opener = await asyncio.create_subprocess_exec("open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name)
+                await opener.wait()
+            else:  # non-bundle / non-macOS build — launch directly
+                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name)
+            waited = 0.0
+            while not K.communicator.is_connected():
+                if waited >= connect_timeout:
+                    raise SignaturePageError(f"kateri did not connect to the socket within {connect_timeout:.0f}s")
                 await asyncio.sleep(0.1)
-            else:
-                raise SignaturePageError("kateri did not connect to the socket within 60s")
+                waited += 0.1
             K.communicator.send_chart(ae_backend.chart_v3.Chart(str(chart)))
             pdf_bytes = await K.communicator.get_pdf(style=style, width=width)
-            K.communicator.quit()
+            K.communicator.quit()  # tells kateri to exit
             return pdf_bytes
         finally:
             server.close()
-            if proc.returncode is None:
-                proc.terminate()
+            if direct is not None and direct.returncode is None:
+                direct.terminate()
             shutil.rmtree(socket_dir, ignore_errors=True)
 
     Path(out_pdf).write_bytes(asyncio.run(_run()))
