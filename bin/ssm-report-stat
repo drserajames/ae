@@ -1,0 +1,18 @@
+#! /usr/bin/env python3
+"""
+Write stat.json.xz (antigen/sera counts by virus type / lab / date / continent)
+from hidb — the data the SSM report's statistics tables are built from. ae port
+of AD's hidb5-stat.
+
+Needs Python 3.10 (the ae_backend extension), a hidb directory ($HIDB_V5 or
+--db-dir) and locationdb ($LOCDB_V2 or --locdb). ae_backend is loaded from this
+repo's build/ automatically.
+
+  PYTHONPATH=py bin/ssm-report-stat --db-dir <hidb> --locdb <locationdb.json.xz> \
+      --start 2025-08 --end 2026-03 stat/stat.json.xz
+"""
+import sys
+from ae.report.stat import main
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -44,12 +44,14 @@ make_report(source_dir=Path("."), source_dir_2=Path(""),
 | `report.py` | `LatexReport` page-by-page assembler, the signature-page / serum-coverage addendum subclasses, and `StatisticsTableMaker`. Ported from AD `report.py`. |
 | `latex.py` | LaTeX template strings (`T_Head`, `T_Cover`, `T_Section`, descriptions, table/figure environments, …). Ported **verbatim** from AD `latex.py`. |
 | `init.py` | Working-dir scaffolding: subdirs, static templates, and the date-substituted `report.json` / `setup.json`. Ported from the unblocked parts of AD `init.py`. |
+| `stat.py` | **`stat.json.xz` writer** (`make_stat_json` / `make_stat`): antigen/sera counts by virus type / lab / date / continent, from `ae_backend.hidb` + `locdb_v3`. Port of AD's C++ `hidb5-stat`. Feeds `StatisticsTableMaker`. |
 | `labs.py` | Lab-name constants (`sLabDisplayName`, `sLabOrder`). Extracted from AD `map.py`/`stat.py` so the assembler doesn't import the figure-generation modules. |
 | `jsonio.py` | `read_json` replacing AD `acmacs_base.json.read_json`: transparent `.xz`/`.bz2` decompression + comment/trailing-comma tolerance. |
 | `cli.py` | `--working-dir` command-line entry point for *assembly* (mirrors AD `bin/report-simple`, plus `--no-compile`/`--no-view`). |
 | `templates/` | Reference templates copied from AD `template/`: `report.json` (canonical page sequence), `setup.json`, `index.html`, `README.org`, `root-gitignore`, `merges-index.html`. |
 
-`bin/ssm-report-init` scaffolds a working dir; `bin/ssm-report` assembles it.
+`bin/ssm-report-init` scaffolds a working dir; `bin/ssm-report` assembles it;
+`bin/ssm-report-stat` writes `stat/stat.json.xz` from hidb.
 
 The only deviation from the AD source is the import wiring (`jsonio`/`labs`
 instead of `acmacs_base` / the `.map` figure module); the emitted LaTeX is
@@ -110,7 +112,7 @@ ae side rather than a straight AD port:
 | `map.py` / `maker.py` | antigenic maps & time series | **kateri** — the Dart map viewer/PDF generator (`drserajames/kateri`), driven over a Unix socket via [`ae.utils.kateri`](../utils/kateri.py) (`send_chart` → `set_style` → `get_pdf`). Not yet wired into a report-figure pipeline. |
 | `signature_page.py` | trees + signature pages | **TAL** (`tal-draw`, TODO.md #3 — Phase B in progress) |
 | `geographic.py` | geographic time-series maps | **no ae renderer yet** — and *not* a kateri job (kateri draws antigenic maps, not world geography). In AD this was a separate `geographic-draw` binary (acmacs-draw/acmacs-map-draw), see note below. On the ae side it would be a small standalone Cairo renderer reusing `cc/draw/cairo-surface.*` (the kept surface, also used by TAL) + `locdb_v3` + hidb (#2) + seqdb. |
-| `stat.py` | `stat.json.xz` (counts) | needs `ae_backend` chart counting; the *reader* is already ported here in `StatisticsTableMaker` |
+| `stat.py` | `stat.json.xz` (counts) | **ported** → `stat.py` here (`make_stat_json`, `bin/ssm-report-stat`), from `ae_backend.hidb` + `locdb_v3`. ⚠ B counts pending an open hidb B-load bug (`STRING_ERROR`); H1/H3 work. |
 | `serum_coverage.py`, `commands.py`/`maker.py` orchestration, the figure half of `init_settings` | per-serum coverage maps + the overall maker driver | depends on the above |
 
 **How AD rendered the geographic maps** (for when this is rebuilt): `geographic.py`
@@ -153,3 +155,12 @@ teleconference selection, the October year split). The generated 233-page
 `LatexReport` with the correct `ts_dates` — proving the init→assembly handoff
 with no figure data. (A *full* compile of that template still needs the figure
 and stat PDFs from the not-yet-ported figure-generation pipeline.)
+
+**Stat writer (`stat.py`)** — run against the real H1/H3 hidb over a date window,
+the output satisfies the cross-product invariants (Σ virus-types = `all`;
+Σ labs = `all` lab; Σ continents ≤ `all` continent; Σ months = year; `sera_unique`
+≥ name-deduped `sera`), and feeds straight into `StatisticsTableMaker` to render a
+real LaTeX statistics table. Needs Python 3.10 + `ae_backend`, a hidb dir and
+locationdb — but **not** `chart_v3`, so it is unaffected by the chart-import bug.
+(B is currently skipped: the B hidb fails to load in `ae_backend.hidb` —
+`STRING_ERROR` — an open hidb-side bug; H1/H3 are complete.)

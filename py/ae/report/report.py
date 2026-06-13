@@ -579,6 +579,10 @@ class StatisticsTableMaker:
             previous_sum = collections.defaultdict(int)
         else:
             previous_data_antigens, previous_data_sera_unique, previous_data_sera = {}, {}, {}
+            # previous_sum is referenced unconditionally for the total line below; in the
+            # no-previous case it stays all-zero and make_line ignores it (AD omitted this,
+            # making the no-previous path raise UnboundLocalError).
+            previous_sum = collections.defaultdict(int)
         r = [self.make_header()]
         for date in self.make_dates(data_antigens):
             r.append(self.make_line(date, data_antigens=data_antigens.get(date, {}), data_sera=data_sera.get(date, {}), data_sera_unique=data_sera_unique.get(date, {}), previous_data_antigens=previous_data_antigens.get(date, {}), previous_data_sera=previous_data_sera.get(date, {}).get('all', 0), previous_data_sera_unique=previous_data_sera_unique.get(date, {}).get('all', 0)))
@@ -632,9 +636,13 @@ class StatisticsTableMaker:
                 data.append( r'\WhoccStatisticsTableCellTwo{{{}}}{{{}}}'.format(data_sera.get('all', 0), data_sera.get('all', 0) - previous_data_sera))
                 data.append( r'\WhoccStatisticsTableCellTwo{{{}}}{{{}}}'.format(data_sera_unique.get('all', 0), data_sera_unique.get('all', 0) - previous_data_sera_unique))
         else:
-            data.extend([r'\WhoccStatisticsTableCellTwo{{{}}}{{{}}}'.format(data_antigens.get(continent, 0)) for continent in self.sContinents[:-2]])
-            data.append( r'\WhoccStatisticsTableCellTwo{{{}}}{{{}}}'.format(data_sera.get('all', 0)))
-            data.append( r'\WhoccStatisticsTableCellTwo{{{}}}{{{}}}'.format(data_sera_unique.get('all', 0)))
+            # No previous report: render the count alone (no "( diff )"). AD used the
+            # 2-arg \WhoccStatisticsTableCellTwo here with a single value, which crashes
+            # (1 arg to a 2-placeholder format). Use the 1-arg \WhoccStatisticsTableCellOne
+            # macro (#1 & & & &) — same 5-column width, so table alignment is unchanged.
+            data.extend([r'\WhoccStatisticsTableCellOne{{{}}}'.format(data_antigens.get(continent, 0)) for continent in self.sContinents[:-2]])
+            data.append( r'\WhoccStatisticsTableCellOne{{{}}}'.format(data_sera.get('all', 0)))
+            data.append( r'\WhoccStatisticsTableCellOne{{{}}}'.format(data_sera_unique.get('all', 0)))
         return '  ' + ' & '.join(data) + ' \\\\'
 
     def make_dates(self, data, **sorting):

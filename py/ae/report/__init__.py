@@ -32,6 +32,7 @@ from .report import (
     StatisticsTableMaker,
 )
 from .init import init, make_report_json, compute_substitutions
+from .stat import make_stat, make_stat_json, write_stat
 
 __all__ = [
     "make_report",
@@ -47,4 +48,7 @@ __all__ = [
     "init",
     "make_report_json",
     "compute_substitutions",
+    "make_stat",
+    "make_stat_json",
+    "write_stat",
 ]
