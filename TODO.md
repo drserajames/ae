@@ -62,9 +62,10 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 > not a porting gap — my original "biggest gap" framing was wrong.
 >
 > **Consequences:**
-> - **`cc/map-draw/`** (`draw.cc`/`draw.hh`/`chart-draw-main.cc` + the `chart-draw` target) is
->   **redundant** with kateri → **shelved** (M1–M4 below kept for reference / possible headless
->   fallback; do not invest further; not merged to `main`).
+> - **`cc/map-draw/`** (`draw.cc`/`draw.hh`/`chart-draw-main.cc` + the `chart-draw` target) was
+>   **redundant** with kateri → **removed from this branch** (`ad-port`). The full M1–M4 code is
+>   **preserved on the `map-draw-shelved` branch** (`drserajames/map-draw-shelved`) if ever needed
+>   as a headless fallback. The M1–M4 milestone notes below are kept here for history.
 > - **`cc/draw/cairo-surface.*` is KEPT and is shared infrastructure.** kateri does **not** draw
 >   trees, so TAL (#3) renders trees in C++ using this exact surface — `cc/tal/draw-tree.cc`
 >   already `#include`s it and calls `pdf.line()/text()/background()`. The Cairo work was *not*

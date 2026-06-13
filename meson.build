@@ -285,18 +285,10 @@ chart_relax = executable(
   link_with : [libae],
   install : true)
 
-# ----------------------------------------------------------------------
-# map-draw (see TODO.md subsystem #1) — minimal chart -> PDF renderer.
-# Cairo is linked only into this target, not into libae or ae_backend.
-# ----------------------------------------------------------------------
-
-chart_draw = executable(
-  'chart-draw',
-  sources : ['cc/map-draw/chart-draw-main.cc', 'cc/map-draw/draw.cc', 'cc/draw/cairo-surface.cc'],
-  include_directories : include_cc,
-  dependencies : [fmt, range_v3, simdjson, cairo],
-  link_with : [libae],
-  install : true)
+# map-draw (subsystem #1) was removed — antigenic-map drawing lives in kateri (see TODO.md
+# §1). The Cairo surface it introduced (cc/draw/cairo-surface.*) is retained as shared
+# infrastructure and is consumed by tal-draw below. Map-draw code is preserved on the
+# `map-draw-shelved` branch.
 
 # --- tal (subsystem #3) — Phase B M1: tree -> PDF renderer. Cairo linked only here. ---
 tal_draw = executable(
