@@ -224,10 +224,24 @@ the `cc/draw/` surface API."*
     900 px hid 125/250 overlapping labels — rasterised & eyeballed (off = unreadable smear,
     on = cleanly spaced); the full tree/edges are always drawn, only labels thin.
 
-11. **M3+ (next):** remaining mod-pipeline features if needed — `if`/`then` conditionals,
-    `-D` command-line defines, and the WHOCC `clades-whocc`/`vaccines` built-ins — layered on
-    this declarative base; plus `AntigenicMaps` (now unblocked — hidb #2 is done and kateri is
-    available for the embedded map PDFs).
+**Signature page (acmacs-tal `AntigenicMaps`):**
+13. **Tree + antigenic-map composition — DONE.** [`bin/tal-signature-page`](../../bin/tal-signature-page)
+    + [`py/ae/tal/signature_page.py`](../../py/ae/tal/signature_page.py). In ae the two halves
+    come from separate tools — the **tree** from `tal-draw` (this subsystem), **antigenic maps**
+    from **kateri** (the Dart map/PDF generator) — so the page is composed at the **PDF level**
+    (not on one Cairo surface as AD did): render the tree → obtain the map PDF(s) → compose
+    tree (left) + map(s) (right) on one landscape page with `pdfjam`. The output is exactly what
+    `py/ae/report`'s `signature_page` page type embeds via `image:`. Supports `--mark ID,…` to
+    highlight vaccine/reference strains on the tree (generates node-mods, merged into the
+    settings) — the hook for **hidb (#2)** identification. The map source is `--map PDF`
+    (pre-rendered) or `--chart ACE` (rendered via kateri over its unix socket per
+    `py/ae/utils/kateri.py`). **Verify:** `sh cc/tal/test/test-signature-page.sh` (skips if
+    pdfjam/tal-draw absent); a 24-leaf tree + stand-in map with S5/S12/S20 marked was
+    rasterised & eyeballed — tree left (marked strains red/enlarged), map right, one page.
+    - *kateri path is wired to the protocol but not runnable here (no `kateri` on PATH); the
+      `--map` (pre-rendered) path — how the report already consumes map PDFs — is verified.*
+14. **Remaining (low-value tail):** `if`/`then` conditionals, `-D` defines, WHOCC
+    `clades-whocc`/`vaccines` built-ins; finer signature-page layout (map grids, captions).
 
 ---
 
