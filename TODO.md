@@ -48,6 +48,13 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
    criteria. A subsystem is not "done" until it compiles in the arm64 build *and* its
    verification command produces the expected output.
 7. **Update this file** as you complete milestones (check the boxes).
+8. **No real surveillance data in committed files.** Keep real strain names, titers, serum
+   IDs, lab data, and sequences out of source, docs (incl. this file), comments, and test
+   fixtures — use synthetic placeholders (e.g. `A(H3N2)/<CITY>/N/YYYY`, `<SERUM_ID>`) or
+   clearly-synthetic test data (like `test/chart1.ace`, which uses German-city names in
+   rank order). Real DB files (`acmacs-data/…`, locdb/hidb/seqdb) are read-only **inputs**,
+   never copied into the repo. When verifying against real data, describe the *result*
+   (counts/outcomes), don't paste the data.
 
 ---
 
@@ -364,11 +371,21 @@ C++ renderer; TAL composes them with the tree.
       into one signature-page PDF via `pdfjam` — the PDF the report's `signature_page` page
       embeds. Maps from `--map` (pre-rendered) or `--chart` (kateri over its socket); `--mark`
       highlights vaccine/reference strains on the tree (node-mods, the hidb hook). **Verify:**
-      `sh cc/tal/test/test-signature-page.sh`; tree + stand-in map with marked strains
-      eyeballed. (kateri path wired but needs `kateri` on PATH; `--map` path verified.)
-- [ ] **Remaining (low-value tail):** mod-pipeline `if/then` / `-D` defines /
-      `clades-whocc`/`vaccines`; finer signature-page layout (map grids/captions); live kateri
-      end-to-end once a `kateri` binary is on PATH.
+      `sh cc/tal/test/test-signature-page.sh` (`--map` path); **and verified live end-to-end
+      with kateri** — optimized `test/chart1.ace` → kateri map → tree+map signature page,
+      rasterised & eyeballed. (kateri is a Flutter GUI app: launched via `open -n -a
+      kateri.app --args --socket …`; the `--chart` path needs `ae_backend`, so run under
+      arm64 python3.10.)
+- [x] **`--mark-vaccines` (WHOCC vaccine strains) — real-data verified.** Reads
+      acmacs-data's `semantic_vaccines.py` (`sData[subtype]`, the modern `vaccines.json`),
+      matches against leaf seq_ids, marks them. **Verify:** `cc/tal/test/test-mark-vaccines.py`
+      (synthetic); one-off on the real 38k-leaf bvic tree matched 7 BV vaccine leaves and rendered
+      a signature page (vaccines red + kateri map) — eyeballed. Live kateri now also covered by
+      the opt-in `cc/tal/test/test-signature-page-kateri.sh` (`TAL_TEST_KATERI=1`).
+- [ ] **Remaining (low-value tail):** mod-pipeline `if/then` / `-D` defines / `clades-whocc`
+      built-in; hidb reference-antigen auto-marking (same match path as `--mark-vaccines`);
+      finer signature-page layout (map grids/captions); the unported `DashBar` / `HzSections` /
+      continent-colouring layout elements.
 
 ---
 
