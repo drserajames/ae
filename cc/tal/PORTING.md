@@ -298,9 +298,23 @@ the `cc/draw/` surface API."*
     common = grey, variants pop), with the position label below. Settings key `"dash_bars"`,
     CLI `--dash-bar=POS`. **Verify:** `sh cc/tal/test/test-draw-tree.sh` (dash-bar case) on the
     aa-sequence tree (pos 3: T grey, the A variant red).
-19. **Remaining toward parity:** the **settings-v3 reader** (so the real `{"N":…}` `.tal`
-    configs run, not just this simplified schema) — the big remaining item. Then
-    continent/aa-pos leaf colouring and `clades-whocc`.
+19. **settings-v3 reader — DONE (structural).** [`py/ae/tal/settings_v3.py`](../../py/ae/tal/settings_v3.py)
+    translates an acmacs-tal `{"N":…}` `.tal` config into the tal-draw schema:
+    relaxed-JSON load (tolerates trailing commas / `//` comments), `$var` defines, named
+    sub-array recursion, `?N` skipping, and command mapping — `canvas`→image_size,
+    `clades`/`clades-whocc`→clade column, `time-series`→time-series, `draw-aa-transitions`
+    (`method`/`min-leaves`)→aa-transitions, `hz-sections`→hz-sections, `dash-bar-aa-at`→dash
+    column, `nodes` select/apply→node-mods. `tal-signature-page --tal CONFIG.tal -D name=val`
+    translates + renders. **Structural, not pixel-perfect:** unsupported bits (arbitrary
+    `apply.text` strain labels, per-clade `show:false` hiding, exact layout ratios) are
+    collected as `warnings`, not silently dropped. **Verify:** `python3
+    cc/tal/test/test-settings-v3.py` (synthetic config, 10 mapping checks); a **real** h3.tal +
+    its 70k-leaf tree translated and rendered in ~1.3 s (clade column + monthly time-series +
+    labels all present; ~2000 text-label `nodes` reported as warnings).
+20. **Remaining (smaller):** `DrawOnTree` (`apply.text` positioned labels) + per-clade
+    `show:false` hiding (would lift the two main settings-v3 approximations); continent/aa-pos
+    leaf colouring; `clades-whocc` clade-from-sequence assignment; `if`/`then` + `-D`-conditional
+    settings; finer signature-page layout.
 19. **Low-value tail:** `if`/`then` conditionals, `-D` defines, `max-edge-length` ladderize,
     finer signature-page layout (map grids, captions).
 
