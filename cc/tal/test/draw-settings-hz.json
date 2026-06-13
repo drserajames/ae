@@ -1,0 +1,11 @@
+{
+  "_": "tal-draw hz-sections test config (works with tree-clades.json; synthetic leaves A-E)",
+  "image_size": 600,
+  "labels": true,
+  "color_by_clade": true,
+  "clades": { "show": true },
+  "hz_sections": [
+    { "first": "A", "last": "C", "label": "sec-1" },
+    { "first": "D", "last": "E", "label": "sec-2" }
+  ]
+}

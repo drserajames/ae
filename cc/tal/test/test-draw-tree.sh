@@ -50,4 +50,8 @@ check "tree-clades.json (settings DSL: node select/apply)" "$tmp/nodes.pdf"
 "$bin" --labels --labels-overlap "$here/tree-clades.json" "$tmp/overlap.pdf" 400 >/dev/null
 check "tree-clades.json (--labels-overlap)" "$tmp/overlap.pdf"
 
+# hz-sections (horizontal section bands, left marker column)
+"$bin" --settings="$here/draw-settings-hz.json" "$here/tree-clades.json" "$tmp/hz.pdf" >/dev/null
+check "tree-clades.json (hz-sections)" "$tmp/hz.pdf"
+
 echo "OK: tal-draw renders valid PDFs"

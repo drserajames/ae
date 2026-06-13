@@ -102,6 +102,16 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         }
     }
 
+    if (const auto& sections = config["hz_sections"]; sections.is_array()) {
+        const auto& array = sections.array();
+        for (std::size_t i = 0; i < array.size(); ++i) {
+            const auto& entry = array[i];
+            if (!entry.is_object())
+                continue;
+            params.hz_sections.push_back(HzSection{.first = get_string(entry["first"]), .last = get_string(entry["last"]), .label = get_string(entry["label"])});
+        }
+    }
+
     return params;
 
 } // ae::tal::load_draw_settings

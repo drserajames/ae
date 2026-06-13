@@ -275,9 +275,19 @@ the `cc/draw/` surface API."*
     reference panel; the feature would mark references on a tree that spans their era. *(The more
     useful related feature for a current signature page would be marking a chart's own
     antigens/sera on the tree — not yet built.)*
-16. **Remaining (low-value tail):** `if`/`then` conditionals, `-D` defines, `clades-whocc`
-    built-in; finer signature-page layout (map grids, captions); the unported
-    `DashBar`/`HzSections`/continent-colouring layout elements.
+**Real-report parity (toward running the production `.tal` configs):**
+16. **`hz-sections` — DONE.** `TreeDrawParameters.hz_sections` + a left marker column in
+    `draw-tree.cc`: each section `{first, last, label}` resolves first/last leaf seq_ids to
+    vertical positions, drawing a bracket (spine + end ticks) and a rotated label, plus a faint
+    separator across the tree at the section's top boundary. Settings key `"hz_sections": [...]`.
+    **Verify:** `sh cc/tal/test/test-draw-tree.sh` (hz-sections case); a 24-leaf tree with three
+    sections rasterised & eyeballed (brackets aligned to the clade groups, labelled 2a/3a/2a1b).
+17. **Remaining toward parity:** the **settings-v3 reader** (so the real `{"N":…}` `.tal`
+    configs run, not just this simplified schema), and wiring the **aa-transition computation**
+    (`cc/tree/aa-transitions.cc`) so transitions are computed, not only read from the tree's `A`
+    field. Then: `DashBar` (aa-at-pos columns), continent/aa-pos colouring, `clades-whocc`.
+18. **Low-value tail:** `if`/`then` conditionals, `-D` defines, `max-edge-length` ladderize,
+    finer signature-page layout (map grids, captions).
 
 ---
 

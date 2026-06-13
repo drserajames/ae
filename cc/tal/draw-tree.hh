@@ -63,6 +63,16 @@ namespace ae::tal
         NodeApply apply{};
     };
 
+    // A horizontal section of the tree (acmacs-tal hz-sections): the contiguous run of
+    // leaves from `first` to `last` (by seq_id), labelled with `label` in a left marker
+    // column, with a separator line across the tree at the section's top boundary.
+    struct HzSection
+    {
+        std::string first{};
+        std::string last{};
+        std::string label{};
+    };
+
     struct TreeDrawParameters
     {
         bool labels{false};                  // draw each leaf's name to the right of its tip
@@ -78,6 +88,7 @@ namespace ae::tal
         bool aa_transitions{false};  // label inodes with their aa-substitution transitions
         std::map<std::string, CladeStyle> clade_styles{}; // clade name -> override
         std::vector<NodeMod> node_mods{};                 // select/apply mods, applied in order
+        std::vector<HzSection> hz_sections{};             // horizontal section bands (left marker column)
     };
 
     // Render `tree` to a square PDF of side `image_size` device units. Takes

@@ -178,15 +178,16 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         return BLACK;
     };
 
-    // --- horizontal layout: tree | labels | clades column | time-series column ---
+    // --- horizontal layout: hz-marker column | tree | labels | clades column | time-series column ---
     const double margin = 0.03 * image_size;
     const double drawable_w = image_size - 2.0 * margin;
     const double gap = 0.012 * image_size;
+    const double hz_w = params.hz_sections.empty() ? 0.0 : 0.045 * drawable_w; // left marker column
     const double label_w = params.labels ? 0.16 * drawable_w : 0.0;
     const double clade_w = params.clades && !clade_sections.empty() ? 0.09 * drawable_w : 0.0;
     const double ts_w = params.time_series && !time_series.slots.empty() ? 0.34 * drawable_w : 0.0;
     const int n_right = (label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0);
-    const double tree_w = drawable_w - label_w - clade_w - ts_w - gap * n_right;
+    const double tree_w = drawable_w - hz_w - label_w - clade_w - ts_w - gap * n_right;
 
     double cursor = margin + tree_w;
     double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0};
@@ -204,7 +205,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double max_cum = layout.max_cumulative > 0.0 ? layout.max_cumulative : 1.0;
     const double vstep = (image_size - 2.0 * margin - top_reserve - bottom_reserve) / height_units;
     const double hstep = tree_w / max_cum;
-    const auto dev_x = [&](double cumulative) { return margin + cumulative * hstep; };
+    const auto dev_x = [&](double cumulative) { return margin + hz_w + cumulative * hstep; };
     const auto dev_y = [&](double vertical_offset) { return margin + top_reserve + (vertical_offset - 0.5) * vstep; };
 
     const double line_width = std::clamp(vstep * 0.5, 0.2, 3.0);
@@ -217,6 +218,33 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     if (!params.title.empty()) {
         const double title_fs = std::clamp(top_reserve * 0.45, 8.0, 26.0);
         pdf.text(image_size / 2.0, margin + top_reserve * 0.5, params.title, title_fs, BLACK, /*center=*/true);
+    }
+
+    // --- hz-sections: left marker column (bracket + rotated label) + separator across the tree ---
+    if (hz_w > 0.0) {
+        std::unordered_map<std::string, double> name_y; // leaf seq_id -> vertical offset
+        name_y.reserve(layout.leaves.size());
+        for (const auto& leaf_node : layout.leaves)
+            name_y.emplace(leaf_node.name, leaf_node.y);
+        const double bracket_x = margin + hz_w * 0.62;
+        const double sep_x_end = margin + hz_w + tree_w; // separator spans the tree
+        const double hz_label_fs = std::clamp(vstep * 1.2, 6.0, 12.0);
+        for (const auto& section : params.hz_sections) {
+            const auto first_it = name_y.find(section.first);
+            const auto last_it = name_y.find(section.last);
+            if (first_it == name_y.end() || last_it == name_y.end())
+                continue; // unknown seq_id — skip the section
+            double y0 = first_it->second, y1 = last_it->second;
+            if (y0 > y1)
+                std::swap(y0, y1);
+            const double dy0 = dev_y(y0), dy1 = dev_y(y1);
+            pdf.line(bracket_x, dy0, bracket_x, dy1, BLACK, 0.8);                         // bracket spine
+            pdf.line(bracket_x, dy0, bracket_x + hz_w * 0.14, dy0, BLACK, 0.8);           // top tick
+            pdf.line(bracket_x, dy1, bracket_x + hz_w * 0.14, dy1, BLACK, 0.8);           // bottom tick
+            if (!section.label.empty())                                                  // label, rotated, centred
+                pdf.text_rotated(margin + hz_w * 0.42, (dy0 + dy1) / 2.0 + section.label.size() * hz_label_fs * 0.28, section.label, hz_label_fs, BLACK, -90.0);
+            pdf.line(bracket_x, dev_y(y0 - 0.5), sep_x_end, dev_y(y0 - 0.5), GREY, 0.3);  // top-boundary separator
+        }
     }
 
     // --- tree: leaf tip segments (coloured) + optional labels ---
