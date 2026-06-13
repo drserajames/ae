@@ -109,17 +109,31 @@ ae side rather than a straight AD port:
 |-----------|----------|--------------------------|
 | `map.py` / `maker.py` | antigenic maps & time series | **kateri** — the Dart map viewer/PDF generator (`drserajames/kateri`), driven over a Unix socket via [`ae.utils.kateri`](../utils/kateri.py) (`send_chart` → `set_style` → `get_pdf`). Not yet wired into a report-figure pipeline. |
 | `signature_page.py` | trees + signature pages | **TAL** (`tal-draw`, TODO.md #3 — Phase B in progress) |
-| `geographic.py` | geographic time-series maps | no ae renderer yet — open question (kateri does maps, not geography) |
+| `geographic.py` | geographic time-series maps | **no ae renderer yet** — and *not* a kateri job (kateri draws antigenic maps, not world geography). In AD this was a separate `geographic-draw` binary (acmacs-draw/acmacs-map-draw), see note below. On the ae side it would be a small standalone Cairo renderer reusing `cc/draw/cairo-surface.*` (the kept surface, also used by TAL) + `locdb_v3` + hidb (#2) + seqdb. |
 | `stat.py` | `stat.json.xz` (counts) | needs `ae_backend` chart counting; the *reader* is already ported here in `StatisticsTableMaker` |
 | `serum_coverage.py`, `commands.py`/`maker.py` orchestration, the figure half of `init_settings` | per-serum coverage maps + the overall maker driver | depends on the above |
+
+**How AD rendered the geographic maps** (for when this is rebuilt): `geographic.py`
+only wrote a settings JSON and shelled out to a `geographic-draw` binary
+(`--time-series monthly`). That binary (acmacs-draw `geographic-map.cc` /
+`continent-map.cc` + acmacs-map-draw `geographic-draw.cc`) drew a **built-in
+equirectangular world map** — a constant continent-outline vector path baked into
+C++ (`acmacs-draw/cc/geographic-path.cc`, bounds `[-168.24,90 … 191.76,-90]` →
+`1261.3×632.591`) — then, for each **hidb** antigen in the month's date slot, looked
+up its location in **locationdb** for `(latitude, longitude)` and dropped a dot at
+that point (co-located strains fanned into a small ring), coloured by
+continent/clade/lineage/amino-acid. One PDF per month →
+`geo/<VT>-geographic-<YYYY-MM>.pdf`, which is exactly what `make_geographic_ts`
+globs for. It is **not** related to the antigenic-map (chart) renderer.
 
 **Next milestone:** build a report-figure pipeline that loads charts via
 `ae_backend.chart_v3`, drives **kateri** through `ae.utils.kateri` to emit the
 antigenic-map PDFs at the filenames `report.py` expects
-(e.g. `<subtype>-<assay>/clade-<lab>.pdf`, `ts-<lab>-<YYYY-MM>.pdf`), and embeds
-TAL tree PDFs. (Caveat: this depends on the `kateri` executable being installed,
-and on the open `ae_backend.chart_v3.Chart(<file>)` import-abort bug noted in
-TODO.md §1.)
+(e.g. `<subtype>-<assay>/clade-<lab>.pdf`, `ts-<lab>-<YYYY-MM>.pdf`), embeds
+**TAL** tree PDFs, and adds a small Cairo **geographic** renderer (on
+`cc/draw/cairo-surface.*` + `locdb_v3` + hidb + seqdb, per the note above). (Caveat:
+the antigenic-map part depends on the `kateri` executable being installed and on
+the open `ae_backend.chart_v3.Chart(<file>)` import-abort bug noted in TODO.md §1.)
 
 ## Verification
 
