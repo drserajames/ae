@@ -19,7 +19,7 @@ status, and respect the shared-file rules below.
 |---|-----------|-----------|-----:|-----------|-------|--------|
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
-| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1-M3 + Phase C M1-M2 + label-collision avoidance done |
+| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1-M3 + Phase C M1-M2 + signature-page composition done |
 | 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; **antigenic-map figures from kateri** (chart → socket → PDF, `py/ae/utils/kateri.py`); **geographic-map renderer now available** (`geo-draw`, §1) — remaining report-side work: the Python glue to extract per-month `{location, count}` from seqdb → `--data` JSON → embed PDFs (`geographic.py`) |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data endpoints verified end-to-end |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
@@ -277,7 +277,7 @@ All AD hidb-5 tools are now ported.
 
 ---
 
-## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B M1-M3 + Phase C M1-M2 + label-collision done)*
+## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B + Phase C + signature page done)*
 
 `ae` already has tree **manipulation** (Newick parse, fix-names, substitution-labels,
 to-json in `cc/tree/`). Missing: the tree **drawing** / signature-page / time-aware
@@ -359,14 +359,26 @@ C++ renderer; TAL composes them with the tree.
       column (forced labels from node mods always shown); on by default, `--labels-overlap`
       disables; `export_tree_pdf` returns the hidden count (CLI surfaces it). **Verify:**
       250-leaf tree hid 125/250 labels; eyeballed off (smear) vs on (clean).
-- [ ] **Phase C M3+ / Phase B M4+:** remaining mod-pipeline (`if/then`, `-D` defines,
-      `clades-whocc`/`vaccines`); `AntigenicMaps` = embed **kateri**-rendered map PDFs
-      (now unblocked: hidb #2 done + kateri available) + hidb vaccine/reference marks →
-      full signature page.
+- [x] **`AntigenicMaps` signature-page composition.** `bin/tal-signature-page` +
+      `py/ae/tal/signature_page.py`: composes the TAL tree (left) + antigenic map(s) (right)
+      into one signature-page PDF via `pdfjam` — the PDF the report's `signature_page` page
+      embeds. Maps from `--map` (pre-rendered) or `--chart` (kateri over its socket); `--mark`
+      highlights vaccine/reference strains on the tree (node-mods, the hidb hook). **Verify:**
+      `sh cc/tal/test/test-signature-page.sh`; tree + stand-in map with marked strains
+      eyeballed. (kateri path wired but needs `kateri` on PATH; `--map` path verified.)
+- [ ] **Remaining (low-value tail):** mod-pipeline `if/then` / `-D` defines /
+      `clades-whocc`/`vaccines`; finer signature-page layout (map grids/captions); live kateri
+      end-to-end once a `kateri` binary is on PATH.
 
 ---
 
 ## 4. ssm-report — seasonal report generation  *(owner: report agent — 🟡 assembly core done)*
+
+> **⚠ Direction change — consolidate around `vcm`, not the AD port.** The team already
+> builds reports on `ae` via the **`vcm`** tool (in each report working dir). The plan is to
+> shelve this AD-faithful port and bring vcm's library tier into `ae` — full audit + phased
+> plan in [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md). Phase 0 done
+> (`report-shelved` branch); `stat.py` is kept (replaces vcm's `hidb5-stat` shell).
 
 Python + LaTeX seasonal/SSM report generation. Note: AD's `bin/ssm-report` and
 `commands.py` are marked *obsolete*; the live entry is `ssm-make`/`maker.py`, but the
