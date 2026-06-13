@@ -314,7 +314,14 @@ the `cc/draw/` surface API."*
 20. **Remaining (smaller, toward full `.tal` fidelity):** `DrawOnTree` (`apply.text` positioned
     strain labels) + per-clade `show:false` hiding — these would lift the two main settings-v3
     approximations; then continent/aa-pos leaf colouring and `clades-whocc` (clade-from-sequence
-    assignment).
+    assignment). **Note — clade recomputation already exists in ae:** `Tree::set_clades(clades_json)`
+    (`cc/tree/tree.cc:305`, bound as `tree.set_clades("clades.json")` in `cc/py/tree.cc`) walks the
+    leaves and sets each leaf's clades from its aa/nuc sequence via the `cc/sequences/clades.hh`
+    `Clades` engine (the WHOCC aa-at-position rules, e.g. `acmacs-data/clades.json` /
+    `semantic_clades.py`). So a tree can be (re)populated with updated clades today — leaves need
+    sequences (the `.tjz` trees carry them; otherwise populate from seqdb first). The remaining
+    `clades-whocc` work is only *wiring this into the `tal` program / settings-v3 reader* as a step,
+    not building the engine.
 21. **Low-value tail:** `if`/`then` conditional settings, `-D`-conditional logic, `max-edge-length`
     ladderize, finer signature-page layout (map grids, captions), other `tal` outputs (`.names`/`.html`).
 
