@@ -5,6 +5,7 @@
 
 #include "ext/fmt.hh"
 #include "tal/draw-tree.hh"
+#include "tal/settings.hh"
 #include "tree/tree.hh"
 
 // ----------------------------------------------------------------------
@@ -18,6 +19,7 @@ int main(int argc, char* const argv[])
     try {
         std::vector<std::string_view> positional;
         ae::tal::TreeDrawParameters params;
+        std::string_view settings_file;
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg{argv[i]};
             if (arg == "--labels")
@@ -36,18 +38,27 @@ int main(int argc, char* const argv[])
                 params.aa_transitions = true;
             else if (arg.substr(0, 8) == "--title=")
                 params.title = std::string{arg.substr(8)};
+            else if (arg.substr(0, 11) == "--settings=")
+                settings_file = arg.substr(11);
             else
                 positional.push_back(arg);
         }
         if (positional.size() < 2) {
             fmt::print(stderr,
-                       "Usage: {} [--labels] [--color-by-clade] [--clades] [--time-series] [--interval=year|month|week|day]\n"
-                       "          [--legend] [--aa-transitions] [--title=TEXT]\n"
-                       "          <tree.newick|tree.json[.xz]> <output.pdf> [image-size-px]\n",
+                       "Usage: {} [--settings=config.json] [--labels] [--color-by-clade] [--clades]\n"
+                       "          [--time-series] [--interval=year|month|week|day] [--legend] [--aa-transitions]\n"
+                       "          [--title=TEXT] <tree.newick|tree.json[.xz]> <output.pdf> [image-size-px]\n"
+                       "  --settings=FILE loads all draw options (incl. per-clade colour/name overrides) from\n"
+                       "  a JSON config; other flags are ignored when it is given (image-size-px still overrides).\n",
                        argv[0]);
             return 1;
         }
-        const double image_size = positional.size() > 2 ? std::stod(std::string{positional[2]}) : 1000.0;
+        // --settings provides the full declarative config; a positional image-size still wins.
+        double image_size = 1000.0;
+        if (!settings_file.empty())
+            params = ae::tal::load_draw_settings(std::filesystem::path{settings_file}, &image_size);
+        if (positional.size() > 2)
+            image_size = std::stod(std::string{positional[2]});
         const auto tree = ae::tree::load(std::filesystem::path{positional[0]});
         ae::tal::export_tree_pdf(*tree, std::filesystem::path{positional[1]}, image_size, params);
         fmt::print("Wrote {} ({:.0f}x{:.0f}, {} leaves{}{}{})\n", positional[1], image_size, image_size, tree->number_of_leaves(), params.labels ? ", labelled" : "",

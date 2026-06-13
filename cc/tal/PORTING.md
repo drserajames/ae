@@ -191,12 +191,24 @@ the `cc/draw/` surface API."*
    inode aa-transitions rendered as a full signature-page-style figure (title + tree +
    aa labels + clade bars + time-series with rotated year labels + legend) — rasterised &
    eyeballed.
-8. **M4+ (next):** the `mapi`/settings-DSL-driven configuration of these elements (Phase C),
-   label collision avoidance, and `AntigenicMaps` (embed kateri-rendered map PDFs per the
-   §1 course-correction, + hidb (#2) for vaccine/reference marks) for the full signature page.
+8. **M4+ (next):** label collision avoidance, and `AntigenicMaps` (embed kateri-rendered map
+   PDFs per the §1 course-correction, + hidb (#2) for vaccine/reference marks) for the full
+   signature page.
 
-**Phase C — settings DSL & CLI:**
-8. Port the `Settings`/`apply_built_in` mod pipeline (`settings.cc`) and `bin/tal`.
+**Phase C — settings DSL:**
+9. **M1 — declarative JSON config — DONE.** [`settings.hh`](settings.hh)/[`settings.cc`](settings.cc),
+   `ae::tal::load_draw_settings(file)` → `TreeDrawParameters`, plus `tal-draw --settings=FILE`.
+   Rather than porting AD's full settings-v3 mod pipeline (node-selection + if/then + ~71 KB
+   of `settings.cc` built-ins), this maps a single declarative JSON object onto the draw
+   parameters and adds what flags can't express: **per-clade `color` / `display_name`
+   overrides** and explicit time-series `start`/`end`. Parsed with `rjson::v3` (already in
+   libae). Schema documented in `settings.hh`; example `test/draw-settings.json`. **Verify:**
+   `sh cc/tal/test/test-draw-tree.sh` (settings case); the 24-leaf tree rendered via
+   `--settings` with override colours/names was rasterised & eyeballed (palette replaced by
+   the configured hex colours; clade labels/legend show the short display names).
+10. **M2+ (next):** the richer AD mod-pipeline features if needed — node `select`/`apply`
+    operations, `if`/`then`, `-D` command-line defines, and the WHOCC `clades-whocc`/
+    `vaccines` built-ins — layered on top of this declarative base.
 
 ---
 

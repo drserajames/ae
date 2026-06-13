@@ -1,0 +1,15 @@
+{
+  "_": "tal-draw settings DSL test config — see cc/tal/test/test-draw-tree.sh; works with tree-clades.json (synthetic clades X, Y)",
+  "image_size": 700,
+  "title": "tal-draw settings demo",
+  "labels": true,
+  "color_by_clade": true,
+  "clades": { "show": true },
+  "time_series": { "show": true, "interval": "year" },
+  "legend": { "show": true },
+  "aa_transitions": { "show": true },
+  "clade_styles": [
+    { "name": "X", "color": "#1f77b4", "display_name": "Clade-X" },
+    { "name": "Y", "color": "#d62728", "display_name": "Clade-Y" }
+  ]
+}

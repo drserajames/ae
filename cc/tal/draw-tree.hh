@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <string>
 
 // ======================================================================
@@ -26,6 +27,15 @@ namespace ae::tree
 
 namespace ae::tal
 {
+    // Per-clade overrides (from the settings DSL): a colour string ("#1f77b4" or a
+    // name like "blue"; empty = use the default palette) and a display name shown in
+    // the clade column / legend (empty = use the clade's own name).
+    struct CladeStyle
+    {
+        std::string color{};
+        std::string display_name{};
+    };
+
     struct TreeDrawParameters
     {
         bool labels{false};          // draw each leaf's name to the right of its tip
@@ -33,9 +43,12 @@ namespace ae::tal
         bool clades{false};          // draw the clade-sections column
         bool time_series{false};     // draw the time-series dash column
         std::string time_series_interval{"month"}; // year | month | week | day
+        std::string time_series_start{};            // optional "YYYY-MM-DD" range start
+        std::string time_series_end{};              // optional "YYYY-MM-DD" range end
         std::string title{};         // page title (top, centred); empty = none
         bool legend{false};          // draw a clade colour legend (bottom row)
         bool aa_transitions{false};  // label inodes with their aa-substitution transitions
+        std::map<std::string, CladeStyle> clade_styles{}; // clade name -> override
     };
 
     // Render `tree` to a square PDF of side `image_size` device units. Takes

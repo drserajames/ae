@@ -81,16 +81,34 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
             clade_rank.emplace(clade_sections[k].name, k);
     }
 
+    // clade colour/name with optional per-clade overrides from the settings DSL
+    const auto clade_color_for = [&](std::size_t rank, const std::string& name) -> Color {
+        if (const auto it = params.clade_styles.find(name); it != params.clade_styles.end() && !it->second.color.empty()) {
+            try {
+                return Color{it->second.color};
+            }
+            catch (const std::exception&) { // unparseable colour -> fall back to palette
+            }
+        }
+        return clade_palette(rank);
+    };
+    const auto clade_display_for = [&](const std::string& name) -> std::string {
+        if (const auto it = params.clade_styles.find(name); it != params.clade_styles.end() && !it->second.display_name.empty())
+            return it->second.display_name;
+        return name;
+    };
+
     // --- time series ---
     TimeSeries time_series;
     if (params.time_series)
-        time_series = compute_time_series(tree, interval_from_string(params.time_series_interval));
+        time_series = compute_time_series(tree, interval_from_string(params.time_series_interval), params.time_series_start, params.time_series_end);
 
-    // leaf colour = first clade's palette colour (when colouring), else black
+    // leaf colour = first clade's (possibly overridden) colour when colouring, else black
     const auto leaf_color = [&](const Leaf& leaf) -> Color {
         if (params.color_by_clade && !leaf.clades.empty()) {
-            if (const auto found = clade_rank.find(std::string{leaf.clades[0]}); found != clade_rank.end())
-                return clade_palette(found->second);
+            const std::string name{leaf.clades[0]};
+            if (const auto found = clade_rank.find(name); found != clade_rank.end())
+                return clade_color_for(found->second, name);
             return GREY50;
         }
         return BLACK;
@@ -186,7 +204,7 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
         for (std::size_t k = 0; k < clade_sections.size(); ++k) {
             const Clade& clade = clade_sections[k];
             const double cx = x_clade0 + (static_cast<double>(k) + 0.5) * slot_w;
-            const Color color = clade_palette(k);
+            const Color color = clade_color_for(k, clade.name);
             const CladeSection* widest = nullptr;
             for (const auto& section : clade.sections) {
                 const double y0 = dev_y(pos.at(section.first_node).second);
@@ -197,7 +215,7 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
             }
             if (widest != nullptr) { // clade name centred on its widest section
                 const double ym = (dev_y(pos.at(widest->first_node).second) + dev_y(pos.at(widest->last_node).second)) / 2.0;
-                pdf.text(cx + bar_w * 0.5 + 2.0, ym + font_size * 0.3, clade.name, font_size, color, /*center=*/false);
+                pdf.text(cx + bar_w * 0.5 + 2.0, ym + font_size * 0.3, clade_display_for(clade.name), font_size, color, /*center=*/false);
             }
         }
     }
@@ -244,10 +262,11 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
         const double ly = image_size - margin - bottom_reserve * 0.35;
         double lx = margin;
         for (std::size_t k = 0; k < clade_sections.size(); ++k) {
-            const Color color = clade_palette(k);
+            const Color color = clade_color_for(k, clade_sections[k].name);
+            const std::string name = clade_display_for(clade_sections[k].name);
             pdf.rectangle(lx, ly - swatch_h / 2.0, swatch_w, swatch_h, color, 0.5, color);
-            const double tw = pdf.text_size(clade_sections[k].name, legend_fs).first;
-            pdf.text(lx + swatch_w + 4.0 + tw / 2.0, ly, clade_sections[k].name, legend_fs, BLACK, /*center=*/true);
+            const double tw = pdf.text_size(name, legend_fs).first;
+            pdf.text(lx + swatch_w + 4.0 + tw / 2.0, ly, name, legend_fs, BLACK, /*center=*/true);
             lx += swatch_w + 4.0 + tw + 16.0;
         }
     }
