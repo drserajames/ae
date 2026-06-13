@@ -63,6 +63,15 @@ namespace ae::tal
         NodeApply apply{};
     };
 
+    // A per-leaf dash column keyed by the amino acid at a position (acmacs-tal
+    // dash-bar-aa-at). Each shown leaf gets a dash coloured by its aa at `pos` (1-based):
+    // by `colors_by_aa` when given, else by frequency (most common = grey, variants pop).
+    struct DashBarAAAt
+    {
+        int pos{0};
+        std::map<char, std::string> colors_by_aa{}; // aa char -> colour string ("#rrggbb"/name)
+    };
+
     // A horizontal section of the tree (acmacs-tal hz-sections): the contiguous run of
     // leaves from `first` to `last` (by seq_id), labelled with `label` in a left marker
     // column, with a separator line across the tree at the section's top boundary.
@@ -92,6 +101,7 @@ namespace ae::tal
         std::map<std::string, CladeStyle> clade_styles{}; // clade name -> override
         std::vector<NodeMod> node_mods{};                 // select/apply mods, applied in order
         std::vector<HzSection> hz_sections{};             // horizontal section bands (left marker column)
+        std::vector<DashBarAAAt> dash_bars{};             // per-leaf aa-at-position dash columns
     };
 
     // Render `tree` to a square PDF of side `image_size` device units. Takes

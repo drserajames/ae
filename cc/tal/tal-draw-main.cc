@@ -40,6 +40,8 @@ int main(int argc, char* const argv[])
                 params.aa_transitions = true;
             else if (arg == "--aa-transitions-compute")
                 params.aa_transitions_compute = true;
+            else if (arg.substr(0, 11) == "--dash-bar=")
+                params.dash_bars.push_back(ae::tal::DashBarAAAt{.pos = std::stoi(std::string{arg.substr(11)})});
             else if (arg.substr(0, 8) == "--title=")
                 params.title = std::string{arg.substr(8)};
             else if (arg.substr(0, 11) == "--settings=")

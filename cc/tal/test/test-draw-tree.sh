@@ -54,4 +54,8 @@ check "tree-clades.json (--labels-overlap)" "$tmp/overlap.pdf"
 "$bin" --settings="$here/draw-settings-hz.json" "$here/tree-clades.json" "$tmp/hz.pdf" >/dev/null
 check "tree-clades.json (hz-sections)" "$tmp/hz.pdf"
 
+# dash-bar-aa-at (per-leaf aa-at-position dash column) on the aa-sequence tree
+"$bin" --labels --dash-bar=3 "$here/tree-aa.json" "$tmp/dash.pdf" 400 >/dev/null
+check "tree-aa.json (dash-bar-aa-at pos 3)" "$tmp/dash.pdf"
+
 echo "OK: tal-draw renders valid PDFs"

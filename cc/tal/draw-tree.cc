@@ -192,19 +192,22 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double label_w = params.labels ? 0.16 * drawable_w : 0.0;
     const double clade_w = params.clades && !clade_sections.empty() ? 0.09 * drawable_w : 0.0;
     const double ts_w = params.time_series && !time_series.slots.empty() ? 0.34 * drawable_w : 0.0;
-    const int n_right = (label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0);
-    const double tree_w = drawable_w - hz_w - label_w - clade_w - ts_w - gap * n_right;
+    const double dash_col_w = 0.022 * drawable_w;                       // width of one dash-bar column
+    const double dash_w = static_cast<double>(params.dash_bars.size()) * dash_col_w;
+    const int n_right = (label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0) + (dash_w > 0.0);
+    const double tree_w = drawable_w - hz_w - label_w - clade_w - ts_w - dash_w - gap * n_right;
 
     double cursor = margin + tree_w;
-    double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0};
+    double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0}, x_dash0{0.0};
     if (label_w > 0.0) { cursor += gap; x_label0 = cursor; cursor += label_w; }
     if (clade_w > 0.0) { cursor += gap; x_clade0 = cursor; cursor += clade_w; }
     if (ts_w > 0.0)    { cursor += gap; x_ts0 = cursor;    cursor += ts_w; }
+    if (dash_w > 0.0)  { cursor += gap; x_dash0 = cursor;  cursor += dash_w; }
 
     // --- vertical reserves: title (top), legend + time-series slot labels (bottom) ---
     const bool want_legend = params.legend && !clade_sections.empty();
     const double top_reserve = params.title.empty() ? 0.0 : 0.05 * image_size;
-    const double bottom_reserve = (want_legend || ts_w > 0.0) ? 0.07 * image_size : 0.0;
+    const double bottom_reserve = (want_legend || ts_w > 0.0 || dash_w > 0.0) ? 0.07 * image_size : 0.0;
 
     // --- vertical (shared) + tree horizontal transforms ---
     const double height_units = layout.height > 0.0 ? layout.height : 1.0;
@@ -371,6 +374,48 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const std::string& slot_first = time_series.slots[i].first;
             const std::string label = yearly ? slot_first.substr(0, 4) : slot_first.substr(0, 7);
             pdf.text_rotated(x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + slot_fs * 0.35, label_anchor_y, label, slot_fs, GREY50, -90.0);
+        }
+    }
+
+    // --- dash-bar-aa-at columns: per-leaf dash coloured by the amino acid at a position ---
+    if (dash_w > 0.0) {
+        static const std::array<Color, 8> freq_palette{GREY, RED, BLUE, GREEN, ORANGE, PURPLE, Color{0x008080}, MAGENTA};
+        const double dash_len = dash_col_w * 0.6;
+        const double dash_lw = std::clamp(vstep * 0.6, 0.3, 2.5);
+        const double pos_fs = std::clamp(dash_col_w * 0.5, 6.0, 11.0);
+        const double bottom = dev_y(layout.height + 0.5);
+        for (std::size_t b = 0; b < params.dash_bars.size(); ++b) {
+            const DashBarAAAt& bar = params.dash_bars[b];
+            if (bar.pos < 1)
+                continue;
+            const sequences::pos0_t pos0{static_cast<std::size_t>(bar.pos - 1)};
+            const double col_x = x_dash0 + (static_cast<double>(b) + 0.5) * dash_col_w;
+            // colours: explicit colors_by_aa, else by aa frequency (most common -> grey, variants pop)
+            std::unordered_map<char, Color> aa_color;
+            for (const auto& [aa, color_string] : bar.colors_by_aa) {
+                try { aa_color.emplace(aa, Color{color_string}); } catch (const std::exception&) { }
+            }
+            if (aa_color.empty()) {
+                std::unordered_map<char, int> counts;
+                for (const auto& node : layout.leaves) {
+                    const Leaf& leaf = tree.leaf(node_index_t{node.node});
+                    if (leaf.aa.size() > pos0)
+                        ++counts[leaf.aa[pos0]];
+                }
+                std::vector<std::pair<char, int>> ranked(counts.begin(), counts.end());
+                std::sort(ranked.begin(), ranked.end(), [](const auto& l, const auto& r) { return l.second > r.second; });
+                for (std::size_t r = 0; r < ranked.size(); ++r)
+                    aa_color.emplace(ranked[r].first, freq_palette[std::min(r, freq_palette.size() - 1)]);
+            }
+            for (const auto& node : layout.leaves) {
+                const Leaf& leaf = tree.leaf(node_index_t{node.node});
+                if (leaf.aa.size() <= pos0)
+                    continue;
+                const auto found = aa_color.find(leaf.aa[pos0]);
+                const double y = dev_y(node.y);
+                pdf.line(col_x - dash_len / 2.0, y, col_x + dash_len / 2.0, y, found != aa_color.end() ? found->second : GREY, dash_lw);
+            }
+            pdf.text_rotated(col_x + pos_fs * 0.35, bottom + bottom_reserve * 0.9, fmt::format("{}", bar.pos), pos_fs, BLACK, -90.0);
         }
     }
 

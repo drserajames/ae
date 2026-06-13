@@ -116,6 +116,27 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         }
     }
 
+    if (const auto& bars = config["dash_bars"]; bars.is_array()) {
+        const auto& array = bars.array();
+        for (std::size_t i = 0; i < array.size(); ++i) {
+            const auto& entry = array[i];
+            if (!entry.is_object())
+                continue;
+            DashBarAAAt bar;
+            bar.pos = static_cast<int>(get_double(entry["pos"], 0.0));
+            if (const auto& colors = entry["colors"]; colors.is_array()) {
+                const auto& color_array = colors.array();
+                for (std::size_t j = 0; j < color_array.size(); ++j) {
+                    const auto& color_entry = color_array[j];
+                    if (color_entry.is_object())
+                        if (const std::string aa = get_string(color_entry["aa"]); !aa.empty())
+                            bar.colors_by_aa.emplace(aa[0], get_string(color_entry["color"]));
+                }
+            }
+            params.dash_bars.push_back(std::move(bar));
+        }
+    }
+
     return params;
 
 } // ae::tal::load_draw_settings

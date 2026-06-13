@@ -292,9 +292,15 @@ the `cc/draw/` surface API."*
     branch whose subtree consensus aa (most-frequent > `non_common_tolerance`, ignoring gaps/X)
     differs from its parent's. **Verify:** `python3 cc/tal/test/test-aa-transitions.py` →
     computes `T3A` on a synthetic derived-clade tree; also ran on a real 70k-leaf ASR tree.
-18. **Remaining toward parity:** the **settings-v3 reader** (so the real `{"N":…}` `.tal`
-    configs run, not just this simplified schema). Then: `DashBar` (aa-at-pos columns),
-    continent/aa-pos colouring, `clades-whocc`.
+18. **`dash-bar-aa-at` — DONE.** `TreeDrawParameters.dash_bars` + per-leaf dash columns
+    (right of the time-series column): each `{pos, colors_by_aa}` draws one dash per shown leaf
+    coloured by its amino acid at `pos` (explicit `colors_by_aa`, else by frequency — most
+    common = grey, variants pop), with the position label below. Settings key `"dash_bars"`,
+    CLI `--dash-bar=POS`. **Verify:** `sh cc/tal/test/test-draw-tree.sh` (dash-bar case) on the
+    aa-sequence tree (pos 3: T grey, the A variant red).
+19. **Remaining toward parity:** the **settings-v3 reader** (so the real `{"N":…}` `.tal`
+    configs run, not just this simplified schema) — the big remaining item. Then
+    continent/aa-pos leaf colouring and `clades-whocc`.
 19. **Low-value tail:** `if`/`then` conditionals, `-D` defines, `max-edge-length` ladderize,
     finer signature-page layout (map grids, captions).
 
