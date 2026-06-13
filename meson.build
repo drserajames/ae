@@ -85,7 +85,7 @@ endif
 
 catch2 = dependency('catch2')
 
-# --- map-draw: Cairo (see TODO.md subsystem #1) ---
+# --- shared draw surface: Cairo (used by tal-draw via cc/draw/cairo-surface; KEEP if map-draw #1 is deleted) ---
 cairo = dependency('cairo', required: false)
 if not cairo.found() and host_machine.system() == 'darwin'
   # pkg_config_libdir is pinned to brotli in the arm64 native file, so cairo
