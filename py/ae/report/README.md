@@ -133,9 +133,11 @@ globs for. It is **not** related to the antigenic-map (chart) renderer.
 antigenic-map PDFs at the filenames `report.py` expects
 (e.g. `<subtype>-<assay>/clade-<lab>.pdf`, `ts-<lab>-<YYYY-MM>.pdf`), embeds
 **TAL** tree PDFs, and adds a small Cairo **geographic** renderer (on
-`cc/draw/cairo-surface.*` + `locdb_v3` + hidb + seqdb, per the note above). (Caveat:
-the antigenic-map part depends on the `kateri` executable being installed and on
-the open `ae_backend.chart_v3.Chart(<file>)` import-abort bug noted in TODO.md §1.)
+`cc/draw/cairo-surface.*` + `locdb_v3` + hidb + seqdb, per the note above). The
+`chart_v3.Chart(<file>)` import-abort that previously blocked this is **fixed**
+(TODO.md §1; verified — load + `export()` work, the `ae.utils.kateri.send_chart`
+path), so the only remaining prerequisite is having the `kateri` executable
+installed.
 
 ## Verification
 
@@ -161,6 +163,7 @@ the output satisfies the cross-product invariants (Σ virus-types = `all`;
 Σ labs = `all` lab; Σ continents ≤ `all` continent; Σ months = year; `sera_unique`
 ≥ name-deduped `sera`), and feeds straight into `StatisticsTableMaker` to render a
 real LaTeX statistics table. Needs Python 3.10 + `ae_backend`, a hidb dir and
-locationdb — but **not** `chart_v3`, so it is unaffected by the chart-import bug.
+locationdb — and **not** `chart_v3` at all (so it was never affected by the
+now-fixed chart-import abort).
 (B is currently skipped: the B hidb fails to load in `ae_backend.hidb` —
 `STRING_ERROR` — an open hidb-side bug; H1/H3 are complete.)
