@@ -206,9 +206,17 @@ the `cc/draw/` surface API."*
    `sh cc/tal/test/test-draw-tree.sh` (settings case); the 24-leaf tree rendered via
    `--settings` with override colours/names was rasterised & eyeballed (palette replaced by
    the configured hex colours; clade labels/legend show the short display names).
-10. **M2+ (next):** the richer AD mod-pipeline features if needed — node `select`/`apply`
-    operations, `if`/`then`, `-D` command-line defines, and the WHOCC `clades-whocc`/
-    `vaccines` built-ins — layered on top of this declarative base.
+10. **M2 — node select/apply mods — DONE.** A `"nodes": [{ "select": {…}, "apply": {…} }]`
+    array drives the core of acmacs-tal's mod pipeline. **Select** by `seq_id` (string or
+    list), `cumulative_min` (long branches), `date_min`/`date_max`; **apply** `hide` (drops
+    the node + subtree from the layout — applied before `compute_layout`), `edge_color`,
+    `label_color`, `label_scale`. Resolved in `draw-tree.cc` via per-node override maps
+    (keyed by node index) consulted while drawing. **Verify:** `sh cc/tal/test/test-draw-tree.sh`
+    (node-mods case); a 24-leaf render hiding S3/S20, red-scaling S5's label and recolouring
+    S13–S15 edges was rasterised & eyeballed.
+11. **M3+ (next):** remaining mod-pipeline features if needed — `if`/`then` conditionals,
+    `-D` command-line defines, and the WHOCC `clades-whocc`/`vaccines` built-ins — layered on
+    this declarative base; plus label-collision avoidance and `AntigenicMaps` (kateri + hidb).
 
 ---
 

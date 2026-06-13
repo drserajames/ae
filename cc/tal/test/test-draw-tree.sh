@@ -38,8 +38,12 @@ check "tree-clades.json (M2: color/clades/time-series)" "$tmp/m2.pdf"
        "$here/tree-clades.json" "$tmp/m3.pdf" 700 >/dev/null
 check "tree-clades.json (M3: title/legend/aa-transitions)" "$tmp/m3.pdf"
 
-# Phase C: declarative JSON settings (incl. per-clade colour/display-name overrides)
+# Phase C M1: declarative JSON settings (incl. per-clade colour/display-name overrides)
 "$bin" --settings="$here/draw-settings.json" "$here/tree-clades.json" "$tmp/settings.pdf" >/dev/null
 check "tree-clades.json (settings DSL)" "$tmp/settings.pdf"
+
+# Phase C M2: node select/apply mods (hide / recolour edge / restyle label)
+"$bin" --settings="$here/draw-settings-nodes.json" "$here/tree-clades.json" "$tmp/nodes.pdf" >/dev/null
+check "tree-clades.json (settings DSL: node select/apply)" "$tmp/nodes.pdf"
 
 echo "OK: tal-draw renders valid PDFs"

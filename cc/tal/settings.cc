@@ -1,5 +1,7 @@
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "tal/settings.hh"
 #include "ad/rjson-v3.hh"
@@ -13,6 +15,25 @@ namespace ae::tal
         bool get_bool(const rjson::v3::value& v, bool dflt = false) { return v.is_null() ? dflt : v.to<bool>(); }
         double get_double(const rjson::v3::value& v, double dflt) { return v.is_null() ? dflt : v.to<double>(); }
         std::string get_string(const rjson::v3::value& v, std::string_view dflt = {}) { return v.is_null() ? std::string{dflt} : std::string{v.to<std::string_view>()}; }
+        std::optional<bool> get_opt_bool(const rjson::v3::value& v) { return v.is_null() ? std::nullopt : std::optional<bool>{v.to<bool>()}; }
+        std::optional<double> get_opt_double(const rjson::v3::value& v) { return v.is_null() ? std::nullopt : std::optional<double>{v.to<double>()}; }
+
+        // Read a JSON string, or an array of strings, into a vector (null -> empty).
+        std::vector<std::string> get_string_list(const rjson::v3::value& v)
+        {
+            std::vector<std::string> out;
+            if (v.is_null())
+                return out;
+            if (v.is_array()) {
+                const auto& array = v.array();
+                for (std::size_t i = 0; i < array.size(); ++i)
+                    out.push_back(get_string(array[i]));
+            }
+            else {
+                out.push_back(get_string(v));
+            }
+            return out;
+        }
     } // namespace
 } // namespace ae::tal
 
@@ -54,6 +75,29 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                 continue;
             if (std::string name = get_string(entry["name"]); !name.empty())
                 params.clade_styles.insert_or_assign(std::move(name), CladeStyle{.color = get_string(entry["color"]), .display_name = get_string(entry["display_name"])});
+        }
+    }
+
+    if (const auto& nodes = config["nodes"]; nodes.is_array()) {
+        const auto& array = nodes.array();
+        for (std::size_t i = 0; i < array.size(); ++i) {
+            const auto& mod_value = array[i];
+            if (!mod_value.is_object())
+                continue;
+            NodeMod mod;
+            if (const auto& select = mod_value["select"]; select.is_object()) {
+                mod.select.seq_id = get_string_list(select["seq_id"]);
+                mod.select.cumulative_min = get_opt_double(select["cumulative_min"]);
+                mod.select.date_min = get_string(select["date_min"]);
+                mod.select.date_max = get_string(select["date_max"]);
+            }
+            if (const auto& apply = mod_value["apply"]; apply.is_object()) {
+                mod.apply.hide = get_opt_bool(apply["hide"]);
+                mod.apply.edge_color = get_string(apply["edge_color"]);
+                mod.apply.label_color = get_string(apply["label_color"]);
+                mod.apply.label_scale = get_opt_double(apply["label_scale"]);
+            }
+            params.node_mods.push_back(std::move(mod));
         }
     }
 

@@ -2,7 +2,9 @@
 
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
+#include <vector>
 
 // ======================================================================
 // TAL (subsystem #3) — Phase B: render a phylogenetic tree (+ aligned columns)
@@ -36,6 +38,30 @@ namespace ae::tal
         std::string display_name{};
     };
 
+    // A node-select / node-apply mod — the core of the acmacs-tal settings pipeline.
+    // A node matches when every set criterion holds (empty criteria match anything).
+    struct NodeSelect
+    {
+        std::vector<std::string> seq_id{};      // leaf-name is one of these (leaves only)
+        std::optional<double> cumulative_min{}; // node cumulative edge length >= this
+        std::string date_min{};                 // leaf date >= this "YYYY-MM-DD" (leaves only)
+        std::string date_max{};                 // leaf date <  this "YYYY-MM-DD" (leaves only)
+    };
+
+    struct NodeApply
+    {
+        std::optional<bool> hide{};       // hide the node (and its subtree) from the layout
+        std::string edge_color{};         // recolour the node's edge line ("#rrggbb"/name)
+        std::string label_color{};        // recolour the leaf label (leaves only)
+        std::optional<double> label_scale{}; // scale the leaf-label font (leaves only)
+    };
+
+    struct NodeMod
+    {
+        NodeSelect select{};
+        NodeApply apply{};
+    };
+
     struct TreeDrawParameters
     {
         bool labels{false};          // draw each leaf's name to the right of its tip
@@ -49,6 +75,7 @@ namespace ae::tal
         bool legend{false};          // draw a clade colour legend (bottom row)
         bool aa_transitions{false};  // label inodes with their aa-substitution transitions
         std::map<std::string, CladeStyle> clade_styles{}; // clade name -> override
+        std::vector<NodeMod> node_mods{};                 // select/apply mods, applied in order
     };
 
     // Render `tree` to a square PDF of side `image_size` device units. Takes

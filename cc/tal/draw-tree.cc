@@ -60,6 +60,70 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
 {
     using namespace ae::tree;
 
+    // --- node select/apply mods (settings DSL): hide nodes + collect per-node style
+    //     overrides (keyed by node index, consulted during drawing). Applied before the
+    //     layout so that "hide" removes nodes from it. ---
+    std::unordered_map<node_index_base_t, Color> edge_color_override;
+    std::unordered_map<node_index_base_t, Color> label_color_override;
+    std::unordered_map<node_index_base_t, double> label_scale_override;
+    if (!params.node_mods.empty()) {
+        tree.calculate_cumulative();
+        const auto apply_mods = [&](node_index_base_t idx, Node& base, const std::string* name, const std::string* date) {
+            for (const auto& mod : params.node_mods) {
+                const NodeSelect& sel = mod.select;
+                if (!sel.seq_id.empty() && (name == nullptr || std::find(sel.seq_id.begin(), sel.seq_id.end(), *name) == sel.seq_id.end()))
+                    continue;
+                if (sel.cumulative_min && base.cumulative_edge.get() < *sel.cumulative_min)
+                    continue;
+                if (!sel.date_min.empty()) {
+                    if (name == nullptr) continue;
+                    if (const std::string day = canonical_date(*date); day.empty() || day < sel.date_min) continue;
+                }
+                if (!sel.date_max.empty()) {
+                    if (name == nullptr) continue;
+                    if (const std::string day = canonical_date(*date); day.empty() || !(day < sel.date_max)) continue;
+                }
+                const NodeApply& ap = mod.apply;
+                if (ap.hide.value_or(false))
+                    base.shown = false;
+                if (!ap.edge_color.empty()) {
+                    try { edge_color_override[idx] = Color{ap.edge_color}; } catch (const std::exception&) { }
+                }
+                if (name != nullptr && !ap.label_color.empty()) {
+                    try { label_color_override[idx] = Color{ap.label_color}; } catch (const std::exception&) { }
+                }
+                if (name != nullptr && ap.label_scale)
+                    label_scale_override[idx] = *ap.label_scale;
+            }
+        };
+        struct Frame
+        {
+            node_index_t index;
+            std::size_t cursor;
+        };
+        std::vector<Frame> stack;
+        stack.push_back({Tree::root_index(), 0});
+        while (!stack.empty()) {
+            Frame& frame = stack.back();
+            const Inode& inode = tree.inode(frame.index);
+            if (frame.cursor < inode.children.size()) {
+                const node_index_t child = inode.children[frame.cursor++];
+                if (is_leaf(child)) {
+                    Leaf& leaf = tree.leaf(child);
+                    apply_mods(*child, leaf, &leaf.name, &leaf.date);
+                }
+                else {
+                    Inode& child_inode = tree.inode(child);
+                    apply_mods(*child, child_inode, nullptr, nullptr);
+                    stack.push_back({child, 0});
+                }
+            }
+            else {
+                stack.pop_back();
+            }
+        }
+    }
+
     const TreeLayout layout = compute_layout(tree);
     if (layout.leaves.empty())
         throw std::runtime_error{"cannot draw tree: no shown leaves"};
@@ -160,10 +224,15 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
         const Leaf& leaf = tree.leaf(node_index_t{node.node});
         const double y = dev_y(node.y);
         const Color color = leaf_color(leaf);
-        pdf.line(dev_x(node.x - leaf.edge.get()), y, dev_x(node.x), y, color, line_width);
+        const auto edge_it = edge_color_override.find(node.node);
+        pdf.line(dev_x(node.x - leaf.edge.get()), y, dev_x(node.x), y, edge_it != edge_color_override.end() ? edge_it->second : color, line_width);
         if (params.labels && !leaf.name.empty()) {
+            const auto lcol_it = label_color_override.find(node.node);
+            const auto lscale_it = label_scale_override.find(node.node);
+            const Color label_color = lcol_it != label_color_override.end() ? lcol_it->second : color;
+            const double label_fs = font_size * (lscale_it != label_scale_override.end() ? lscale_it->second : 1.0);
             const double lx = label_w > 0.0 ? x_label0 : dev_x(node.x) + line_width * 2.0;
-            pdf.text(lx, y + font_size * 0.3, leaf.name, font_size, color, /*center=*/false);
+            pdf.text(lx, y + label_fs * 0.3, leaf.name, label_fs, label_color, /*center=*/false);
         }
     }
 
@@ -171,7 +240,8 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
     for (const auto& node : layout.inodes) {
         const Inode& inode = tree.inode(node_index_t{node.node});
         const double y = dev_y(node.y);
-        pdf.line(dev_x(node.x - inode.edge.get()), y, dev_x(node.x), y, BLACK, line_width);
+        const auto edge_it = edge_color_override.find(node.node);
+        pdf.line(dev_x(node.x - inode.edge.get()), y, dev_x(node.x), y, edge_it != edge_color_override.end() ? edge_it->second : BLACK, line_width);
         double first_child_y{std::numeric_limits<double>::quiet_NaN()};
         double last_child_y{first_child_y};
         for (const node_index_t child : inode.children) {
