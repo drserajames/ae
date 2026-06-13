@@ -262,10 +262,15 @@ same either way.
       Per-report adaptation: the report's concrete `conference_data.py` subclasses
       `ae.report.conference_data_base.ConferenceData`. (`conference_data.py`, `serology.py`,
       subtype modifiers stay per-report.)
-- [ ] **Phase 2 — de-AD the stat path.** Point `stat_tables._compute_stat` at
-      `ae.report.stat.make_stat_json` (drop the `hidb5-stat` shell).
-- [ ] **Phase 3 — remove the remaining AD scaffolding** (`init.py`, `templates/`,
-      `bin/ssm-report-init`); finish `README.md`. End-to-end test a report dir against `ae.report`.
+- [x] **Phase 2 — de-AD the stat path.** `stat_tables._compute_stat` now calls
+      `ae.report.stat.make_stat_json` (`ae_backend.hidb` + `locdb_v3`) instead of shelling
+      `hidb5-stat`. **✅ Verified:** `make_stat` over real hidb produces `stat.json.xz` +
+      per-lab/subtype `*-tab.txt` + `stat.csv` + `index.html`, no AD/C++ binary.
+- [x] **Phase 3 — removed the remaining AD scaffolding** (`init.py`, `templates/`,
+      `bin/ssm-report-init`) and refreshed `README.md`. `ae.report` is now just the engine.
+- [ ] **End-to-end validation** (next): repoint a real report dir at `ae.report` and run
+      `commander` download→populate→style→export. Needs `kateri` + env + TAL/`geo-draw`.
+      Also: `geographic.py` shells `geographic-draw` (AD name) — switch to ae's `geo-draw`.
 - [ ] **Phase 4 — (separate) port `zero_do`** interactive adjustment AD→ae.
 
 ---

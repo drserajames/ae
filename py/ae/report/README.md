@@ -49,14 +49,29 @@ runners). These encode season-specific scientific decisions and are edited every
 
 All 11 engine modules import clean under Python 3.10 + `ae_backend`.
 
-Also pending: **Phase 2** — point `stat_tables.py`'s `_compute_stat` at
-`ae.report.stat.make_stat_json` (it currently still shells the AD `hidb5-stat` binary);
-and the AD scaffolding still present here (`init.py`, `templates/`, `bin/ssm-report-init`)
-to be removed/replaced.
+## Done — Phase 2 (de-AD the stat path) + Phase 3 (drop AD scaffolding)
 
-## Verification (stat writer)
+- **Phase 2:** `stat_tables._compute_stat` now calls `ae.report.stat.make_stat_json`
+  (`ae_backend.hidb` + `locdb_v3`) instead of shelling the AD `hidb5-stat` C++ binary.
+  So the consolidated tree has **no AD/C++ dependency** for stats.
+- **Phase 3:** removed the leftover AD scaffolding — `init.py`, `templates/`,
+  `bin/ssm-report-init`. The vcm world uses `dirs.py` conventions, not `report.json`.
 
-`ae.report.stat.make_stat_json` is verified against real H1/H3 hidb: cross-product
-invariants hold (Σ vt = all, Σ labs = all, Σ months = year, `sera_unique` ≥ deduped
-`sera`) and the output feeds the LaTeX statistics tables. ⚠ B is skipped — the B hidb
-fails to load in `ae_backend.hidb` (`STRING_ERROR`, open hidb-side bug).
+## What remains
+
+- **End-to-end validation:** repoint a real report dir (`conference_data.py` /
+  `0do` imports) at `ae.report` and run `commander` `download`→`populate`→`style`→
+  `export`; needs the `kateri` executable + env (`$HIDB_V5`/`$LOCDB_V2`/`$WHOCC_TABLES_DIR`)
+  and, for trees/geo, TAL `tal-draw` + the `geo-draw` renderer.
+- **Geo renderer name:** `geographic.py` shells `geographic-draw` (AD's name); ae's is
+  `geo-draw` (map-draw `cc/geo`) — update the command + wire the `--data` JSON flow.
+- A per-report **skeleton** (a `conference_data.py` subclass + subtype-modifier stubs)
+  so a new report can bootstrap against `ae.report` — optional, owner's call.
+
+## Verification
+
+- **Engine:** all 11 modules import clean (Python 3.10 + `ae_backend`).
+- **Stat (Phase 2):** `stat_tables.make_stat` over real hidb produces `stat.json.xz` +
+  per-lab/subtype `*-tab.txt` + `stat.csv` + `index.html` via `ae.report.stat` (no
+  `hidb5-stat`). `make_stat_json` cross-product invariants verified earlier (Σ vt = all,
+  Σ labs = all, Σ months = year, `sera_unique` ≥ deduped `sera`).

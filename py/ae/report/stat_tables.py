@@ -7,7 +7,6 @@ import collections
 import re
 import csv
 import json
-import subprocess
 import lzma
 from ae.utils.time_series import TimeSeriesRange
 
@@ -48,7 +47,12 @@ def make_stat(output_dir: Path, hidb_dir: Path, time_series: TimeSeriesRange, pr
 def _compute_stat(output_dir, hidb_dir, time_series: TimeSeriesRange):
     output_dir.mkdir(exist_ok=True)
     output = output_dir.joinpath("stat.json.xz")
-    subprocess.check_call(f"hidb5-stat --start '{time_series.front_YMD()}' --end '{time_series.after_last_YMD()}' --db-dir '{hidb_dir}' '{output}'", shell=True)
+    # Phase 2: use the ae Python port of hidb5-stat (ae_backend.hidb + locdb_v3)
+    # instead of shelling the AD `hidb5-stat` C++ binary. locationdb is resolved
+    # from $LOCDB_V2 (set in the report environment).
+    from . import stat
+    stat.make_stat_json(output=output, start=time_series.front_YMD(),
+                        end=time_series.after_last_YMD(), db_dir=hidb_dir)
     return json.load(lzma.LZMAFile(output, "rb"))
 
 # ----------------------------------------------------------------------
