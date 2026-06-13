@@ -88,6 +88,26 @@ namespace ae::draw
         cairo_stroke(context_);
     }
 
+    void CairoPdf::path_negative_move(const double* first, const double* last, Color outline, double outline_width, Color fill)
+    {
+        cairo_new_path(context_);
+        for (const double* p = first; p + 1 < last; p += 2) {
+            if (p[0] < 0.0)
+                cairo_move_to(context_, -p[0], p[1]);
+            else
+                cairo_line_to(context_, p[0], p[1]);
+        }
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        if (outline_width > 0.0 && !outline.is_transparent()) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+    }
+
     void CairoPdf::rectangle(double x, double y, double width, double height, Color outline, double outline_width, Color fill)
     {
         cairo_new_path(context_);

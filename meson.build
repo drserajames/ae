@@ -299,6 +299,16 @@ tal_draw = executable(
   link_with : [libae],
   install : true)
 
+# --- geo (geographic maps, needed by ssm-report #4) — equirectangular world map -> PDF.
+#     Uses the shared cc/draw/cairo-surface; Cairo linked only here. See TODO.md §1. ---
+geo_draw = executable(
+  'geo-draw',
+  sources : ['cc/geo/geo-draw-main.cc', 'cc/geo/geographic-map.cc', 'cc/geo/geographic-path.cc', 'cc/draw/cairo-surface.cc'],
+  include_directories : include_cc,
+  dependencies : [fmt, range_v3, simdjson, cairo],
+  link_with : [libae],
+  install : true)
+
 # ----------------------------------------------------------------------
 # tests ae
 # ----------------------------------------------------------------------

@@ -37,6 +37,10 @@ namespace ae::draw
         // Axis-aligned rectangle with its top-left corner at (x, y). Transparent fill = outline only.
         void rectangle(double x, double y, double width, double height, Color outline, double outline_width, Color fill);
         void line(double x1, double y1, double x2, double y2, Color color, double width);
+        // Draw a multi-subpath path in the "negative-move" convention: [first, last) is a flat
+        // double array (stride 2 = {x, y}); a pair with x < 0 starts a new subpath (move-to at
+        // {|x|, y}), x >= 0 is a line-to. Transparent fill / non-positive outline width are skipped.
+        void path_negative_move(const double* first, const double* last, Color outline, double outline_width, Color fill);
         // Draw UTF-8 text via Cairo's built-in font API. When center is true the text's
         // bounding box is centred on (x, y); otherwise (x, y) is the box's top-left.
         void text(double x, double y, std::string_view utf8, double font_size, Color color, bool center = true);
