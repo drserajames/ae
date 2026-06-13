@@ -1,15 +1,28 @@
 #pragma once
 
 #include <filesystem>
+#include <vector>
+
+#include "ad/color.hh"
 
 // ----------------------------------------------------------------------
 
 namespace ae::geo
 {
-    // Render the equirectangular world base map (land filled + coastline) to a PDF.
-    // `image_width` is the PDF width in device units; the height follows the map's
-    // ~2:1 aspect. Plotting located points (lon/lat) + time-series is a later slice.
-    void export_geographic_pdf(const std::filesystem::path& output, double image_width = 1000.0);
+    // A point to plot on the map, given in geographic coordinates.
+    struct GeoPoint
+    {
+        double lon{};
+        double lat{};
+        Color fill{0xFF0000};
+        Color outline{0}; // black
+        double radius{6.0};
+    };
+
+    // Render the equirectangular world base map (land filled + coastline) to a PDF and
+    // plot `points` at their lon/lat. `image_width` is the PDF width in device units; the
+    // height follows the map's geographic_map_size aspect (~2:1).
+    void export_geographic_pdf(const std::filesystem::path& output, double image_width = 1000.0, const std::vector<GeoPoint>& points = {});
 
 } // namespace ae::geo
 
