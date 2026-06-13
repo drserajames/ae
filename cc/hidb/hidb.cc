@@ -379,6 +379,24 @@ namespace
         }
     }
 
+    // Some AD-generated B hidb files encode CJK location names with invalid
+    // capital-"\U" escapes (e.g. "\U6E56\U5357" for 湖南) instead of the JSON
+    // "\u" form. simdjson rejects these with STRING_ERROR. Rewrite "\U" -> "\u"
+    // in-place; the four hex digits that follow are already valid. The scan is
+    // escape-aware so a legitimate "\\U" (escaped backslash + U) is untouched.
+    void sanitize_invalid_unicode_escapes(std::string& json)
+    {
+        for (size_t i = 0; i + 1 < json.size();) {
+            if (json[i] == '\\') {
+                if (json[i + 1] == 'U')
+                    json[i + 1] = 'u';
+                i += 2; // skip the escape pair, so "\\" is consumed whole
+            }
+            else
+                ++i;
+        }
+    }
+
     template <typename Source> void read_table(Table& target, Source source)
     {
         for (auto field : source.get_object()) {
@@ -408,7 +426,9 @@ namespace
 
 ae::hidb::HiDb::HiDb(const std::filesystem::path& filename)
 {
-    ae::simdjson::Parser parser{filename};
+    std::string json = ae::file::read(filename);
+    sanitize_invalid_unicode_escapes(json);
+    ae::simdjson::Parser parser{std::string_view{json}};
     for (auto field : parser.doc().get_object()) {
         const std::string_view key = field.unescaped_key();
         if (key == "a") {
