@@ -38,6 +38,8 @@ int main(int argc, char* const argv[])
                 params.legend = true;
             else if (arg == "--aa-transitions")
                 params.aa_transitions = true;
+            else if (arg == "--aa-transitions-compute")
+                params.aa_transitions_compute = true;
             else if (arg.substr(0, 8) == "--title=")
                 params.title = std::string{arg.substr(8)};
             else if (arg.substr(0, 11) == "--settings=")

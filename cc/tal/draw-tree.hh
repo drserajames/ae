@@ -86,6 +86,9 @@ namespace ae::tal
         std::string title{};         // page title (top, centred); empty = none
         bool legend{false};          // draw a clade colour legend (bottom row)
         bool aa_transitions{false};  // label inodes with their aa-substitution transitions
+        bool aa_transitions_compute{false}; // compute the transitions first (consensus) instead of using the tree's stored ones
+        double aa_transitions_tolerance{0.6}; // consensus non-common tolerance (when computing)
+        int aa_transitions_min_leaves{1};   // only label an inode's transitions if its subtree has >= this many leaves
         std::map<std::string, CladeStyle> clade_styles{}; // clade name -> override
         std::vector<NodeMod> node_mods{};                 // select/apply mods, applied in order
         std::vector<HzSection> hz_sections{};             // horizontal section bands (left marker column)

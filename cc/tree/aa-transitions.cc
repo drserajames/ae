@@ -123,27 +123,38 @@ namespace ae::tree
         //     {
         //     }
 
+        // The consensus aa at this position if the most frequent aa occupies more than
+        // `tolerance` of the subtree (else 0 = no consensus). Gaps/unknowns never count
+        // as a consensus, so transitions to/from "-"/"X" are not produced.
+        static char common_at(const Inode& node, double tolerance)
+        {
+            if (!node.common_aa)
+                return 0;
+            const auto total = node.common_aa->total();
+            if (total == 0)
+                return 0;
+            const auto [aa, count] = node.common_aa->max();
+            if (aa == '-' || aa == 'X')
+                return 0;
+            return static_cast<double>(count) > tolerance * static_cast<double>(total) ? aa : char{0};
+        }
+
+        // A transition is placed on a child branch where the child subtree's consensus aa
+        // differs from its (consensus) parent — i.e. the substitution happened on that edge.
         void set_transitions(Inode& node, sequences::pos0_t pos, double non_common_tolerance)
         {
-            // if (!is_common_with_tolerance(node, pos, non_common_tolerance)) {
-            //     for (const auto child_id : node.children) {
-            //         if (!is_leaf(child_id)) {
-            //             if (auto& child = tree_.inode(child_id); is_common_with_tolerance_for_child(child, pos, non_common_tolerance))
-            //                 child.aa_transitions.add(pos, common_at(child, pos, non_common_tolerance));
-            //         }
-            //     }
-            // }
-            // else {
-            //     for (const auto child_id : node.children) {
-            //         if (!is_leaf(child_id)) {
-            //             if (auto& child = tree_.inode(child_id); !child.common_aa->empty(pos)) {
-            //                 const auto child_aa = child.common_aa->at(pos, non_common_tolerance);
-            //                 if (const auto [common_child, msg_child] = is_common_with_tolerance_for_child(child, pos, non_common_tolerance /*, dbg*/); /* child_aa != node_aa && */ common_child)
-            //                     child.replace_aa_transition(pos, child_aa);
-            //             }
-            //         }
-            //     }
-            // }
+            const char node_aa = common_at(node, non_common_tolerance);
+            if (node_aa == 0)
+                return; // parent has no consensus -> no defined transition here
+            for (const auto child_id : node.children) {
+                if (is_leaf(child_id))
+                    continue;
+                auto& child = tree_.inode(child_id);
+                if (!child.shown)
+                    continue;
+                if (const char child_aa = common_at(child, non_common_tolerance); child_aa != 0 && child_aa != node_aa)
+                    child.aa_transitions.add(node_aa, static_cast<sequences::pos1_t>(pos), child_aa);
+            }
         }
 
         bool is_common_with_tolerance(const Inode& node, sequences::pos0_t pos, double tolerance)

@@ -1,0 +1,12 @@
+{"_": "synthetic aa-sequence tree for test-aa-transitions.py — leaves L1-L3,L6 = MKTII (ancestral), the derived (L4,L5) clade = MKAII, so position 3 carries a T->A substitution",
+ "  version": "phylogenetic-tree-v3",
+ "tree": {"t": [
+   {"l": 1, "n": "L1", "a": "MKTII"},
+   {"l": 1, "n": "L2", "a": "MKTII"},
+   {"l": 1, "n": "L3", "a": "MKTII"},
+   {"l": 1, "n": "L6", "a": "MKTII"},
+   {"l": 1, "t": [
+     {"l": 1, "n": "L4", "a": "MKAII"},
+     {"l": 1, "n": "L5", "a": "MKAII"}
+   ]}
+ ]}}

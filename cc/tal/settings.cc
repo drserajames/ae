@@ -65,8 +65,12 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
     }
     if (const auto& legend = config["legend"]; legend.is_object())
         params.legend = get_bool(legend["show"]);
-    if (const auto& aa = config["aa_transitions"]; aa.is_object())
+    if (const auto& aa = config["aa_transitions"]; aa.is_object()) {
         params.aa_transitions = get_bool(aa["show"]);
+        params.aa_transitions_compute = get_bool(aa["compute"]);
+        params.aa_transitions_tolerance = get_double(aa["tolerance"], 0.6);
+        params.aa_transitions_min_leaves = static_cast<int>(get_double(aa["min_leaves"], 1.0));
+    }
 
     if (const auto& styles = config["clade_styles"]; styles.is_array()) {
         const auto& array = styles.array();

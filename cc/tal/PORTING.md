@@ -282,11 +282,20 @@ the `cc/draw/` surface API."*
     separator across the tree at the section's top boundary. Settings key `"hz_sections": [...]`.
     **Verify:** `sh cc/tal/test/test-draw-tree.sh` (hz-sections case); a 24-leaf tree with three
     sections rasterised & eyeballed (brackets aligned to the clade groups, labelled 2a/3a/2a1b).
-17. **Remaining toward parity:** the **settings-v3 reader** (so the real `{"N":…}` `.tal`
-    configs run, not just this simplified schema), and wiring the **aa-transition computation**
-    (`cc/tree/aa-transitions.cc`) so transitions are computed, not only read from the tree's `A`
-    field. Then: `DashBar` (aa-at-pos columns), continent/aa-pos colouring, `clades-whocc`.
-18. **Low-value tail:** `if`/`then` conditionals, `-D` defines, `max-edge-length` ladderize,
+17. **aa-transition *computation* — DONE (incl. a `cc/tree` fix).** tal-draw gains
+    `--aa-transitions-compute` (settings `aa_transitions.compute`) — computes transitions via
+    `set_aa_nuc_transition_labels` before drawing — and `aa_transitions.min_leaves` (only label
+    inodes whose subtree has ≥ N leaves, like AD's `minimum-number-leaves-in-subtree`, so big
+    trees stay readable). **Found and fixed a stub:** `cc/tree/aa-transitions.cc`'s consensus
+    `set_transitions` body was entirely commented out (it built the `common_aa` counters but
+    assigned **nothing** — 0 transitions). Implemented it: a transition is placed on a child
+    branch whose subtree consensus aa (most-frequent > `non_common_tolerance`, ignoring gaps/X)
+    differs from its parent's. **Verify:** `python3 cc/tal/test/test-aa-transitions.py` →
+    computes `T3A` on a synthetic derived-clade tree; also ran on a real 70k-leaf ASR tree.
+18. **Remaining toward parity:** the **settings-v3 reader** (so the real `{"N":…}` `.tal`
+    configs run, not just this simplified schema). Then: `DashBar` (aa-at-pos columns),
+    continent/aa-pos colouring, `clades-whocc`.
+19. **Low-value tail:** `if`/`then` conditionals, `-D` defines, `max-edge-length` ladderize,
     finer signature-page layout (map grids, captions).
 
 ---

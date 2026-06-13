@@ -12,6 +12,7 @@
 #include "tal/clades.hh"
 #include "tal/time-series.hh"
 #include "tree/tree.hh"
+#include "tree/aa-transitions.hh"
 #include "draw/cairo-surface.hh"
 #include "ad/color.hh"
 #include "ext/date.hh"
@@ -59,6 +60,11 @@ namespace ae::tal
 std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size, const TreeDrawParameters& params)
 {
     using namespace ae::tree;
+
+    // --- compute aa-substitution transitions (consensus) when requested, instead of
+    //     using the transitions already stored on the tree's inodes (the `A` field). ---
+    if (params.aa_transitions_compute)
+        set_aa_nuc_transition_labels(tree, AANucTransitionSettings{.set_aa_labels = true, .set_nuc_labels = false, .non_common_tolerance = params.aa_transitions_tolerance});
 
     // --- node select/apply mods (settings DSL): hide nodes + collect per-node style
     //     overrides (keyed by node index, consulted during drawing). Applied before the
@@ -296,11 +302,15 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     }
 
     // --- aa-transition labels at inodes (port of DrawAATransitions) ---
-    if (params.aa_transitions) {
+    if (params.aa_transitions || params.aa_transitions_compute) {
         const double aa_fs = std::clamp(vstep * 0.7, 4.0, 11.0);
+        if (params.aa_transitions_min_leaves > 1)
+            tree.update_number_of_leaves_in_subtree();
         for (const auto& node : layout.inodes) {
             const Inode& inode = tree.inode(node_index_t{node.node});
             if (inode.aa_transitions.empty())
+                continue;
+            if (params.aa_transitions_min_leaves > 1 && inode.number_of_leaves() < static_cast<std::size_t>(params.aa_transitions_min_leaves))
                 continue;
             const std::string label = fmt::format("{}", inode.aa_transitions);
             pdf.text(dev_x(node.x) + aa_fs * 0.3, dev_y(node.y) - aa_fs * 0.55, label, aa_fs, Color{0x9400D3}, /*center=*/false);
