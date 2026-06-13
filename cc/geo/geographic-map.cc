@@ -30,7 +30,7 @@ namespace ae::geo
         return Color{0x808080}; // grey fallback
     }
 
-    void export_geographic_pdf(const std::filesystem::path& output, double image_width, const std::vector<GeoPoint>& points)
+    void export_geographic_pdf(const std::filesystem::path& output, double image_width, const std::vector<GeoPoint>& points, const std::string& title)
     {
         const auto [first, last] = geographic_map_path();
 
@@ -75,6 +75,11 @@ namespace ae::geo
         for (const auto& pt : points) {
             const auto [x, y] = lonlat_to_dev(pt.lon, pt.lat);
             pdf.circle(x, y, pt.radius, pt.outline, point_outline_w, pt.fill);
+        }
+
+        if (!title.empty()) {
+            const double title_font = image_width / 40.0;
+            pdf.text(image_width / 2.0, margin + title_font, title, title_font, Color{0}, /*center=*/true);
         }
     }
 

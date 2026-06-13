@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -25,8 +26,9 @@ namespace ae::geo
 
     // Render the equirectangular world base map (land filled + coastline) to a PDF and
     // plot `points` at their lon/lat. `image_width` is the PDF width in device units; the
-    // height follows the map's geographic_map_size aspect (~2:1).
-    void export_geographic_pdf(const std::filesystem::path& output, double image_width = 1000.0, const std::vector<GeoPoint>& points = {});
+    // height follows the map's geographic_map_size aspect (~2:1). A non-empty `title` is
+    // drawn centred near the top.
+    void export_geographic_pdf(const std::filesystem::path& output, double image_width = 1000.0, const std::vector<GeoPoint>& points = {}, const std::string& title = {});
 
 } // namespace ae::geo
 
