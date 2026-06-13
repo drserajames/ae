@@ -168,14 +168,62 @@ def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 80
     return Path(out_pdf)
 
 
+def load_vaccine_names(vaccines_file, subtype: str) -> list:
+    """Read the WHO vaccine strain names for `subtype` from acmacs-data's
+    semantic_vaccines.py (the modern replacement for AD's vaccines.json). Keys are
+    e.g. "A(H1N1)", "A(H3N2)", "BV", "BY"."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_ae_tal_semantic_vaccines", str(vaccines_file))
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)  # imports ae.utils.org — needs py/ on sys.path
+    except Exception as err:
+        raise SignaturePageError(f"cannot load vaccines file {vaccines_file}: {err}") from err
+    table = getattr(module, "sData", {}).get(subtype)
+    if table is None:
+        raise SignaturePageError(f"subtype {subtype!r} not in {vaccines_file} (keys: {sorted(getattr(module, 'sData', {}))})")
+    return [entry["name"] for entry in table if entry.get("name")]
+
+
+def match_leaves_by_name(tree, names: Sequence[str]) -> list:
+    """Return the seq_ids of tree leaves whose strain-name matches one of `names`.
+
+    Leaf seq_ids look like `LOCATION/ISOLATE/YEAR[_PASSAGE]_HASH` with spaces written
+    as underscores (e.g. NEW_CALEDONIA/20/1999_E5_AB12CD34); vaccine names use spaces
+    (NEW CALEDONIA/20/1999). A leaf matches when its seq_id equals the normalised name
+    or starts with it followed by `_` (so all passages of the strain are caught).
+    Loads the tree via ae_backend, so run under the Python that can import it.
+    """
+    try:
+        import ae_backend
+    except ImportError as err:
+        raise SignaturePageError(f"--mark-vaccines needs ae_backend ({err}); run under the arm64 python3.10") from err
+    loaded = ae_backend.tree.load(str(tree))
+    wanted = {n.strip().upper().replace(" ", "_") for n in names if n.strip()}
+    matched = []
+    for ref in loaded.select_leaves():
+        seq_id = ref.name()
+        upper = seq_id.upper()
+        if any(upper == w or upper.startswith(w + "_") for w in wanted):
+            matched.append(seq_id)
+    return matched
+
+
 def make_signature_page(tree, output, *, maps: Sequence[os.PathLike] = (), chart=None, size: int = 1000,
                         settings: Optional[str] = None, mark: Optional[Sequence[str]] = None, mark_style: Optional[dict] = None,
+                        mark_vaccines: Optional[str] = None, vaccines_file=None,
                         style: str = "-", map_width: float = 800.0, tal_draw_args: Sequence[str] = (), frame: bool = False,
                         keep_temp: bool = False) -> Path:
     """Render the tree, obtain the map(s), and compose them into `output`."""
     tmpdir = Path(tempfile.mkdtemp(prefix="tal-sig-"))
     try:
-        tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size, settings=settings, mark=mark, mark_style=mark_style,
+        marks = list(mark or [])
+        if mark_vaccines:
+            if not vaccines_file:
+                raise SignaturePageError("--mark-vaccines needs --vaccines-file (acmacs-data/semantic_vaccines.py)")
+            marks += match_leaves_by_name(tree, load_vaccine_names(vaccines_file, mark_vaccines))
+        tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size, settings=settings, mark=marks or None, mark_style=mark_style,
                                    tal_draw_args=tal_draw_args, _tmpdir=tmpdir)
         map_pdfs = [Path(m) for m in maps]
         if chart:

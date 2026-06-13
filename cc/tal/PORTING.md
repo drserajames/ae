@@ -247,9 +247,25 @@ the `cc/draw/` surface API."*
       --socket …`** (a bare subprocess gets no Aqua session and never connects) —
       `render_map_via_kateri` resolves the `.app` from the on-PATH `kateri` symlink and does
       this; (2) the `--chart` path imports `ae_backend`, so run it under the arm64 **python3.10**
-      (the `--map` path is pure-stdlib and runs anywhere).
-14. **Remaining (low-value tail):** `if`/`then` conditionals, `-D` defines, WHOCC
-    `clades-whocc`/`vaccines` built-ins; finer signature-page layout (map grids, captions).
+      (the `--map` path is pure-stdlib and runs anywhere). Committed as the **opt-in** test
+      [`test/test-signature-page-kateri.sh`](test/test-signature-page-kateri.sh) (runs only with
+      `TAL_TEST_KATERI=1`; skips in headless CI).
+14. **`--mark-vaccines` (WHOCC vaccine strains) — DONE, real-data verified.** `--mark-vaccines
+    SUBTYPE --vaccines-file …/semantic_vaccines.py` reads the vaccine list (acmacs-data's
+    `semantic_vaccines.py`, the modern `sData[subtype] -> [{"name":…}]` replacement for AD's
+    `vaccines.json`), matches each against the tree's leaf seq_ids (normalise spaces↔underscores,
+    prefix-match so every passage of a strain is caught), and feeds the hits to the `--mark`
+    node-mods. `load_vaccine_names` + `match_leaves_by_name` in `signature_page.py` (the latter
+    needs `ae_backend`). **Verify (committed, synthetic):**
+    `python3 cc/tal/test/test-mark-vaccines.py` → matches A,E from a fake list. **Verify
+    (real, one-off):** the real 38,128-leaf `bvic.after-2021.tjz` + real BV vaccines matched 7
+    leaves (AUSTRIA/1359417/2021 passages, SINGAPORE/WUH4618/2021, CONNECTICUT/1/2021) and
+    rendered a signature page (tree with the vaccines red + kateri map) in ~2 s — rasterised &
+    eyeballed. *(hidb reference-antigen auto-marking would reuse the same `match_leaves_by_name`
+    path; not yet wired.)*
+15. **Remaining (low-value tail):** `if`/`then` conditionals, `-D` defines, `clades-whocc`
+    built-in; hidb reference-antigen auto-marking; finer signature-page layout (map grids,
+    captions); the unported `DashBar`/`HzSections`/continent-colouring layout elements.
 
 ---
 

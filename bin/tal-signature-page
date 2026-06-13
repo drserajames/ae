@@ -35,6 +35,8 @@ def main() -> int:
     parser.add_argument("--chart", metavar="CHART.ace", help="chart to render to a map via kateri (requires the kateri executable)")
     parser.add_argument("--settings", metavar="FILE", help="tal-draw JSON settings file for the tree")
     parser.add_argument("--mark", metavar="ID,ID,...", help="comma-separated seq_ids to highlight on the tree (e.g. vaccine/reference strains)")
+    parser.add_argument("--mark-vaccines", metavar="SUBTYPE", help="highlight WHO vaccine strains for SUBTYPE (e.g. BV, BY, 'A(H3N2)') — reads --vaccines-file (needs ae_backend)")
+    parser.add_argument("--vaccines-file", metavar="semantic_vaccines.py", help="path to acmacs-data/semantic_vaccines.py (required with --mark-vaccines)")
     parser.add_argument("--size", type=int, default=1000, help="tree panel size in px (default 1000)")
     parser.add_argument("--map-width", type=float, default=800.0, help="kateri map width in px (default 800)")
     parser.add_argument("--style", default="-", help="kateri style name (default '-')")
@@ -51,8 +53,8 @@ def main() -> int:
 
     try:
         out = make_signature_page(args.tree, args.output, maps=args.maps, chart=args.chart, size=args.size,
-                                  settings=args.settings, mark=mark, style=args.style, map_width=args.map_width,
-                                  tal_draw_args=tal_draw_args, frame=args.frame)
+                                  settings=args.settings, mark=mark, mark_vaccines=args.mark_vaccines, vaccines_file=args.vaccines_file,
+                                  style=args.style, map_width=args.map_width, tal_draw_args=tal_draw_args, frame=args.frame)
     except SignaturePageError as err:
         print(f"ERROR: {err}", file=sys.stderr)
         return 2
