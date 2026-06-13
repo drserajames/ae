@@ -16,7 +16,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-SO = os.path.join(ROOT, "build", "ae_backend.cpython-310-darwin.so")
+# Discover the built module by glob so the test is portable (…-darwin.so on macOS,
+# …-linux-gnu.so on Linux); it is loaded by path to bypass any editable-install shadow.
+import glob as _glob
+_built = _glob.glob(os.path.join(ROOT, "build", "ae_backend*.so"))
+SO = _built[0] if _built else os.path.join(ROOT, "build", "ae_backend.cpython-310-darwin.so")
 
 
 def load_ae_backend():
