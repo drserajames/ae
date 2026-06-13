@@ -20,7 +20,7 @@ status, and respect the shared-file rules below.
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
 | 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1-M3 (signature-page elements) done |
-| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; **map figures come from kateri** (chart → kateri socket → PDF, see `py/ae/utils/kateri.py`), **not** the shelved C++ map-draw #1 |
+| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; **antigenic-map figures from kateri** (chart → socket → PDF, `py/ae/utils/kateri.py`); **geographic-map figures blocked on the unbuilt ae geographic renderer (§1 "Remaining ae-side map drawing")** — not a kateri job |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data endpoints verified end-to-end |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 
@@ -72,10 +72,29 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 >   wasted; only the map-specific renderer was.
 > - Other subsystems audited against kateri: **hidb / ssm-report / webserver are NOT in kateri**
 >   → they remain legitimate ae-side work. Only map-draw was already done there.
+> - **"Maps live in kateri" means *antigenic* maps only.** kateri has **no** geographic/world-map
+>   code (zero `geograph`/`continent`/`coastline` hits in `kateri/lib`). **Geographic maps are
+>   NOT a kateri job** and remain a genuine **ae-side C++ Cairo renderer still to build** — see
+>   "Remaining ae-side map drawing" below. Don't over-apply the kateri framing to them.
 
 The milestones below (M1–M4) record what the C++ map renderer reached **before** the kateri
 audit; they are retained for history. `cc/draw/cairo-surface.*` graduated out of map-draw into
 shared `cc/draw/` infrastructure (see TAL #3).
+
+### Remaining ae-side map drawing — **geographic time-series maps** (legitimate, unbuilt)
+
+The *one* piece of "map drawing" that genuinely belongs in ae C++ (kateri does not do it).
+Needed by **ssm-report #4** for its `geographic_ts` pages (`geo/<VT>-geographic-<YYYY-MM>.pdf`);
+currently **no ae renderer exists** (`py/ae/report/geographic.py` is unported — see that README).
+
+- [ ] **Build a small standalone geographic renderer.** Reuse the **kept** `cc/draw/cairo-surface.*`
+      (also used by TAL) + `locdb_v3` (location → lat/long) + seqdb/hidb for isolation counts.
+      Draw a built-in **equirectangular world map** (port AD's baked continent outline from
+      `acmacs-draw/cc/geographic-path.cc`, bounds `[-168.24,90 … 191.76,-90]`), plot points/pies
+      per location, support `--time-series monthly`. Output `geo/<VT>-geographic-<YYYY-MM>.pdf`
+      to match `make_geographic_ts`. **Verify:** monthly grid renders for a known subtype.
+- This is independent of the shelved antigenic renderer; it shares only the Cairo surface.
+  Unowned for now — could be picked up by the map-draw agent (surface expertise) or report #4.
 
 - **AD source:** `~/AC/eu/AD/sources/acmacs-draw` (Cairo backend) and
   `~/AC/eu/AD/sources/acmacs-map-draw` (map render + the `mapi` settings DSL).
