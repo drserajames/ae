@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -64,7 +65,8 @@ namespace ae::tal
 
     struct TreeDrawParameters
     {
-        bool labels{false};          // draw each leaf's name to the right of its tip
+        bool labels{false};                  // draw each leaf's name to the right of its tip
+        bool labels_avoid_collisions{true};  // suppress leaf labels that would overlap the one above
         bool color_by_clade{false};  // colour leaf edges/labels/dashes by first clade
         bool clades{false};          // draw the clade-sections column
         bool time_series{false};     // draw the time-series dash column
@@ -79,8 +81,9 @@ namespace ae::tal
     };
 
     // Render `tree` to a square PDF of side `image_size` device units. Takes
-    // Tree& because layout computes cumulative edges.
-    void export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size = 1000.0, const TreeDrawParameters& params = {});
+    // Tree& because layout computes cumulative edges. Returns the number of leaf
+    // labels suppressed by collision avoidance (0 when disabled or none overlap).
+    std::size_t export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size = 1000.0, const TreeDrawParameters& params = {});
 
 } // namespace ae::tal
 

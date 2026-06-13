@@ -52,6 +52,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
 
     params.title = get_string(config["title"]);
     params.labels = get_bool(config["labels"]);
+    params.labels_avoid_collisions = get_bool(config["labels_avoid_collisions"], true);
     params.color_by_clade = get_bool(config["color_by_clade"]);
 
     if (const auto& clades = config["clades"]; clades.is_object())

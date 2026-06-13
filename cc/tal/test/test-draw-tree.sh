@@ -46,4 +46,8 @@ check "tree-clades.json (settings DSL)" "$tmp/settings.pdf"
 "$bin" --settings="$here/draw-settings-nodes.json" "$here/tree-clades.json" "$tmp/nodes.pdf" >/dev/null
 check "tree-clades.json (settings DSL: node select/apply)" "$tmp/nodes.pdf"
 
+# Label-collision avoidance: default is ON; --labels-overlap turns it off (both must render)
+"$bin" --labels --labels-overlap "$here/tree-clades.json" "$tmp/overlap.pdf" 400 >/dev/null
+check "tree-clades.json (--labels-overlap)" "$tmp/overlap.pdf"
+
 echo "OK: tal-draw renders valid PDFs"

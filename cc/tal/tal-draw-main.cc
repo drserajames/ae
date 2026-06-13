@@ -24,6 +24,8 @@ int main(int argc, char* const argv[])
             const std::string_view arg{argv[i]};
             if (arg == "--labels")
                 params.labels = true;
+            else if (arg == "--labels-overlap")
+                params.labels_avoid_collisions = false;
             else if (arg == "--color-by-clade")
                 params.color_by_clade = true;
             else if (arg == "--clades")
@@ -60,9 +62,10 @@ int main(int argc, char* const argv[])
         if (positional.size() > 2)
             image_size = std::stod(std::string{positional[2]});
         const auto tree = ae::tree::load(std::filesystem::path{positional[0]});
-        ae::tal::export_tree_pdf(*tree, std::filesystem::path{positional[1]}, image_size, params);
-        fmt::print("Wrote {} ({:.0f}x{:.0f}, {} leaves{}{}{})\n", positional[1], image_size, image_size, tree->number_of_leaves(), params.labels ? ", labelled" : "",
-                   params.clades ? ", clades" : "", params.time_series ? ", time-series" : "");
+        const std::size_t labels_hidden = ae::tal::export_tree_pdf(*tree, std::filesystem::path{positional[1]}, image_size, params);
+        fmt::print("Wrote {} ({:.0f}x{:.0f}, {} leaves{}{}{}{})\n", positional[1], image_size, image_size, tree->number_of_leaves(), params.labels ? ", labelled" : "",
+                   params.clades ? ", clades" : "", params.time_series ? ", time-series" : "",
+                   labels_hidden > 0 ? fmt::format(", {} labels hidden to avoid overlap", labels_hidden) : std::string{});
     }
     catch (std::exception& err) {
         fmt::print(stderr, "ERROR: {}\n", err.what());

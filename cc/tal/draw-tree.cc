@@ -56,7 +56,7 @@ namespace ae::tal
 
 // ----------------------------------------------------------------------
 
-void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size, const TreeDrawParameters& params)
+std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size, const TreeDrawParameters& params)
 {
     using namespace ae::tree;
 
@@ -220,6 +220,11 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
     }
 
     // --- tree: leaf tip segments (coloured) + optional labels ---
+    // Leaf labels share the fixed column at x_label0, so collisions are purely vertical:
+    // a greedy top-to-bottom pass keeps a label only if it clears the last kept one.
+    // Labels singled out by a node mod (label_color / label_scale) are forced on.
+    std::size_t labels_hidden{0};
+    double last_label_center{-1.0e18};
     for (const auto& node : layout.leaves) {
         const Leaf& leaf = tree.leaf(node_index_t{node.node});
         const double y = dev_y(node.y);
@@ -231,8 +236,15 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
             const auto lscale_it = label_scale_override.find(node.node);
             const Color label_color = lcol_it != label_color_override.end() ? lcol_it->second : color;
             const double label_fs = font_size * (lscale_it != label_scale_override.end() ? lscale_it->second : 1.0);
-            const double lx = label_w > 0.0 ? x_label0 : dev_x(node.x) + line_width * 2.0;
-            pdf.text(lx, y + label_fs * 0.3, leaf.name, label_fs, label_color, /*center=*/false);
+            const bool forced = lcol_it != label_color_override.end() || lscale_it != label_scale_override.end();
+            if (params.labels_avoid_collisions && !forced && (y - last_label_center) < label_fs * 1.15) {
+                ++labels_hidden; // would overlap the label above — skip it (edge line is still drawn)
+            }
+            else {
+                const double lx = label_w > 0.0 ? x_label0 : dev_x(node.x) + line_width * 2.0;
+                pdf.text(lx, y + label_fs * 0.3, leaf.name, label_fs, label_color, /*center=*/false);
+                last_label_center = y;
+            }
         }
     }
 
@@ -340,6 +352,8 @@ void ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path&
             lx += swatch_w + 4.0 + tw + 16.0;
         }
     }
+
+    return labels_hidden;
 
 } // ae::tal::export_tree_pdf
 

@@ -214,9 +214,20 @@ the `cc/draw/` surface API."*
     (keyed by node index) consulted while drawing. **Verify:** `sh cc/tal/test/test-draw-tree.sh`
     (node-mods case); a 24-leaf render hiding S3/S20, red-scaling S5's label and recolouring
     S13–S15 edges was rasterised & eyeballed.
+**Drawing quality:**
+12. **Label-collision avoidance — DONE.** Leaf labels share the fixed column at `x_label0`,
+    so collisions are purely vertical: a greedy top-to-bottom pass keeps a label only if it
+    clears the last kept one by `label_fs * 1.15`. Labels singled out by a node mod
+    (`label_color`/`label_scale`) are **forced** on. On by default (`labels_avoid_collisions`;
+    `tal-draw --labels-overlap` disables it). `export_tree_pdf` returns the suppressed count
+    (surfaced by the CLI — "N labels hidden", no silent drop). **Verify:** a 250-leaf tree at
+    900 px hid 125/250 overlapping labels — rasterised & eyeballed (off = unreadable smear,
+    on = cleanly spaced); the full tree/edges are always drawn, only labels thin.
+
 11. **M3+ (next):** remaining mod-pipeline features if needed — `if`/`then` conditionals,
     `-D` command-line defines, and the WHOCC `clades-whocc`/`vaccines` built-ins — layered on
-    this declarative base; plus label-collision avoidance and `AntigenicMaps` (kateri + hidb).
+    this declarative base; plus `AntigenicMaps` (now unblocked — hidb #2 is done and kateri is
+    available for the embedded map PDFs).
 
 ---
 
