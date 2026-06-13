@@ -19,8 +19,8 @@ status, and respect the shared-file rules below.
 |---|-----------|-----------|-----:|-----------|-------|--------|
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
-| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1-M3 + Phase C M1-M2 + signature-page composition done |
-| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; **antigenic-map figures from kateri** (chart → socket → PDF, `py/ae/utils/kateri.py`); **geographic-map renderer now available** (`geo-draw`, §1) — remaining report-side work: the Python glue to extract per-month `{location, count}` from seqdb → `--data` JSON → embed PDFs (`geographic.py`) |
+| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` + `py/ae/tal/` | *(tal agent)* | 🟡 core complete — tree render; clades / time-series / **dash-bar-aa-at** columns; title / legend / **aa-transitions** (+ computation — fixed a `cc/tree` stub); **hz-sections**; node select/apply; **settings-v3 `.tal` reader** (`tal-signature-page --tal`); signature page = tree + **kateri** map + **WHOCC vaccine** marks. Remaining: `DrawOnTree` labels, per-clade hide, continent colouring — see [`cc/tal/PORTING.md`](cc/tal/PORTING.md) |
+| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (vcm engine consolidated) | *(report agent)* | 🟡 vcm engine in `ae.report` (Phases 0–3 + 1b); **end-to-end validated** (real h1-cdc chart → `chart_modifier` styling → kateri → map PDF matching known-good); **stat** de-AD'd (Python hidb5-stat port); **geographic** wired to `geo-draw` (hidb→records→per-month PDFs). Remaining: TAL `tal-draw` tree/sig-page integration; geo clade/lineage colouring (geo-draw pies) — see [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data endpoints verified end-to-end |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 
@@ -284,7 +284,7 @@ All AD hidb-5 tools are now ported.
 
 ---
 
-## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B + Phase C + signature page done)*
+## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 core complete; remaining: DrawOnTree labels / per-clade hide / continent colouring)*
 
 `ae` already has tree **manipulation** (Newick parse, fix-names, substitution-labels,
 to-json in `cc/tree/`). Missing: the tree **drawing** / signature-page / time-aware
@@ -329,8 +329,8 @@ C++ renderer; TAL composes them with the tree.
       (year/month/week/day slots + per-slot counts; ports the data side of `time-series.cc`
       using `ae::date` + C++20 `<chrono>`, no `acmacs-base/time-series` dependency; reuses
       `Leaf::date`). **Verify:** `python3 cc/tal/test/test-time-series.py` → `OK …`.
-- [ ] **Phase A (remaining, headless):** reconcile aa-transition labelling with
-      `cc/tree/aa-transitions.cc`; hz-section detection (`hz-sections.cc`).
+- [x] **Phase A (remaining, headless):** aa-transition labelling — reconciled and the
+      `cc/tree/aa-transitions.cc` consensus stub implemented; hz-sections — done (drawing).
 - [x] **Phase B M1 — tree → PDF.** `ae::tal::export_tree_pdf` in
       [`cc/tal/draw-tree.cc`](cc/tal/draw-tree.cc) + the **`tal-draw`** CLI (port of
       acmacs-tal `DrawTree::draw`: edge segments + inode connectors, optional leaf labels).
@@ -382,10 +382,22 @@ C++ renderer; TAL composes them with the tree.
       (synthetic); one-off on the real 38k-leaf bvic tree matched 7 BV vaccine leaves and rendered
       a signature page (vaccines red + kateri map) — eyeballed. Live kateri now also covered by
       the opt-in `cc/tal/test/test-signature-page-kateri.sh` (`TAL_TEST_KATERI=1`).
-- [ ] **Remaining (low-value tail):** mod-pipeline `if/then` / `-D` defines / `clades-whocc`
-      built-in; hidb reference-antigen auto-marking (same match path as `--mark-vaccines`);
-      finer signature-page layout (map grids/captions); the unported `DashBar` / `HzSections` /
-      continent-colouring layout elements.
+- [x] **`--mark-reference` (hidb reference antigens) — built; 0 hits on current trees.**
+      `get_reference_antigen_names` (union of `HiDb.reference_antigens` over recent tables,
+      `name_without_subtype`) + multi-colour mark groups (vaccines red / references blue). Honest
+      finding: hidb references are older anchor strains, so on a current-season tree they match 0
+      (expected — vaccines match because they're recent). Mechanism verified via the shared
+      `match_leaves_by_name`.
+- [x] **`hz-sections`** (left marker column: bracket + label per section, separator across the
+      tree). Verified `sh cc/tal/test/test-draw-tree.sh` (hz-sections case).
+- [x] **aa-transition *computation*** (`--aa-transitions-compute` + `min_leaves`). **Required
+      fixing a `cc/tree` stub** — the consensus `set_transitions` in `cc/tree/aa-transitions.cc`
+      was commented out (computed 0). Implemented it; `cc/tal/test/test-aa-transitions.py` →
+      `T3A`.
+- [ ] **Remaining toward parity:** the **settings-v3 reader** (run real `{"N":…}` `.tal` configs,
+      not just the simplified schema) — the biggest item. Then `DashBar` (aa-at-pos columns),
+      continent/aa-pos colouring, `clades-whocc`. Low-value tail: `if/then` / `-D` defines /
+      `max-edge-length` ladderize / finer map-grid layout.
 
 ---
 

@@ -191,9 +191,9 @@ the `cc/draw/` surface API."*
    inode aa-transitions rendered as a full signature-page-style figure (title + tree +
    aa labels + clade bars + time-series with rotated year labels + legend) — rasterised &
    eyeballed.
-8. **M4+ (next):** label collision avoidance, and `AntigenicMaps` (embed kateri-rendered map
-   PDFs per the §1 course-correction, + hidb (#2) for vaccine/reference marks) for the full
-   signature page.
+8. **M4+ — DONE** (see the items below): label-collision avoidance (#12), `hz-sections` (#16),
+   aa-transition computation (#17), `dash-bar-aa-at` (#18), and `AntigenicMaps` — the full
+   tree+map signature page composed from kateri PDFs + hidb/WHOCC vaccine marks (#13–#15).
 
 **Phase C — settings DSL:**
 9. **M1 — declarative JSON config — DONE.** [`settings.hh`](settings.hh)/[`settings.cc`](settings.cc),
@@ -311,12 +311,12 @@ the `cc/draw/` surface API."*
     cc/tal/test/test-settings-v3.py` (synthetic config, 10 mapping checks); a **real** h3.tal +
     its 70k-leaf tree translated and rendered in ~1.3 s (clade column + monthly time-series +
     labels all present; ~2000 text-label `nodes` reported as warnings).
-20. **Remaining (smaller):** `DrawOnTree` (`apply.text` positioned labels) + per-clade
-    `show:false` hiding (would lift the two main settings-v3 approximations); continent/aa-pos
-    leaf colouring; `clades-whocc` clade-from-sequence assignment; `if`/`then` + `-D`-conditional
-    settings; finer signature-page layout.
-19. **Low-value tail:** `if`/`then` conditionals, `-D` defines, `max-edge-length` ladderize,
-    finer signature-page layout (map grids, captions).
+20. **Remaining (smaller, toward full `.tal` fidelity):** `DrawOnTree` (`apply.text` positioned
+    strain labels) + per-clade `show:false` hiding — these would lift the two main settings-v3
+    approximations; then continent/aa-pos leaf colouring and `clades-whocc` (clade-from-sequence
+    assignment).
+21. **Low-value tail:** `if`/`then` conditional settings, `-D`-conditional logic, `max-edge-length`
+    ladderize, finer signature-page layout (map grids, captions), other `tal` outputs (`.names`/`.html`).
 
 ---
 
