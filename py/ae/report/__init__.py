@@ -1,54 +1,32 @@
 """
-ae.report — seasonal/SSM WHO CC report generation.
+ae.report — seasonal/SSM WHO CC report tooling.
 
-Ported from AD ``ssm-report`` (~/AC/eu/AD/sources/ssm-report). This package
-contains the *report-assembly* core: it takes a ``report.json`` settings file
-plus a directory of pre-generated figure PDFs (antigenic maps, phylogenetic
-trees, geographic time series, signature pages) and assembles them into a single
-LaTeX document that is compiled with ``pdflatex`` into the final report PDF.
+**Migration in progress** (see `MIGRATION.md`). This package is being consolidated
+around the team's ae-based report tool `vcm`. As of Phase 1, the **engine/library
+tier** has landed here:
 
-The figure *generation* side of AD ssm-report (map.py, maker.py, commands.py,
-stat.py, geographic.py, signature_page.py) is not yet ported. The figures it
-would produce now come from different places in ae: antigenic-map PDFs from
-**kateri** (the Dart map viewer/PDF generator, driven over a socket via
-``ae.utils.kateri``), phylogenetic trees from **TAL** (``tal-draw``, TODO.md #3).
-See README.md for the full status and the dependency boundary.
+    latex         — the LaTeX assembler (functions → list[str])
+    dirs          — working-dir conventions, lab_title / lab_of_dir
+    main_loop     — async command loop + kateri task, the @command decorator
+    modules       — hot-reload module machinery
+    download      — chart download / relax / orient / merge (ae_backend.chart_v3)
+    stat_tables   — stat.json.xz → tabs / csv / html
+    stat          — stat.json.xz writer (ae_backend.hidb; replaces AD hidb5-stat)
 
-Public entry points:
-    make_report(...)        — build + compile + view a report from report.json
-    LatexReport             — the page-by-page assembler class
+Still per-report (live in each report working dir, not here): conference_data,
+serology, the subtype chart_modifiers, report.py + the addenda + 0do scripts.
+
+Still pending (Phase 1b refactor — see MIGRATION.md): the ConferenceData-coupled
+modules `chart_modifier`, `geographic`, `commander`.
+
+Import the submodules explicitly, e.g. `from ae.report import latex, download`.
+The engine submodules require `ae_backend` (Python 3.10) and, at runtime, the
+`kateri` executable; they are intentionally not eagerly imported here so that
+`import ae.report` stays lightweight.
 """
 
-from .report import (
-    make_report,
-    make_report_abbreviated,
-    make_report_serumcoverage,
-    make_signature_page_addendum,
-    make_signature_page_addendum_interleave,
-    LatexReport,
-    LatexReportError,
-    LatexSignaturePageAddendum,
-    LatexSerumCoverageAddendum,
-    StatisticsTableMaker,
-)
-from .init import init, make_report_json, compute_substitutions
-from .stat import make_stat, make_stat_json, write_stat
+# Lightweight, dependency-free convenience re-exports only.
+# (Engine submodules pull ae_backend / kateri and are imported on demand.)
+from .stat import make_stat_json, write_stat  # noqa: F401  (lazy ae_backend inside)
 
-__all__ = [
-    "make_report",
-    "make_report_abbreviated",
-    "make_report_serumcoverage",
-    "make_signature_page_addendum",
-    "make_signature_page_addendum_interleave",
-    "LatexReport",
-    "LatexReportError",
-    "LatexSignaturePageAddendum",
-    "LatexSerumCoverageAddendum",
-    "StatisticsTableMaker",
-    "init",
-    "make_report_json",
-    "compute_substitutions",
-    "make_stat",
-    "make_stat_json",
-    "write_stat",
-]
+__all__ = ["make_stat_json", "write_stat"]
