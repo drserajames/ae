@@ -19,8 +19,8 @@ status, and respect the shared-file rules below.
 |---|-----------|-----------|-----:|-----------|-------|--------|
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
-| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1-M3 (signature-page elements) done |
-| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; **antigenic-map figures from kateri** (chart → socket → PDF, `py/ae/utils/kateri.py`); **geographic-map figures blocked on the unbuilt ae geographic renderer (§1 "Remaining ae-side map drawing")** — not a kateri job |
+| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` | *(tal agent)* | 🟡 Phase A done; Phase B M1-M3 + Phase C M1-M2 + label-collision avoidance done |
+| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (new) | *(report agent)* | 🟡 in progress — assembly core ported; **antigenic-map figures from kateri** (chart → socket → PDF, `py/ae/utils/kateri.py`); **geographic-map renderer now available** (`geo-draw`, §1) — remaining report-side work: the Python glue to extract per-month `{location, count}` from seqdb → `--data` JSON → embed PDFs (`geographic.py`) |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data endpoints verified end-to-end |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 
@@ -77,95 +77,52 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 >   NOT a kateri job** and remain a genuine **ae-side C++ Cairo renderer still to build** — see
 >   "Remaining ae-side map drawing" below. Don't over-apply the kateri framing to them.
 
-The milestones below (M1–M4) record what the C++ map renderer reached **before** the kateri
-audit; they are retained for history. `cc/draw/cairo-surface.*` graduated out of map-draw into
-shared `cc/draw/` infrastructure (see TAL #3).
+The C++ **antigenic**-map renderer (its M1–M4 milestones and code) has been **removed from this
+branch** — it lives on **`map-draw-shelved`** (`drserajames/map-draw-shelved`) if ever needed as a
+headless fallback. `cc/draw/cairo-surface.*` graduated out of it into shared `cc/draw/`
+infrastructure (used by TAL #3 and the geographic renderer below). What remains under map-draw on
+`ad-port` is the geographic renderer:
 
-### Remaining ae-side map drawing — **geographic time-series maps** (legitimate, unbuilt)
+### Remaining ae-side map drawing — **geographic time-series maps** *(map-draw agent — in progress)*
 
 The *one* piece of "map drawing" that genuinely belongs in ae C++ (kateri does not do it).
-Needed by **ssm-report #4** for its `geographic_ts` pages (`geo/<VT>-geographic-<YYYY-MM>.pdf`);
-currently **no ae renderer exists** (`py/ae/report/geographic.py` is unported — see that README).
+Needed by **ssm-report #4** for its `geographic_ts` pages (`geo/<VT>-geographic-<YYYY-MM>.pdf`).
+New code lives in **`cc/geo/`** + the **`geo-draw`** CLI; reuses the shared `cc/draw/cairo-surface.*`.
 
-- [ ] **Build a small standalone geographic renderer.** Reuse the **kept** `cc/draw/cairo-surface.*`
-      (also used by TAL) + `locdb_v3` (location → lat/long) + seqdb/hidb for isolation counts.
-      Draw a built-in **equirectangular world map** (port AD's baked continent outline from
-      `acmacs-draw/cc/geographic-path.cc`, bounds `[-168.24,90 … 191.76,-90]`), plot points/pies
-      per location, support `--time-series monthly`. Output `geo/<VT>-geographic-<YYYY-MM>.pdf`
-      to match `make_geographic_ts`. **Verify:** monthly grid renders for a known subtype.
-- This is independent of the shelved antigenic renderer; it shares only the Cairo surface.
-  Unowned for now — could be picked up by the map-draw agent (surface expertise) or report #4.
-
-- **AD source:** `~/AC/eu/AD/sources/acmacs-draw` (Cairo backend) and
-  `~/AC/eu/AD/sources/acmacs-map-draw` (map render + the `mapi` settings DSL).
-- **Build deps:** Cairo (`/opt/homebrew/opt/cairo`) — linked into the `chart-draw` target
-  only (not libae/ae_backend). **Pango is NOT used** — arm64 pango isn't installed
-  (`/opt/homebrew/opt/pango` has no `lib/pkgconfig`/dylib; pkg-config resolves the x86_64
-  `/usr/local` copy, which can't link arm64). M3 text uses Cairo's built-in font API
-  instead. If advanced typography is ever needed, `brew install pango` (arm64) first.
-- **Files added (M1):** [`cc/draw/cairo-surface.hh`](cc/draw/cairo-surface.hh)/`.cc`
-  (`ae::draw::CairoPdf`), [`cc/map-draw/draw.hh`](cc/map-draw/draw.hh)/`.cc`
-  (`ae::map_draw::export_pdf`), `cc/map-draw/chart-draw-main.cc` (CLI), `meson.build`
-  `cairo` dep + `chart-draw` executable.
-
-**Milestones (staged vertical slices):**
-- [x] **M1 — Cairo links + minimal slice.** Cairo wired into `meson.build`; `CairoPdf`
-      surface (background/circle/square); `export_pdf()` loads an `.ace`, takes the best
-      projection's transformed layout, computes a padded square viewport (Y-flipped), and
-      draws test antigens (filled green circles), reference antigens (open circles) and
-      sera (open squares). CLI is the compiled binary **`build/chart-draw <in.ace>
-      <out.pdf> [size]`** (not a `bin/` python script — there's no pybind binding yet).
-      **✅ Verified:** `chart-relax test/chart1.ace` → `chart-draw` produces a valid PDF
-      1.7 (32 points rendered; rasterised and eyeballed — correct map).
-- [x] **M2 — Full styling + draw order.** `export_pdf()` now drives per-point
-      shape/fill/outline/outline-width/size/shown from the chart's `legacy::PlotSpec`
-      (resolving `ae::draw::v2::Color` strings → RGB via the global `::Color`), and iterates
-      `plot_spec.drawing_order()` (sera → reference → test). Charts with no plot spec get the
-      synthesised defaults via `PlotSpec::initialize()`. `point_shape` dispatch: Circle/Box/
-      Triangle implemented; Egg/UglyEgg fall back to Circle (until M3). Surface gained
-      `triangle()` + `line()` primitives. **`size` is treated as ae's multiplier convention
-      (default 1.0), not AD pixels** — legacy AD charts with `s≈5` render ~5× large; that's
-      an ae *import* convention gap, not a renderer bug. **✅ Verified:** default-path
-      `chart1` (green circles / open circles / open boxes) and a hand-styled chart
-      (red triangles / blue boxes / open-circle sera, sera behind) both rasterised and
-      eyeballed — shapes, colors and order correct.
-      **⚠ Still TODO for the TAL blocker:** `CairoPdf` is *not yet* an abstract reusable
-      `ae::draw::Surface` — it's a concrete PDF class with `background/circle/square/
-      triangle/line`. TAL (#3) Phase B should drive the surface-abstraction extraction
-      (likely alongside **M6** SVG/PNG); coordinate on the primitive set then.
-- [x] **M3 — Text (Cairo built-in, not Pango).** Surface gained `text(x, y, utf8, font,
-      color, center)` using Cairo's toy font API (no new build dep — arm64 pango absent, see
-      Build deps above). `export_pdf()` now draws a **title** from `chart.name()` (top centre)
-      and **per-point labels**: explicit `PointStyle::label().text` always, plus an
-      opt-in `--labels` CLI flag that labels every point by name (`chart.antigens()/sera()
-      [i].name()`) — AD's `add-all-labels` behaviour. Label position honours the label
-      offset/size/colour. **✅ Verified:** rendered the test chart with `--labels` — the
-      chart title plus per-point virus-name labels appear over the correctly-styled shapes;
-      rasterised and eyeballed. **Note:** no label collision
-      avoidance yet (labels overlap in dense regions) — deferred to M4.
-      **For TAL:** the surface now has the `text()` primitive TAL labels will need.
-- [x] **M4 (core) — Background + serum circles.** Surface gained a `rectangle`/border via
-      `line()`. `export_pdf()` now draws (before points) an antigenic-unit **grid** (grey,
-      1 AU spacing) and a black **viewport border** (AD `BackgroundBorderGrid`), and an
-      opt-in **`--serum-circles`** overlay using `chart/v3 serum_circles(chart, projection,
-      fold=2.0)` — a navy circle per serum at its empirical (else theoretical) radius in AU,
-      scaled to device. Sera with no homologous antigen are skipped (logged by the core).
-      **✅ Verified:** `chart-draw --serum-circles chart1-opt.ace` — grid + border + title +
-      navy serum circles centred on sera with points on top; rasterised and eyeballed.
-- [~] **M4 (extras):**
-      - [x] **Label collision avoidance (basic).** Surface gained `text_size()`
-            (cairo_text_extents). The label pass now tries each label's specified position
-            first, then a ring of 8 fallback positions around the point, picking the first
-            that doesn't overlap an already-placed label box. Greedy near-point heuristic —
-            **not** AD's force-directed layout. **✅ Verified:** dense `--labels` render is
-            markedly less cluttered than M3; upper/mid labels fully separated. *Limitation:*
-            very dense sub-clusters (≈6 points in a tiny area) still overlap — full fix needs
-            force-directed placement + leader lines (future).
-      - [ ] legend (better suited to M5 once semantic styles/config exist),
-            connection lines (procrustes arrows — needs a 2nd chart + procrustes match),
-            stress/error blobs (need bootstrap/triangulation data).
-- [ ] **M5 — `mapi` settings DSL:** the JSON-driven mod-applicator pipeline.
-- [ ] **M6 — SVG/PNG surfaces** in addition to PDF.
+- [x] **Slice 1 — world base map.** Ported AD's baked equirectangular continent outline
+      (`acmacs-draw/geographic-path.cc`, CC BY-SA) → [`cc/geo/geographic-path.cc`](cc/geo/geographic-path.cc)
+      under `ae::geo`. Added a `path_negative_move()` primitive to `cc/draw/cairo-surface.*`
+      (negative-x = move-to / positive = line-to). [`cc/geo/geographic-map.cc`](cc/geo/geographic-map.cc)
+      fits the path bbox to a ~2:1 canvas and draws filled land + coastline; **`geo-draw <out.pdf>
+      [width]`** CLI. **✅ Verified:** `geo-draw /tmp/world.pdf 1200` → recognizable world map
+      (all continents incl. Antarctica + islands; rasterised and eyeballed).
+- [x] **Slice 2 — plot located points.** `export_geographic_pdf()` now fits the full
+      `geographic_map_size` rectangle (so path + points share one transform) and plots each
+      `GeoPoint` via an equirectangular lon/lat→path-coord map over `geographic_map_bounds`
+      (lon spans exactly 360°). `geo-draw --point lon,lat` (repeatable). **✅ Verified:** 8
+      cities (Anchorage/NYC/London/Tokyo/Rio/Cape Town/Singapore/Sydney) land exactly on
+      their landmasses; rasterised and eyeballed.
+- [~] **Slice 3 — data integration.**
+      - [x] **locdb + continent colour.** `geo-draw --location NAME` resolves via `locdb_v3`
+            (`get().find()` → lat/long + `continent(country)`) and plots a continent-coloured
+            dot; `ae::geo::continent_color()` ports AD's palette. **✅ Verified** (LOCDB_V2 =
+            `acmacs-data/locationdb.json.xz`): London/NYC/Tokyo/Moscow/Sydney/Cairo/Buenos
+            Aires/Delhi land correctly and are coloured by continent; rasterised and eyeballed.
+      - [ ] seqdb/hidb per-location counts; pies for multi-category counts (deferred to Slice 4
+            with the data source, since counts come from the same sequence/chart input).
+- [x] **Slice 4 — time series + count sizing.** `geo-draw --data records.json --prefix <p>`
+      reads `{title_prefix, periods:[{period, locations:[{name,count}]}]}` (rjson::v3), and
+      writes one PDF per period named **`<prefix><period>.pdf`** (matches `make_geographic_ts`).
+      Dots sized by √count, coloured by continent; per-map title. **✅ Verified:** a 2-month
+      dataset renders `H3-geographic-2024-01.pdf` / `-2024-02.pdf` correctly (placement, sizes,
+      continent colours, titles); rasterised and eyeballed.
+- **🟢 geo-draw renderer complete** for the report's needs (base map · lon/lat points · named
+  locations · monthly count series). **Remaining is on the report side (#4), not here:** the
+  Python glue that extracts per-month `{location, count}` from seqdb and writes the `--data`
+  JSON, then embeds the resulting PDFs (`py/ae/report/geographic.py`). geo-draw is the renderer;
+  data extraction is the report's job (ae-idiomatic split, mirrors tal-draw / kateri).
+  *Optional future polish:* pies for multi-category (clade/lineage) counts per location;
+  configurable coloring modes (the AD `-s settings.json` coloring rules).
 
 > **Build gotcha (affects every agent who edits `meson.build`):** any edit triggers a full
 > meson regenerate, which re-runs the vendored `lexy` CMake subproject. Homebrew CMake is
@@ -308,11 +265,19 @@ simply omitted.
       branch here. **✅ Verified** on real H3 data: dated antigens blank, date-less antigens
       emit the AD offset numbers; constant and arithmetic checked.
 
+- [x] **B hidb loader fix (`STRING_ERROR`).** AD-generated `hidb5.b.json.xz` encodes CJK
+      location names with invalid capital-`\U` escapes (e.g. `"\U6E56\U5357"` for 湖南)
+      instead of JSON `\u`; simdjson rejected the whole file with `STRING_ERROR`, so `B`
+      wouldn't load while H1/H3 (no CJK names) did. `HiDb` ctor now reads + decompresses the
+      file, rewrites `\U`→`\u` in-buffer (escape-aware, leaves `\\U` alone), then parses.
+      Data files untouched (read-only inputs). **✅ Verified:** `hidb("B")` → 81661 antigens
+      and CJK names decode (`B/湖南南县/31/2008`); H1/H3 unchanged (55497 / 95251).
+
 All AD hidb-5 tools are now ported.
 
 ---
 
-## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B M1-M3 done)*
+## 3. TAL — phylogenetic tree drawing / signature pages  *(owner: tal agent — 🟡 Phase A done; Phase B M1-M3 + Phase C M1-M2 + label-collision done)*
 
 `ae` already has tree **manipulation** (Newick parse, fix-names, substitution-labels,
 to-json in `cc/tree/`). Missing: the tree **drawing** / signature-page / time-aware
@@ -379,9 +344,25 @@ C++ renderer; TAL composes them with the tree.
       (`--aa-transitions`, ports `DrawAATransitions`), and rotated year/month slot labels.
       **Verify:** `sh cc/tal/test/test-draw-tree.sh`; 24-leaf aa-annotated tree rendered as a
       full signature-page-style figure & eyeballed.
-- [ ] **Phase B M4+ / Phase C:** settings-DSL configuration of the elements; label collision
-      avoidance; `AntigenicMaps` = embed **kateri**-rendered map PDFs (per §1 course-correction)
-      + hidb (#2) marks → the full signature page.
+- [x] **Phase C M1 — declarative JSON settings.** `ae::tal::load_draw_settings()` in
+      [`cc/tal/settings.cc`](cc/tal/settings.cc) + `tal-draw --settings=FILE`. Maps a JSON
+      config onto `TreeDrawParameters` (parsed with `rjson::v3`), adding per-clade
+      `color`/`display_name` overrides + time-series `start`/`end` that flags can't express —
+      a bounded alternative to porting AD's full 71 KB settings-v3 mod pipeline. **Verify:**
+      `sh cc/tal/test/test-draw-tree.sh` (settings case); override colours/names eyeballed.
+- [x] **Phase C M2 — node select/apply mods.** `"nodes": [{select, apply}]` in the JSON
+      config: select by `seq_id`/`cumulative_min`/`date_min`/`date_max`, apply
+      `hide`/`edge_color`/`label_color`/`label_scale` (parsed in `settings.cc`, resolved via
+      per-node override maps + pre-layout hide in `draw-tree.cc`). **Verify:**
+      `sh cc/tal/test/test-draw-tree.sh` (node-mods case); eyeballed (hide + recolour + relabel).
+- [x] **Label-collision avoidance.** Greedy top-to-bottom vertical non-overlap on the leaf-label
+      column (forced labels from node mods always shown); on by default, `--labels-overlap`
+      disables; `export_tree_pdf` returns the hidden count (CLI surfaces it). **Verify:**
+      250-leaf tree hid 125/250 labels; eyeballed off (smear) vs on (clean).
+- [ ] **Phase C M3+ / Phase B M4+:** remaining mod-pipeline (`if/then`, `-D` defines,
+      `clades-whocc`/`vaccines`); `AntigenicMaps` = embed **kateri**-rendered map PDFs
+      (now unblocked: hidb #2 done + kateri available) + hidb vaccine/reference marks →
+      full signature page.
 
 ---
 
@@ -428,14 +409,26 @@ shared **report-assembly core** (`report.py` + `latex.py`) is what emits the fin
       date logic unit-checked (Northern/Southern season, teleconference, Oct year
       split); the generated 233-page `report.json` round-trips through the assembler
       (`read_json` + `LatexReport` ctor, correct `ts_dates`).
-- [ ] **Build the report-figure pipeline (kateri-based, not map-draw).** Load charts
-      via `ae_backend.chart_v3`, drive **kateri** through [`ae.utils.kateri`](py/ae/utils/kateri.py)
-      (`send_chart` → `set_style` → `get_pdf`) to emit the antigenic-map PDFs at the
-      filenames `report.py` expects (`<subtype>-<assay>/clade-<lab>.pdf`,
-      `ts-<lab>-<YYYY-MM>.pdf`, …); embed **TAL** tree PDFs (#3); port the `stat.json.xz`
-      counts writer. Open questions: geographic maps have no ae renderer yet (kateri does
-      maps, not geography); depends on `kateri` being installed and on the
-      `ae_backend.chart_v3.Chart(<file>)` import-abort bug (TODO.md §1). **Verify:**
+- [x] **Port the `stat.json.xz` counts writer.** `stat.py` (`make_stat_json`/`make_stat`)
+      + `bin/ssm-report-stat`: antigen/sera counts by virus-type/lab/date/continent from
+      `ae_backend.hidb` + `locdb_v3` (port of AD's C++ `hidb5-stat`). Uses hidb (#2 done) +
+      locdb — **not** `chart_v3`, so unaffected by the import-abort bug. **✅ Verified**
+      against real H1/H3 hidb: cross-product invariants hold (Σ vt = all, Σ labs = all,
+      Σ months = year, `sera_unique` ≥ deduped `sera`) and the output feeds
+      `StatisticsTableMaker` to render a real LaTeX table. ✅ **B now loads** — the B hidb
+      `STRING_ERROR` (invalid `\U` escapes in `hidb5.b.json.xz`) is fixed in the hidb loader
+      (see #2), so the stat writer no longer warn-skips B. (Also surfaced: a latent no-previous-data
+      crash in the ported `StatisticsTableMaker`, `report.py` ~L635 — 1 arg to a 2-arg
+      macro; only the first-report/no-previous path.)
+- [ ] **Build the rest of the report-figure pipeline (kateri-based, not map-draw).** Load
+      charts via `ae_backend.chart_v3`, drive **kateri** through
+      [`ae.utils.kateri`](py/ae/utils/kateri.py) (`send_chart` → `set_style` → `get_pdf`) to
+      emit the antigenic-map PDFs at the filenames `report.py` expects
+      (`<subtype>-<assay>/clade-<lab>.pdf`, `ts-<lab>-<YYYY-MM>.pdf`, …); embed **TAL** tree
+      PDFs (#3); wire in the geographic maps from the **`geo-draw`** renderer being built in
+      `cc/geo/` (§1 "Remaining ae-side map drawing", slices 1–2 done) → `geo/<VT>-geographic-<YYYY-MM>.pdf`.
+      The `chart_v3.Chart(<file>)` import-abort is **fixed** (§1, verified — load + `export()`),
+      so the only remaining prerequisite is the `kateri` executable being installed. **Verify:**
       generates a full PDF report from a sample dataset.
 
 ---
