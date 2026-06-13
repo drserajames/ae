@@ -233,6 +233,23 @@ flip_over_line = reflect coords; geometric select = point-in-polygon over the la
 primitive + ~500-line thin-wrapper Python framework. **Sole dependency:** the `chart_v3`
 coordinate setter (flagged separately to the chart-engine owner).
 
+**⚠ Revised after auditing kateri (likely the intended architecture).** kateri is built for
+*interactive* editing — it hit-tests points on hover (`pointLookupByCoordinates`), lets you
+drag **selection-region vertices** (`dragStart`/`vertexMove`/`reportRegion` — the interactive
+`slot.path()`/`ag.inside`), and can return the edited chart (`get_chart`). What it does **not**
+do yet is drag antigen **points** to move them — `dragStart` only grabs region vertices. So the
+adjust stage is probably **not** a scripted-Python `zero_do` port but rather:
+1. **kateri grows antigen-point dragging** (small Dart change — it already has the point
+   hit-test + `get_chart`; `dragStart`/`dragUpdate` just need a point branch that writes the
+   layout), and
+2. **`ae_backend` adds relax-with-pinned-points** (settable `unmovable`) so a post-move relax
+   keeps dragged points fixed.
+
+In this (kateri-centric) design the `chart_v3` *coordinate setter* is **not** required (kateri
+edits the layout in Dart and returns it via `get_chart`); only settable `unmovable` is. The
+scripted-Python design above remains a valid alternative for batch/repeatable moves. **This is a
+design decision for the kateri / architecture owner.**
+
 ---
 
 ## Build & reproducibility implications of the package name
