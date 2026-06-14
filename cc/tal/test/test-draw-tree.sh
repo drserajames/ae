@@ -62,4 +62,12 @@ check "tree-aa.json (dash-bar-aa-at pos 3)" "$tmp/dash.pdf"
 "$bin" --settings="$here/draw-settings-labels-hide.json" "$here/tree-clades.json" "$tmp/labels-hide.pdf" >/dev/null
 check "tree-clades.json (per-clade hide + positioned labels)" "$tmp/labels-hide.pdf"
 
+# colour-by-continent + legend (geo tree carries continents)
+"$bin" --labels --color-by-continent --legend "$here/tree-geo.json" "$tmp/continent.pdf" 500 >/dev/null
+check "tree-geo.json (--color-by-continent --legend)" "$tmp/continent.pdf"
+
+# colour-by-pos (aa-at-position) + legend on the aa-sequence tree (pos 3: T vs A)
+"$bin" --labels --color-by-pos=3 --legend "$here/tree-aa.json" "$tmp/by-pos.pdf" 500 >/dev/null
+check "tree-aa.json (--color-by-pos=3 --legend)" "$tmp/by-pos.pdf"
+
 echo "OK: tal-draw renders valid PDFs"

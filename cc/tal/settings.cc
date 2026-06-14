@@ -54,6 +54,19 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
     params.labels = get_bool(config["labels"]);
     params.labels_avoid_collisions = get_bool(config["labels_avoid_collisions"], true);
     params.color_by_clade = get_bool(config["color_by_clade"]);
+    params.color_by_continent = get_bool(config["color_by_continent"]);
+    if (const auto& cbp = config["color_by_pos"]; cbp.is_object()) {
+        params.color_by_pos = static_cast<int>(get_double(cbp["pos"], 0.0));
+        if (const auto& colors = cbp["colors"]; colors.is_array()) {
+            const auto& color_array = colors.array();
+            for (std::size_t j = 0; j < color_array.size(); ++j) {
+                const auto& color_entry = color_array[j];
+                if (color_entry.is_object())
+                    if (const std::string aa = get_string(color_entry["aa"]); !aa.empty())
+                        params.color_by_pos_colors.emplace(aa[0], get_string(color_entry["color"]));
+            }
+        }
+    }
 
     if (const auto& clades = config["clades"]; clades.is_object())
         params.clades = get_bool(clades["show"]);

@@ -28,6 +28,10 @@ int main(int argc, char* const argv[])
                 params.labels_avoid_collisions = false;
             else if (arg == "--color-by-clade")
                 params.color_by_clade = true;
+            else if (arg == "--color-by-continent")
+                params.color_by_continent = true;
+            else if (arg.substr(0, 15) == "--color-by-pos=")
+                params.color_by_pos = std::stoi(std::string{arg.substr(15)});
             else if (arg == "--clades")
                 params.clades = true;
             else if (arg == "--time-series")
@@ -52,6 +56,7 @@ int main(int argc, char* const argv[])
         if (positional.size() < 2) {
             fmt::print(stderr,
                        "Usage: {} [--settings=config.json] [--labels] [--color-by-clade] [--clades]\n"
+                       "          [--color-by-continent] [--color-by-pos=N]\n"
                        "          [--time-series] [--interval=year|month|week|day] [--legend] [--aa-transitions]\n"
                        "          [--title=TEXT] <tree.newick|tree.json[.xz]> <output.pdf> [image-size-px]\n"
                        "  --settings=FILE loads all draw options (incl. per-clade colour/name overrides) from\n"

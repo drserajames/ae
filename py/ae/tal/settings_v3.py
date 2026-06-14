@@ -155,7 +155,27 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                     sel, ap = _select(select_raw, warnings), _apply(apply_raw, warnings)
                     if sel and ap:
                         node_mods.append({"select": sel, "apply": ap})
-            elif name in ("margins", "tree", "gap", "node-id-size", "ladderize", "set"):
+            elif name == "tree":
+                # leaf colouring: color-by is a string ("continent") or an object
+                # ({"N": "pos-aa-frequency"|"pos-aa-colors", "pos": N}). Both pos modes
+                # map to color_by_pos (frequency colouring; explicit aa scheme approximated).
+                cb = cmd.get("color-by")
+                if isinstance(cb, str):
+                    if cb == "continent":
+                        schema["color_by_continent"] = True
+                    elif cb not in ("", "uniform"):
+                        warnings.append(f"tree color-by {cb!r} not supported — skipped")
+                elif isinstance(cb, dict):
+                    cbn = cb.get("N")
+                    if cbn == "continent":
+                        schema["color_by_continent"] = True
+                    elif cbn in ("pos-aa-frequency", "pos-aa-colors") and "pos" in cb:
+                        schema["color_by_pos"] = {"pos": int(cb["pos"])}
+                    else:
+                        warnings.append(f"tree color-by {cbn!r} not supported — skipped")
+                if isinstance(cmd.get("legend"), dict) and cmd["legend"].get("show"):
+                    schema.setdefault("legend", {})["show"] = True
+            elif name in ("margins", "gap", "node-id-size", "ladderize", "set"):
                 pass  # no tal-draw equivalent / no-op for a one-off render
             else:
                 warnings.append(f"command {name!r} not handled — skipped")

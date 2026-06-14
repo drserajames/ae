@@ -321,7 +321,17 @@ the `cc/draw/` surface API."*
     `sh cc/tal/test/test-draw-tree.sh` (per-clade-hide + positioned-labels case) + a PDF-text check
     (display-name `clade-X` and labels `vaccine`/`ref` present; hidden clade `Y` gone from the column
     /legend, its leaves still drawn).
-21. **Remaining (smaller, toward full `.tal` fidelity):** continent / aa-pos leaf colouring.
+21. **Continent / aa-pos leaf colouring — DONE.** Leaf colour now resolves by aa-at-pos >
+    continent > clade > black (`draw-tree.cc` `leaf_color`). `color_by_continent` uses the AD
+    continent palette (ported into `draw-tree.cc`); `color_by_pos` colours by amino acid at a 1-based
+    position — explicit `color_by_pos_colors` or, when absent, by frequency (most common = grey,
+    variants pop, shared `frequency_palette`). The bottom legend is now mode-aware (clade /
+    continent / `<pos><aa>`). Wired through `settings.cc` (`color_by_continent`, `color_by_pos`
+    `{pos, colors}`), the CLI (`--color-by-continent`, `--color-by-pos=N`), and the settings-v3
+    reader (`{"N":"tree","color-by": "continent" | {"N":"pos-aa-frequency"|"pos-aa-colors","pos":N}}`
+    + `legend.show`). **Verify:** `sh cc/tal/test/test-draw-tree.sh` (continent + by-pos cases on
+    `tree-geo.json` / `tree-aa.json`) + PDF-text check (continent legend `EUROPE/ASIA/NORTH-AMERICA
+    /AFRICA`, by-pos legend `3T`/`3A`); `python3 cc/tal/test/test-settings-v3.py` (15 checks).
 22. **Low-value tail:** `if`/`then` conditional settings, `-D`-conditional logic, `max-edge-length`
     ladderize, finer signature-page layout (map grids, captions), other `tal` outputs (`.names`/`.html`).
 

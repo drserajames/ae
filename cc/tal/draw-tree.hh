@@ -101,6 +101,9 @@ namespace ae::tal
         bool labels{false};                  // draw each leaf's name to the right of its tip
         bool labels_avoid_collisions{true};  // suppress leaf labels that would overlap the one above
         bool color_by_clade{false};  // colour leaf edges/labels/dashes by first clade
+        bool color_by_continent{false}; // colour leaves by geographic continent (acmacs-tal color-by continent)
+        int color_by_pos{0};         // colour leaves by amino acid at this 1-based position (0 = off)
+        std::map<char, std::string> color_by_pos_colors{}; // aa char -> colour for color_by_pos; empty = colour by frequency
         bool clades{false};          // draw the clade-sections column
         bool time_series{false};     // draw the time-series dash column
         std::string time_series_interval{"month"}; // year | month | week | day

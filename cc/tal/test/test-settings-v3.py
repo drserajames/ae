@@ -39,6 +39,8 @@ def main():
         "per-clade color preserved": any(
             s.get("name") == "C2" and s.get("color") == "#1f78b4" for s in schema.get("clade_styles", [])
         ),
+        "tree color-by continent": schema.get("color_by_continent") is True,
+        "tree legend.show": schema.get("legend", {}).get("show") is True,
         "no apply.text warning": not any("apply.text" in w for w in warnings),
     }
     failures = [name for name, ok in checks.items() if not ok]

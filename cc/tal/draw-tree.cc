@@ -30,6 +30,28 @@ namespace ae::tal
             return palette[index % palette.size()];
         }
 
+        // Continent colour, ported from AD acmacs-base/color-continent.cc (primary palette).
+        Color continent_color(std::string_view continent)
+        {
+            static const std::array<std::pair<std::string_view, std::uint32_t>, 14> colors{{
+                {"EUROPE", 0x00FF00}, {"CENTRAL-AMERICA", 0xAAF9FF}, {"MIDDLE-EAST", 0x8000FF}, {"NORTH-AMERICA", 0x00008B},
+                {"AFRICA", 0xFF8000}, {"ASIA", 0xFF0000}, {"RUSSIA", 0xB03060}, {"AUSTRALIA-OCEANIA", 0xFF69B4},
+                {"SOUTH-AMERICA", 0x40E0D0}, {"ANTARCTICA", 0x808080}, {"CHINA-SOUTH", 0xFF0000}, {"CHINA-NORTH", 0x6495ED},
+                {"CHINA-UNKNOWN", 0x808080}, {"UNKNOWN", 0x808080}}};
+            for (const auto& [name, value] : colors)
+                if (name == continent)
+                    return Color{value};
+            return GREY50; // unknown / empty continent
+        }
+
+        // Frequency palette shared by colour-by-pos and the dash-bar columns
+        // (most common aa -> grey, variants pop).
+        Color frequency_palette(std::size_t rank)
+        {
+            static const std::array<Color, 8> palette{GREY, RED, BLUE, GREEN, ORANGE, PURPLE, Color{0x008080}, MAGENTA};
+            return palette[std::min(rank, palette.size() - 1)];
+        }
+
         TimeSeriesInterval interval_from_string(const std::string& interval)
         {
             if (interval == "year")
@@ -181,8 +203,39 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     if (params.time_series)
         time_series = compute_time_series(tree, interval_from_string(params.time_series_interval), params.time_series_start, params.time_series_end);
 
-    // leaf colour = first clade's (possibly overridden) colour when colouring, else black
+    // --- colour-by-pos: amino-acid-at-position colour map (explicit or by frequency) ---
+    const sequences::pos0_t color_pos0{params.color_by_pos > 0 ? static_cast<std::size_t>(params.color_by_pos - 1) : std::size_t{0}};
+    std::vector<std::pair<char, Color>> pos_aa_colors; // aa -> colour, ordered (most common first / as given)
+    if (params.color_by_pos > 0) {
+        for (const auto& [aa, color_string] : params.color_by_pos_colors) {
+            try { pos_aa_colors.emplace_back(aa, Color{color_string}); } catch (const std::exception&) { }
+        }
+        if (pos_aa_colors.empty()) { // colour by frequency over the shown leaves
+            std::unordered_map<char, int> counts;
+            for (const auto& node : layout.leaves) {
+                const Leaf& leaf = tree.leaf(node_index_t{node.node});
+                if (leaf.aa.size() > color_pos0)
+                    ++counts[leaf.aa[color_pos0]];
+            }
+            std::vector<std::pair<char, int>> ranked(counts.begin(), counts.end());
+            std::sort(ranked.begin(), ranked.end(), [](const auto& l, const auto& r) { return l.second > r.second; });
+            for (std::size_t r = 0; r < ranked.size(); ++r)
+                pos_aa_colors.emplace_back(ranked[r].first, frequency_palette(r));
+        }
+    }
+    const auto pos_color_for = [&](char aa) -> Color {
+        for (const auto& [a, c] : pos_aa_colors)
+            if (a == aa)
+                return c;
+        return GREY50;
+    };
+
+    // leaf colour: by aa-at-pos > by continent > by first clade > black
     const auto leaf_color = [&](const Leaf& leaf) -> Color {
+        if (params.color_by_pos > 0)
+            return leaf.aa.size() > color_pos0 ? pos_color_for(leaf.aa[color_pos0]) : GREY50;
+        if (params.color_by_continent)
+            return continent_color(leaf.continent);
         if (params.color_by_clade && !leaf.clades.empty()) {
             const std::string name{leaf.clades[0]};
             if (const auto found = clade_rank.find(name); found != clade_rank.end())
@@ -212,8 +265,31 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     if (ts_w > 0.0)    { cursor += gap; x_ts0 = cursor;    cursor += ts_w; }
     if (dash_w > 0.0)  { cursor += gap; x_dash0 = cursor;  cursor += dash_w; }
 
+    // --- legend items for the active colouring mode (aa-at-pos > continent > clade) ---
+    std::vector<std::pair<std::string, Color>> legend_items;
+    if (params.legend) {
+        if (params.color_by_pos > 0) {
+            for (const auto& [aa, color] : pos_aa_colors)
+                legend_items.emplace_back(fmt::format("{}{}", params.color_by_pos, aa), color);
+        }
+        else if (params.color_by_continent) {
+            std::vector<std::string> seen; // first-seen order among shown leaves
+            for (const auto& node : layout.leaves) {
+                const std::string& cont = tree.leaf(node_index_t{node.node}).continent;
+                if (!cont.empty() && std::find(seen.begin(), seen.end(), cont) == seen.end())
+                    seen.push_back(cont);
+            }
+            for (const auto& cont : seen)
+                legend_items.emplace_back(cont, continent_color(cont));
+        }
+        else {
+            for (const std::size_t k : visible_clades)
+                legend_items.emplace_back(clade_display_for(clade_sections[k].name), clade_color_for(k, clade_sections[k].name));
+        }
+    }
+
     // --- vertical reserves: title (top), legend + time-series slot labels (bottom) ---
-    const bool want_legend = params.legend && !visible_clades.empty();
+    const bool want_legend = !legend_items.empty();
     const double top_reserve = params.title.empty() ? 0.0 : 0.05 * image_size;
     const double bottom_reserve = (want_legend || ts_w > 0.0 || dash_w > 0.0) ? 0.07 * image_size : 0.0;
 
@@ -428,16 +504,14 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         }
     }
 
-    // --- legend: clade colour swatches (bottom-left row) ---
+    // --- legend: colour swatches for the active mode (clade / continent / aa-at-pos), bottom-left row ---
     if (want_legend) {
         const double legend_fs = std::clamp(bottom_reserve * 0.28, 7.0, 12.0);
         const double swatch_w = legend_fs * 1.4;
         const double swatch_h = legend_fs * 0.9;
         const double ly = image_size - margin - bottom_reserve * 0.35;
         double lx = margin;
-        for (const std::size_t k : visible_clades) {
-            const Color color = clade_color_for(k, clade_sections[k].name);
-            const std::string name = clade_display_for(clade_sections[k].name);
+        for (const auto& [name, color] : legend_items) {
             pdf.rectangle(lx, ly - swatch_h / 2.0, swatch_w, swatch_h, color, 0.5, color);
             const double tw = pdf.text_size(name, legend_fs).first;
             pdf.text(lx + swatch_w + 4.0 + tw / 2.0, ly, name, legend_fs, BLACK, /*center=*/true);
