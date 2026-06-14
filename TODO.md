@@ -20,7 +20,7 @@ status, and respect the shared-file rules below.
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
 | 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` + `py/ae/tal/` | *(tal agent)* | 🟢 feature-complete (core) — tree render; clades / time-series / **dash-bar-aa-at** columns; **leaf colouring by clade / continent / aa-at-pos** + mode-aware legend; title / **aa-transitions** (+ computation — fixed a `cc/tree` stub); **hz-sections**; node select/apply + **positioned `apply.text` labels (DrawOnTree)**; **per-clade `show:false` hiding**; **settings-v3 `.tal` reader** (`tal-signature-page --tal`); signature page = tree + **kateri** map + **WHOCC vaccine** marks. Only low-value tail left (`for-each`, ladderize, `.names`/`.html` outputs) — see [`cc/tal/PORTING.md`](cc/tal/PORTING.md) |
-| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (vcm engine consolidated) | *(report agent)* | 🟡 vcm engine in `ae.report` (Phases 0–3 + 1b); **all four figure families generate on ae** — antigenic maps (kateri, e2e-validated vs known-good), **stat** (Python hidb5-stat port), **geographic** (`geo-draw`), **trees** (`tal-draw` + `.tal` translation); **adjust ported** — programmatic `ae.adjust` + interactive kateri point-drag. Remaining: a **full assembled-report run** (capstone), and geo clade/lineage colouring (geo-draw pies, #1). See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) |
+| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (vcm engine consolidated) | *(report agent)* | 🟡 vcm **library tier** in `ae.report` (Phases 0–3 + 1b) — **verified faithful** vs a real later report's vcm (`2026-0223`): `commander`/`download`/`main_loop`/`dirs`/`modules`/`chart_modifier`/`latex` differ only by the deliberate decoupling + warning fixes. **adjust ported** — `ae.adjust` + kateri point-drag. **NOT yet remake-ready** — capstone (full report on `ae.report`) surfaced 3 gaps: (a) ✅ **geographic CLOSED** — `geo-draw` + `geographic.make_geo(color_by="coloring")` now consume the report's `geographic_coloring` aa/clade `apply` rules (AD `ColoringByAminoAcid` port via seqdb `SequenceAA.matches_all` + packed per-antigen dots); built + verified on real H1 hidb (clade palette + clusters); clade-pie & continent modes also present; (b) **tree** `.tal`→tal-draw translation fidelity unverified vs a real report's `.tal`; (c) per-report glue not applied to a real report's `conference_data.py`/modifiers. Remaining: (b)(c) → then assembled-report run. See [`py/ae/report/MIGRATION.md` gap analysis](py/ae/report/MIGRATION.md#gap-analysis-2026-0223-capstone-attempt) |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data endpoints verified end-to-end |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 
@@ -58,7 +58,7 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 
 ---
 
-## 1. Map drawing  *(owner: map-draw agent — ⚪ SHELVED: maps are implemented in kateri)*
+## 1. Map drawing  *(owner: map-draw agent — antigenic maps ⚪ SHELVED (kateri); geographic `geo-draw` 🟢 done, incl. clade pies)*
 
 > **⚠ COURSE CORRECTION (kateri audit).** Antigenic-**map** drawing is **already implemented
 > in `kateri`** (`github.com/drserajames/kateri`, a Dart/Flutter app — its README: *"antigenic
@@ -123,13 +123,42 @@ New code lives in **`cc/geo/`** + the **`geo-draw`** CLI; reuses the shared `cc/
       Dots sized by √count, coloured by continent; per-map title. **✅ Verified:** a 2-month
       dataset renders `H3-geographic-2024-01.pdf` / `-2024-02.pdf` correctly (placement, sizes,
       continent colours, titles); rasterised and eyeballed.
+- [x] **Slice 5 — clade/lineage pies.** A location can now be drawn as a **pie chart** (wedges
+      sized by per-category count, coloured by category) instead of only a continent-coloured dot.
+      - **Surface primitive:** added `CairoPdf::sector(cx,cy,radius,start_angle,end_angle,outline,
+        outline_width,fill)` to the shared `cc/draw/cairo-surface.*` (Cairo `arc`+`line_to`-to-centre;
+        angles clockwise from 12 o'clock). Additive — no existing signature changed (TAL #3 safe).
+      - **Pie `GeoPoint`:** `GeoPoint` gained an optional `std::vector<GeoWedge>{count,color,label}`;
+        empty ⇒ the existing single-dot path (unchanged). When present, `geographic-map.cc` draws one
+        sector per wedge clockwise from 12 o'clock (angle ∝ count), total radius still √(Σcount)-scaled,
+        each wedge outlined. Added `clade_color()` (stable FNV-hashed palette) + a lower-left clade
+        **legend** (`LegendEntry` list, new optional arg to `export_geographic_pdf`).
+      - **JSON + CLI:** the `--data` schema now accepts per-location
+        `"categories":[{"name","count","color"?}]` (flat `"count"` still works → continent dot).
+        Category→colour is stable across all periods of a run (first-seen order, optional per-category
+        `"color"` override); legend drawn whenever any pies are present.
+      - **✅ Verify:** `sh cc/geo/test/test-geo-pie.sh` (synthetic `cc/geo/test/pie-records.json`)
+        renders `/tmp/geo-pie-test-2024-{01,02}.pdf` — pies sized/ordered by count, stable per-clade
+        colours, forced-red `3C.3a`, SYDNEY stays a single continent dot, legend lower-left. **Built +
+        eyeballed 2026-06-14** (report agent). *(One minor palette nit: the auto palette can collide
+        with an explicit override colour — e.g. two reds — worth avoiding claimed-override colours.)*
+- [x] **Slice 6 — report-faithful aa/clade coloring (`color_by="coloring"`).** geo-draw now also
+      reproduces AD `geographic-draw -s settings.json`: one dot per antigen, packed in AD's
+      concentric rings, coloured by the report's `geographic_coloring` `apply` rules. Added per-point
+      `GeoPoint::outline_width`; `CairoPdf::circle()` skips the stroke on transparent/zero outline;
+      `geo-draw-main.cc` parses per-location `"points":[{color,outline,outline_width,count}]` +
+      top-level `point_size`/`density` + per-period `"title"`, and packs via `pack_colored_points()`
+      (port of AD `GeographicMapWithPointsFromHidb::prepare`). The rule engine + seqdb match live on
+      the report side (`_Coloring` in `py/ae/report/geographic.py`). **✅ Built + verified** on real
+      H1 hidb (Dec 2023): clade palette correct, packed clusters, month-name title. (Closes #4 gap a.)
 - **🟢 geo-draw renderer complete** for the report's needs (base map · lon/lat points · named
-  locations · monthly count series). **Remaining is on the report side (#4), not here:** the
-  Python glue that extracts per-month `{location, count}` from seqdb and writes the `--data`
-  JSON, then embeds the resulting PDFs (`py/ae/report/geographic.py`). geo-draw is the renderer;
-  data extraction is the report's job (ae-idiomatic split, mirrors tal-draw / kateri).
-  *Optional future polish:* pies for multi-category (clade/lineage) counts per location;
-  configurable coloring modes (the AD `-s settings.json` coloring rules).
+  locations · monthly count series · **clade/lineage pies + legend**). **Remaining is on the report
+  side (#4):** the Python glue extracts per-month `{location, count}` (continent) or
+  `{location, categories:[{clade,count}]}` (clade) and writes the `--data` JSON
+  (`py/ae/report/geographic.py`, `make_geo(..., color_by=…)`). geo-draw is the renderer; data
+  extraction is the report's job (ae-idiomatic split, mirrors tal-draw / kateri).
+  The AD `-s settings.json` coloring-rule DSL is now consumed report-side via
+  `make_geo(color_by="coloring", colorings={subtype: geographic_coloring(subtype)})` (Slice 6).
 
 > **Build gotcha (affects every agent who edits `meson.build`):** any edit triggers a full
 > meson regenerate, which re-runs the vendored `lexy` CMake subproject. Homebrew CMake is
@@ -482,8 +511,10 @@ shared **report-assembly core** (`report.py` + `latex.py`) is what emits the fin
       [`ae.utils.kateri`](py/ae/utils/kateri.py) (`send_chart` → `set_style` → `get_pdf`) to
       emit the antigenic-map PDFs at the filenames `report.py` expects
       (`<subtype>-<assay>/clade-<lab>.pdf`, `ts-<lab>-<YYYY-MM>.pdf`, …); embed **TAL** tree
-      PDFs (#3); wire in the geographic maps from the **`geo-draw`** renderer being built in
-      `cc/geo/` (§1 "Remaining ae-side map drawing", slices 1–2 done) → `geo/<VT>-geographic-<YYYY-MM>.pdf`.
+      PDFs (#3); wire in the geographic maps from the **`geo-draw`** renderer in `cc/geo/` (§1,
+      all slices incl. **clade pies** done) → `geo/<VT>-geographic-<YYYY-MM>.pdf`. The Python glue
+      `geographic.make_geo(..., color_by="continent"|"clade")` writes the `--data` JSON (clade resolved
+      from seqdb) and embeds the per-month PDFs.
       The `chart_v3.Chart(<file>)` import-abort is **fixed** (§1, verified — load + `export()`),
       so the only remaining prerequisite is the `kateri` executable being installed. **Verify:**
       generates a full PDF report from a sample dataset.

@@ -32,6 +32,12 @@ namespace ae::draw
         // For the shapes below, a transparent fill (Color::is_transparent()) is not painted,
         // giving an outline-only shape.
         void circle(double cx, double cy, double radius, Color outline, double outline_width, Color fill);
+        // Filled circular sector (pie wedge): the slice of the disc of `radius` centred at
+        // (cx, cy) between `start_angle` and `end_angle` (radians, measured clockwise from
+        // 12 o'clock in the PDF coordinate system where y grows downward). The path runs
+        // centre -> arc -> centre, so the wedge is closed. Transparent fill = outline only;
+        // non-positive outline width / transparent outline skips the stroke.
+        void sector(double cx, double cy, double radius, double start_angle, double end_angle, Color outline, double outline_width, Color fill);
         void square(double cx, double cy, double side, Color outline, double outline_width, Color fill);
         void triangle(double cx, double cy, double radius, Color outline, double outline_width, Color fill); // equilateral, point up
         // Axis-aligned rectangle with its top-left corner at (x, y). Transparent fill = outline only.

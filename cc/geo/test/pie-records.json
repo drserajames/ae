@@ -1,0 +1,36 @@
+{
+  "title_prefix": "H3 (synthetic)",
+  "periods": [
+    {
+      "period": "2024-01",
+      "locations": [
+        {"name": "TOKYO", "categories": [
+          {"name": "3C.2a1b", "count": 7},
+          {"name": "3C.2a2", "count": 3}
+        ]},
+        {"name": "LONDON", "categories": [
+          {"name": "3C.2a1b", "count": 2},
+          {"name": "3C.2a2", "count": 6},
+          {"name": "3C.3a", "count": 2, "color": "#FF0000"}
+        ]},
+        {"name": "NEW YORK", "categories": [
+          {"name": "3C.2a1b", "count": 5}
+        ]},
+        {"name": "SYDNEY", "count": 4}
+      ]
+    },
+    {
+      "period": "2024-02",
+      "locations": [
+        {"name": "TOKYO", "categories": [
+          {"name": "3C.2a2", "count": 9},
+          {"name": "3C.3a", "count": 1, "color": "#FF0000"}
+        ]},
+        {"name": "CAPE TOWN", "categories": [
+          {"name": "3C.2a1b", "count": 3},
+          {"name": "unknown", "count": 2}
+        ]}
+      ]
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <numbers>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -30,7 +32,29 @@ namespace ae::geo
         return Color{0x808080}; // grey fallback
     }
 
-    void export_geographic_pdf(const std::filesystem::path& output, double image_width, const std::vector<GeoPoint>& points, const std::string& title)
+    Color clade_color(std::string_view category)
+    {
+        if (category.empty() || category == "unknown" || category == "UNKNOWN")
+            return Color{0x808080};
+        // A fixed, distinctive palette (Tableau-10 style) assigned deterministically by name
+        // hash so the same clade/lineage always gets the same colour across maps. The caller
+        // may still override a category's colour explicitly.
+        static const uint32_t palette[] = {
+            0x1F77B4, 0xFF7F0E, 0x2CA02C, 0xD62728, 0x9467BD, 0x8C564B,
+            0xE377C2, 0x7F7F7F, 0xBCBD22, 0x17BECF, 0xAEC7E8, 0xFFBB78,
+            0x98DF8A, 0xFF9896, 0xC5B0D5, 0xC49C94, 0xF7B6D2, 0xC7C7C7,
+        };
+        constexpr size_t n = sizeof(palette) / sizeof(palette[0]);
+        size_t h = 2166136261u; // FNV-1a, stable across runs
+        for (const char c : category) {
+            h ^= static_cast<unsigned char>(c);
+            h *= 16777619u;
+        }
+        return Color{palette[h % n]};
+    }
+
+    void export_geographic_pdf(const std::filesystem::path& output, double image_width, const std::vector<GeoPoint>& points, const std::string& title,
+                               const std::vector<LegendEntry>& legend)
     {
         const auto [first, last] = geographic_map_path();
 
@@ -74,12 +98,55 @@ namespace ae::geo
 
         for (const auto& pt : points) {
             const auto [x, y] = lonlat_to_dev(pt.lon, pt.lat);
-            pdf.circle(x, y, pt.radius, pt.outline, point_outline_w, pt.fill);
+            const double pt_outline_w = pt.outline_width >= 0.0 ? pt.outline_width : point_outline_w;
+            if (pt.wedges.empty()) {
+                pdf.circle(x, y, pt.radius, pt.outline, pt_outline_w, pt.fill);
+            }
+            else {
+                double total = 0.0;
+                for (const auto& w : pt.wedges)
+                    total += w.count;
+                if (total <= 0.0) // degenerate -> fall back to a dot
+                    pdf.circle(x, y, pt.radius, pt.outline, point_outline_w, pt.fill);
+                else {
+                    constexpr double two_pi = 2.0 * std::numbers::pi;
+                    double angle = 0.0;
+                    for (const auto& w : pt.wedges) {
+                        if (w.count <= 0.0)
+                            continue;
+                        const double next = angle + (w.count / total) * two_pi;
+                        pdf.sector(x, y, pt.radius, angle, next, pt.outline, point_outline_w, w.color);
+                        angle = next;
+                    }
+                }
+            }
         }
 
         if (!title.empty()) {
             const double title_font = image_width / 40.0;
             pdf.text(image_width / 2.0, margin + title_font, title, title_font, Color{0}, /*center=*/true);
+        }
+
+        // Legend: a small stack of colour swatches + labels in the lower-left corner.
+        if (!legend.empty()) {
+            const double font = std::max(7.0, image_width / 90.0);
+            const double swatch = font;
+            const double row_h = font * 1.4;
+            const double pad = font * 0.6;
+            double max_label_w = 0.0;
+            for (const auto& e : legend)
+                max_label_w = std::max(max_label_w, pdf.text_size(e.label, font).first);
+            const double box_w = pad * 2.0 + swatch + pad + max_label_w;
+            const double box_h = pad * 2.0 + row_h * static_cast<double>(legend.size());
+            const double box_x = margin;
+            const double box_y = image_height - margin - box_h;
+            pdf.rectangle(box_x, box_y, box_w, box_h, Color{0x808080}, 0.5, Color{0xFFFFFF});
+            double ry = box_y + pad;
+            for (const auto& e : legend) {
+                pdf.rectangle(box_x + pad, ry, swatch, swatch, Color{0}, 0.4, e.color);
+                pdf.text(box_x + pad + swatch + pad, ry, e.label, font, Color{0}, /*center=*/false);
+                ry += row_h;
+            }
         }
     }
 

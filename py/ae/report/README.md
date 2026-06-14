@@ -1,10 +1,16 @@
 # ae.report — seasonal / SSM WHO CC report tooling
 
-**Consolidation largely done** (see [`MIGRATION.md`](MIGRATION.md) for the full plan,
-history (AD → `vcm`), audit, and as-built notes). The ae-based report **engine** is in
-place; all four figure families generate on ae (kateri maps · `stat` · `geo-draw` ·
-`tal-draw`) and the adjust stage is ported (`ae.adjust` + kateri point-drag). Remaining:
-a full assembled-report run, and geo clade colouring (geo-draw pies, map-draw #1).
+**Engine consolidated; not yet remake-ready end-to-end** (see [`MIGRATION.md`](MIGRATION.md)
+for the full plan, history (AD → `vcm`), audit, and as-built notes — in particular the
+[2026-0223 gap analysis](MIGRATION.md#gap-analysis-2026-0223-capstone-attempt)). The
+**library tier** is a verified-faithful copy of a real report's `vcm`, and the adjust stage
+is ported (`ae.adjust` + kateri point-drag). But a full faithful **remake** of a real
+report on `ae.report` is **not yet achievable** — the capstone attempt surfaced three gaps:
+(a) ✅ **closed** — `geographic.py` now has a `color_by="coloring"` mode that consumes the
+report's `geographic_coloring` aa/clade `apply` rules (AD `ColoringByAminoAcid` port + geo-draw
+packed-dots renderer), built + verified on real H1 hidb; (b) tree `.tal`→`tal-draw` translation
+fidelity is unverified vs a real report's `.tal`; (c) the per-report glue isn't applied to a real
+report's config. Remaining: (b), (c), then the full assembled-report run.
 
 This package holds the ae-based **report engine** (the library tier of the team's
 `vcm` tool). The AD-faithful re-port that previously lived here (`report.py`,
@@ -42,7 +48,7 @@ runners). These encode season-specific scientific decisions and are edited every
 |--------|------|
 | `conference_data_base.py` | thin base `class ConferenceData(dirs.VcmDirs)` — the per-report interface (`conferencence_date`/`time_series`/`current_vaccine_years`/`geographic_*`) as `NotImplementedError` stubs. The report's concrete `conference_data.py` subclasses it. |
 | `chart_modifier.py` | base `class ChartModifier(conference_data_base.ConferenceData)` — semantic styling. `semantic_clades`/`semantic_vaccines` (acmacs-data) and per-report `serology` are **guarded imports** (resolved at report runtime), so `ae.report` imports standalone. |
-| `geographic.py` | geographic time-series maps via ae's **`geo-draw`**: `make_geo(geo_dir, time_series, hidb_dir)` counts hidb antigens by (month, location), writes geo-draw's `--data` records JSON, and renders `<geo_dir>/<subtype>-<YYYY-MM>.pdf`. Decoupled from `ConferenceData` (geo-draw colours by continent). |
+| `geographic.py` | geographic time-series maps via ae's **`geo-draw`**: `make_geo(geo_dir, time_series, hidb_dir, color_by=…)` counts hidb antigens by (month, location), writes geo-draw's `--data` records JSON, and renders `<geo_dir>/<subtype>-<YYYY-MM>.pdf`. Decoupled from `ConferenceData`. **`color_by="continent"`** (default) → one continent-coloured dot per location; **`color_by="clade"`** → one clade-coloured **pie** per location (wedges per clade + legend), clade resolved from **seqdb** (name/reassortant/passage match; unresolved → "unknown"). |
 | `trees.py` | phylogenetic-tree PDFs via ae's **`tal-draw`**: `make_trees(specs)` translates the report's `.tal` settings-v3 config (`ae.tal.settings_v3`) → tal-draw schema and renders the tree file (`.tjz`/`tree.json[.xz]`) → the `<subtype>.pdf` the `phylogenetic_tree` page embeds. Replaces AD's `tal -s …`. |
 | `commander.py` | the `@command` surface (`download`/`populate`/`prestyle`/`style`/`export`). |
 
@@ -91,9 +97,11 @@ resolving the symlink: `KATERI_EXE = os.path.realpath(shutil.which("kateri") or 
   works, but the settings-v3 `.tal` → tal-draw translator skips a few features (arbitrary
   positioned labels, `edge >=` selection, non-object select/apply). Signature-page composition
   (tree + map) is `bin/tal-signature-page` (TAL).
-- **Geographic clade/lineage colouring:** `geo-draw` currently colours dots by continent;
-  AD's "coloured by clade/lineage" geographic maps need geo-draw pies (map-draw optional
-  polish). The continent-coloured monthly maps work today.
+- **Geographic clade/lineage colouring — DONE.** `geo-draw` now draws per-location **pies**
+  (wedges per clade + legend) in addition to continent dots; `make_geo(color_by="clade")`
+  resolves each hidb antigen's clade from **seqdb** and emits the pie `--data`. (Note: clade
+  resolution depends on the seqdb being available and matching the hidb antigen by
+  name/reassortant/passage; unmatched antigens bucket as "unknown".)
 - **Adjust stage** (the last AD dependency) — the **programmatic (agent-facing) front-end is
   done**: [`ae.adjust`](../adjust.py) (`Adjust`: select-by-geometry / move / flip / pin / relax /
   procrustes / save), the scriptable equivalent of AD's `0do`. The interactive (human) half —
@@ -110,9 +118,13 @@ Use synthetic placeholders; real strain data stays in the report dir only.
 ## Verification
 
 - **Engine:** all 11 modules import clean (Python 3.10 + `ae_backend`).
-- **Geographic:** `geographic.make_geo` over real hidb (2-month H3 window) extracts
+- **Geographic (continent):** `geographic.make_geo` over real hidb (2-month H3 window) extracts
   per-month location counts → records JSON → `geo-draw` renders `h3-2024-01.pdf` /
   `-02.pdf` — world maps with continent-coloured, count-sized dots; rasterised and eyeballed.
+- **Geographic (clade pies):** `geo-draw` clade-pie rendering verified with synthetic
+  `cc/geo/test/pie-records.json` via `sh cc/geo/test/test-geo-pie.sh` (pies sized/ordered by
+  count, stable per-clade colours, legend). `make_geo(color_by="clade")` resolves clades from
+  real seqdb (counts only — no strain data emitted, per TODO rule 8).
 - **Trees:** `trees.make_trees` on a real report tree (`.tjz` + 93 KB `.tal`) translates the
   `.tal` → tal-draw schema and renders a phylo-tree PDF (88 k leaves, clades, time-series
   matrix); rasterised and eyeballed. (3 `.tal` translation warnings — features the TAL

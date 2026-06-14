@@ -42,9 +42,39 @@ namespace ae::draw
             set_source(context_, fill);
             cairo_fill_preserve(context_);
         }
-        set_source(context_, outline);
-        cairo_set_line_width(context_, outline_width);
-        cairo_stroke(context_);
+        if (outline_width > 0.0 && !outline.is_transparent()) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+        else
+            cairo_new_path(context_); // discard the preserved path if we didn't stroke
+    }
+
+    void CairoPdf::sector(double cx, double cy, double radius, double start_angle, double end_angle, Color outline, double outline_width, Color fill)
+    {
+        // The caller's angles are measured clockwise from 12 o'clock. In Cairo, angle 0 is
+        // the +x axis (3 o'clock) and cairo_arc sweeps in the direction of increasing angle,
+        // which is clockwise in the PDF device space (y grows downward). So 12 o'clock is at
+        // Cairo angle -pi/2 and a clockwise sweep maps directly onto cairo_arc.
+        constexpr double twelve_oclock = -std::numbers::pi / 2.0;
+        const double a0 = twelve_oclock + start_angle;
+        const double a1 = twelve_oclock + end_angle;
+        cairo_new_path(context_);
+        cairo_move_to(context_, cx, cy);
+        cairo_arc(context_, cx, cy, radius, a0, a1);
+        cairo_close_path(context_);
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        if (outline_width > 0.0 && !outline.is_transparent()) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+        else
+            cairo_new_path(context_); // discard the preserved path if we didn't stroke
     }
 
     void CairoPdf::square(double cx, double cy, double side, Color outline, double outline_width, Color fill)
