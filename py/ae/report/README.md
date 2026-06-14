@@ -91,8 +91,10 @@ resolving the symlink: `KATERI_EXE = os.path.realpath(shutil.which("kateri") or 
 - **Geographic clade/lineage colouring:** `geo-draw` currently colours dots by continent;
   AD's "coloured by clade/lineage" geographic maps need geo-draw pies (map-draw optional
   polish). The continent-coloured monthly maps work today.
-- **Adjust stage** (the last AD dependency) — see `MIGRATION.md` Stage B; likely a kateri
-  point-drag feature + `ae_backend` relax-with-pinned-points, a design call for kateri's owner.
+- **Adjust stage** (the last AD dependency) — the **programmatic (agent-facing) front-end is
+  done**: [`ae.adjust`](../adjust.py) (`Adjust`: select-by-geometry / move / flip / pin / relax /
+  procrustes / save), the scriptable equivalent of AD's `0do`. The interactive (human) half —
+  kateri antigen-point dragging — remains, owned by kateri. See `MIGRATION.md` Stage B.
 
 ## Bootstrapping a new report
 

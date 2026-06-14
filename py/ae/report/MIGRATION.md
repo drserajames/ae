@@ -254,12 +254,16 @@ core ✅    └─ programmatic : ae.zero_do move/select/relax (Python)  ─┘
    primitives: Projection.set_coordinates / Layout.__setitem__  +  Projection.set_unmovable
 ```
 
-- **Programmatic (agent-facing) — first-class, not a fallback.** The `chart_v3` coordinate
-  setter **is required** for this path and **is now done** (`set_coordinates` / `Layout.__setitem__`
-  / `set_unmovable`). Next: the ~500-line Python `zero_do` framework (`move`/`flip`/`select-inside`/
-  `relax`/`procrustes`/`final_ace`) on `ae_backend`; snapshots via kateri optional.
-- **Interactive (human-facing).** kateri grows antigen-point dragging (small Dart change; it
-  already has the hit-test + `get_chart`) → relax-with-pinned (`set_unmovable`, done).
+- ✅ **Programmatic (agent-facing) — DONE.** [`py/ae/adjust.py`](../adjust.py) — `Adjust` class
+  on `ae_backend.chart_v3`: `figure()` (polygon) + `select_antigens/sera(predicate)` with geometric
+  `pt.inside(figure)`, `move`/`move_by`/`flip_over_line`, `pin`/`unpin_all`, `relax`, `stress`,
+  `procrustes`, `save`. Built on the new coordinate setter + `set_unmovable`. **Verified** on
+  synthetic `test/chart1.ace`: geometric selection correct; pinned points stay exactly through
+  relax while others move; flip reflects correctly; save/reload + procrustes(self)=0. This is the
+  AD `0do` workflow, scriptable: `select region → move → relax → save`. (kateri snapshots optional.)
+- **Interactive (human-facing) — remaining.** kateri grows antigen-point dragging (small Dart
+  change; it already has the hit-test + `get_chart`) → relax-with-pinned (`set_unmovable`, done).
+  Owner: kateri.
 
 The report engine already follows this both/and pattern elsewhere (programmatic `make_geo`/
 `make_trees`/`make_stat` for agents; interactive `0do`/kateri for humans) — the adjust stage
