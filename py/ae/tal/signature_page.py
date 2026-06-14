@@ -10,7 +10,10 @@ binary (subsystem #3) and **antigenic maps** by **kateri** (a separate Dart app,
      strains, e.g. from hidb, as node-mods);
   2. obtain the antigenic-map PDF(s): either pre-rendered (`maps=`) or rendered on the
      fly from a chart via kateri (`chart=`, requires the `kateri` executable);
-  3. compose tree (left) + map(s) (right) onto one landscape page with `pdfjam`.
+  3. compose tree (left) + map(s) (right) onto one landscape page — either a plain
+     stack (`compose_side_by_side`, via `pdfjam`) or, when captions / a page title /
+     an explicit column count are wanted, an R×C captioned grid (`compose_grid`, via
+     `pdflatex`).
 
 The resulting PDF is exactly what `py/ae/report`'s `signature_page` page type embeds
 via an explicit `image:` path, so this slots into the seasonal report unchanged.
@@ -22,6 +25,7 @@ wired to the kateri.py socket protocol but needs the `kateri` executable on PATH
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -104,6 +108,89 @@ def compose_side_by_side(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, 
         cmd.insert(-2, "--landscape")
     subprocess.run(cmd, check=True)
     return Path(out_pdf)
+
+
+_LATEX_SPECIAL = {
+    "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
+    "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+}
+
+
+def _latex_escape(text: str) -> str:
+    return "".join(_LATEX_SPECIAL.get(ch, ch) for ch in str(text))
+
+
+def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions: Optional[Sequence[str]] = None,
+                 page_title: Optional[str] = None, tree_caption: Optional[str] = None, columns: Optional[int] = None,
+                 paper_mm: tuple = (297.0, 210.0), margin_mm: float = 6.0) -> Path:
+    """Compose the tree (left) and an R×C grid of captioned antigenic maps (right) onto one
+    landscape page via `pdflatex`. This is the richer counterpart to `compose_side_by_side`:
+    it adds per-map captions, an optional page title, and a real grid (vs a 1×N stack).
+
+    `columns` defaults to ceil(sqrt(n)). If `pdflatex` isn't available it falls back to
+    `compose_side_by_side` (which drops the captions/title but still composes the page).
+    """
+    maps = [str(m) for m in map_pdfs]
+    if not maps:  # tree only
+        shutil.copyfile(str(tree_pdf), str(out_pdf))
+        return Path(out_pdf)
+    pdflatex = shutil.which("pdflatex")
+    if not pdflatex:  # no LaTeX → degrade gracefully to the pdfjam stack (no captions)
+        return compose_side_by_side(tree_pdf, map_pdfs, out_pdf)
+
+    caps = list(captions or [])
+    caps += [""] * (len(maps) - len(caps))  # pad to one caption per map
+    cols = columns if (columns and columns > 0) else max(1, math.ceil(math.sqrt(len(maps))))
+    paper_w, paper_h = paper_mm
+    # right panel ≈ 48% of the printable width; size each cell to fit `cols` across it
+    right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
+    cell_mm = max(10.0, right_panel_mm / cols - 3.0)
+
+    work = Path(tempfile.mkdtemp(prefix="tal-grid-"))
+    try:
+        shutil.copyfile(str(tree_pdf), str(work / "tree.pdf"))
+        for i, m in enumerate(maps):
+            shutil.copyfile(m, str(work / f"map{i}.pdf"))
+
+        cells = []
+        for i, cap in enumerate(caps):
+            cells.append(
+                rf"\begin{{minipage}}[t]{{{cell_mm:.1f}mm}}\centering"
+                rf"\includegraphics[width=\linewidth]{{map{i}.pdf}}\\[1pt]"
+                rf"{{\footnotesize {_latex_escape(cap)}}}\end{{minipage}}%"
+            )
+            cells.append(r"\hspace{2mm}")
+            if (i + 1) % cols == 0:  # row break
+                cells.append(r"\par\vspace{2mm}")
+        grid = "\n".join(cells)
+
+        title_tex = rf"{{\large\bfseries {_latex_escape(page_title)}\par}}\vspace{{2mm}}" + "\n" if page_title else ""
+        tree_cap_tex = rf"\\[1pt]{{\footnotesize {_latex_escape(tree_caption)}}}" if tree_caption else ""
+
+        tex = "\n".join([
+            r"\documentclass{article}",
+            rf"\usepackage[paperwidth={paper_w:.0f}mm,paperheight={paper_h:.0f}mm,margin={margin_mm:.0f}mm]{{geometry}}",
+            r"\usepackage{graphicx}",
+            r"\setlength{\parindent}{0pt}\pagestyle{empty}",
+            r"\begin{document}",
+            title_tex + r"\noindent",
+            r"\begin{minipage}[t]{0.5\linewidth}\vspace{0pt}\centering",
+            rf"\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{{tree.pdf}}{tree_cap_tex}",
+            r"\end{minipage}\hfill",
+            r"\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}\centering",
+            grid,
+            r"\end{minipage}",
+            r"\end{document}",
+        ])
+        (work / "sig.tex").write_text(tex, encoding="utf-8")
+        proc = subprocess.run([pdflatex, "-interaction=nonstopmode", "-halt-on-error", "sig.tex"],
+                              cwd=str(work), capture_output=True, text=True)
+        if proc.returncode != 0 or not (work / "sig.pdf").exists():
+            raise SignaturePageError(f"pdflatex failed composing the signature page:\n{proc.stdout[-1500:]}")
+        shutil.copyfile(str(work / "sig.pdf"), str(out_pdf))
+        return Path(out_pdf)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def _kateri_app_bundle(kateri_exe: str) -> Optional[Path]:
@@ -255,8 +342,15 @@ def make_signature_page(tree, output, *, maps: Sequence[os.PathLike] = (), chart
                         mark_vaccines: Optional[str] = None, vaccines_file=None,
                         mark_reference: Optional[str] = None, hidb_dir=None, reference_tables: int = 20,
                         style: str = "-", map_width: float = 800.0, tal_draw_args: Sequence[str] = (), frame: bool = False,
+                        captions: Optional[Sequence[str]] = None, page_title: Optional[str] = None,
+                        tree_caption: Optional[str] = None, columns: Optional[int] = None,
                         keep_temp: bool = False) -> Path:
-    """Render the tree, obtain the map(s), and compose them into `output`."""
+    """Render the tree, obtain the map(s), and compose them into `output`.
+
+    The composition uses the captioned grid layout (`compose_grid`, via pdflatex) when any of
+    `captions`/`page_title`/`tree_caption`/`columns` is given; otherwise the plain side-by-side
+    stack (`compose_side_by_side`, via pdfjam).
+    """
     tmpdir = Path(tempfile.mkdtemp(prefix="tal-sig-"))
     try:
         groups = []  # (names, style) — drawn as node-mods, each its own colour
@@ -274,7 +368,11 @@ def make_signature_page(tree, output, *, maps: Sequence[os.PathLike] = (), chart
         map_pdfs = [Path(m) for m in maps]
         if chart:
             map_pdfs.append(render_map_via_kateri(chart, tmpdir / "map.pdf", style=style, width=map_width))
-        compose_side_by_side(tree_pdf, map_pdfs, output, frame=frame)
+        if captions or page_title or tree_caption or columns:
+            compose_grid(tree_pdf, map_pdfs, output, captions=captions, page_title=page_title,
+                         tree_caption=tree_caption, columns=columns)
+        else:
+            compose_side_by_side(tree_pdf, map_pdfs, output, frame=frame)
         return Path(output)
     finally:
         if not keep_temp:

@@ -340,8 +340,16 @@ the `cc/draw/` surface API."*
     now accepts bare `-D name` (truthy flag) as well as `-D name=value`. **Verify:** `python3
     cc/tal/test/test-settings-v3.py` (12 direct grammar checks + an `if`-gated dash-bar in the
     synthetic config: pos 145 included when `$enable_extra` set, pos 999 `not`-branch excluded).
-23. **Low-value tail:** `for-each` loops, `max-edge-length` ladderize, finer signature-page layout
-    (map grids, captions), other `tal` outputs (`.names`/`.html`).
+23. **Finer signature-page layout — DONE.** `py/ae/tal/signature_page.py` `compose_grid` composes
+    the tree (left) + an R×C grid of **captioned** antigenic maps (right) with an optional page title
+    and tree caption, via `pdflatex` (LaTeX `geometry`+`graphicx`); columns default to
+    `ceil(sqrt(n))`. Falls back to the plain `pdfjam` stack when `pdflatex` is absent. Used by
+    `make_signature_page` (and `tal-signature-page`'s `--caption` / `--page-title` / `--tree-caption`
+    / `--columns`) whenever any grid option is given; the plain side-by-side path is unchanged.
+    **Verify:** `sh cc/tal/test/test-signature-page-grid.sh` (tree + 3 captioned maps, 2-col grid,
+    title → one landscape A4 page; pdftotext confirms title + all captions present).
+24. **Low-value tail:** `for-each` loops, `max-edge-length` ladderize, other `tal` outputs
+    (`.names`/`.html`).
 
 **Not a remaining item — `clades-whocc` (clade-from-sequence assignment).** This was struck off
 after auditing the AD source. In acmacs-tal `clades-whocc` is a draw-time settings macro that

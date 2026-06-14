@@ -19,7 +19,7 @@ status, and respect the shared-file rules below.
 |---|-----------|-----------|-----:|-----------|-------|--------|
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
-| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` + `py/ae/tal/` | *(tal agent)* | 🟢 feature-complete (core) — tree render; clades / time-series / **dash-bar-aa-at** columns; **leaf colouring by clade / continent / aa-at-pos** + mode-aware legend; title / **aa-transitions** (+ computation — fixed a `cc/tree` stub); **hz-sections**; node select/apply + **positioned `apply.text` labels (DrawOnTree)**; **per-clade `show:false` hiding**; **settings-v3 `.tal` reader** (`tal-signature-page --tal`); signature page = tree + **kateri** map + **WHOCC vaccine** marks. Only low-value tail left (`for-each`, ladderize, map-grid layout) — see [`cc/tal/PORTING.md`](cc/tal/PORTING.md) |
+| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` + `py/ae/tal/` | *(tal agent)* | 🟢 feature-complete (core) — tree render; clades / time-series / **dash-bar-aa-at** columns; **leaf colouring by clade / continent / aa-at-pos** + mode-aware legend; title / **aa-transitions** (+ computation — fixed a `cc/tree` stub); **hz-sections**; node select/apply + **positioned `apply.text` labels (DrawOnTree)**; **per-clade `show:false` hiding**; **settings-v3 `.tal` reader** (`tal-signature-page --tal`); signature page = tree + **kateri** map + **WHOCC vaccine** marks. Only low-value tail left (`for-each`, ladderize, `.names`/`.html` outputs) — see [`cc/tal/PORTING.md`](cc/tal/PORTING.md) |
 | 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (vcm engine consolidated) | *(report agent)* | 🟡 vcm engine in `ae.report` (Phases 0–3 + 1b); **end-to-end validated** (real h1-cdc chart → `chart_modifier` styling → kateri → map PDF matching known-good); **stat** de-AD'd (Python hidb5-stat port); **geographic** wired to `geo-draw` (hidb→records→per-month PDFs). Remaining: TAL `tal-draw` tree/sig-page integration; geo clade/lineage colouring (geo-draw pies) — see [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data endpoints verified end-to-end |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
@@ -406,10 +406,14 @@ C++ renderer; TAL composes them with the tree.
       `{"N":"if","condition":…,"then":[…],"else":[…]}` (full `eval_condition` grammar:
       `$var`/`and`/`or`/`not`/`empty`/`not-empty`/`equal`/`not-equal`); `tal-signature-page` accepts
       bare `-D name` truthy flags. `python3 cc/tal/test/test-settings-v3.py`.
-- [ ] **Remaining (low-value tail only):** `for-each` loops / `max-edge-length` ladderize / finer
-      map-grid layout / other `tal` outputs (`.names`/`.html`). **`clades-whocc` struck** — obsolete
-      in AD (clades assigned upstream at tree-build, stored in the `.tjz`, which `tal-draw` reads;
-      persisted relabelling is covered by `Tree::set_clades` + `export`).
+- [x] **Finer signature-page layout** — `compose_grid` (pdflatex) lays the tree + an R×C grid of
+      **captioned** maps with an optional page title/tree caption (`--caption` / `--page-title` /
+      `--tree-caption` / `--columns`); falls back to the `pdfjam` stack without pdflatex.
+      `sh cc/tal/test/test-signature-page-grid.sh`.
+- [ ] **Remaining (low-value tail only):** `for-each` loops / `max-edge-length` ladderize / other
+      `tal` outputs (`.names`/`.html`). **`clades-whocc` struck** — obsolete in AD (clades assigned
+      upstream at tree-build, stored in the `.tjz`, which `tal-draw` reads; persisted relabelling is
+      covered by `Tree::set_clades` + `export`).
 
 ---
 
