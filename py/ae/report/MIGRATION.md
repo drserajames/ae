@@ -237,22 +237,34 @@ flip_over_line = reflect coords; geometric select = point-in-polygon over the la
 primitive (✅ now done — see above) + ~500-line thin-wrapper Python framework. The sole
 chart-engine dependency (the `chart_v3` coordinate setter + settable `unmovable`) is **resolved**.
 
-**⚠ Revised after auditing kateri (likely the intended architecture).** kateri is built for
-*interactive* editing — it hit-tests points on hover (`pointLookupByCoordinates`), lets you
-drag **selection-region vertices** (`dragStart`/`vertexMove`/`reportRegion` — the interactive
-`slot.path()`/`ag.inside`), and can return the edited chart (`get_chart`). What it does **not**
-do yet is drag antigen **points** to move them — `dragStart` only grabs region vertices. So the
-adjust stage is probably **not** a scripted-Python `zero_do` port but rather:
-1. **kateri grows antigen-point dragging** (small Dart change — it already has the point
-   hit-test + `get_chart`; `dragStart`/`dragUpdate` just need a point branch that writes the
-   layout), and
-2. ✅ **`ae_backend` relax-with-pinned-points** (settable `unmovable` via
-   `Projection.set_unmovable([...])`) so a post-move relax keeps dragged points fixed — **done**.
+**↻ Final framing — build BOTH front-ends (they share one core).** kateri is built for
+*interactive* editing (hover hit-test `pointLookupByCoordinates`, drag selection-region
+vertices `dragStart`/`vertexMove`/`reportRegion`, return the edited chart `get_chart`) — it
+just doesn't drag antigen **points** yet (`dragStart` only grabs region vertices). Earlier I
+leaned "kateri-centric, the coordinate setter isn't needed." **That was too narrow.** As the
+work shifts from manual to **Claude-agent-driven**, an interactive-only (drag) design is a step
+*backwards* for automation — an agent doesn't drag in a GUI, it writes a script (exactly what the
+AD `0do` files already are). So the right design is a **combination**, and both front-ends share
+the same `ae_backend` core (now done):
 
-In this (kateri-centric) design the `chart_v3` *coordinate setter* is **not** required (kateri
-edits the layout in Dart and returns it via `get_chart`); only settable `unmovable` is. The
-scripted-Python design above remains a valid alternative for batch/repeatable moves. **This is a
-design decision for the kateri / architecture owner.**
+```
+          ┌─ interactive  : kateri drags a point → get_chart        ─┐
+shared    │                  (needs a small Dart point-drag branch)  ├→ adjusted.ace
+core ✅    └─ programmatic : ae.zero_do move/select/relax (Python)  ─┘
+   primitives: Projection.set_coordinates / Layout.__setitem__  +  Projection.set_unmovable
+```
+
+- **Programmatic (agent-facing) — first-class, not a fallback.** The `chart_v3` coordinate
+  setter **is required** for this path and **is now done** (`set_coordinates` / `Layout.__setitem__`
+  / `set_unmovable`). Next: the ~500-line Python `zero_do` framework (`move`/`flip`/`select-inside`/
+  `relax`/`procrustes`/`final_ace`) on `ae_backend`; snapshots via kateri optional.
+- **Interactive (human-facing).** kateri grows antigen-point dragging (small Dart change; it
+  already has the hit-test + `get_chart`) → relax-with-pinned (`set_unmovable`, done).
+
+The report engine already follows this both/and pattern elsewhere (programmatic `make_geo`/
+`make_trees`/`make_stat` for agents; interactive `0do`/kateri for humans) — the adjust stage
+should match. **Owner decision is only sequencing** (which front-end first), not either/or; the
+shared core is in place.
 
 ---
 
