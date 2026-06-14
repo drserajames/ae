@@ -26,8 +26,13 @@ Example::
 
 import sys
 import glob
+import asyncio
 import importlib.util
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ae.utils.kateri import Communicator
 
 # ----------------------------------------------------------------------
 
@@ -207,6 +212,14 @@ class Adjust:
         "Re-optimize the projection (respecting unmovable points)."
         self.projection.relax(rough=rough)
 
+    def relax_capturing_intermediates(self, rough: bool = False):
+        """Relax this projection in place (all points free), returning the optimiser's
+        per-iteration intermediate layouts as a list of `(coords, stress)` — `coords`
+        is one `[x, y]` per point (`None` for disconnected), in layout order. The
+        projection is left holding the final relaxed layout. Sample these to animate a
+        relax (see `adjust_from_kateri`)."""
+        return self.projection.relax_capturing_intermediates(rough=rough)
+
     def stress(self) -> float:
         return self.projection.stress()
 
@@ -223,10 +236,117 @@ class Adjust:
         return self._be.chart_v3.procrustes(
             self.projection, other.projection(other_projection_no), common, scaling)
 
+    def orient_to(self, master):
+        """Re-orient this projection to best match *master* (a Chart or path) via
+        procrustes. Only the projection *transformation* (rotation / reflection /
+        translation) is changed — the raw coordinates are untouched — so pinned
+        points keep their stored coordinates while the whole layout is rotated
+        into *master*'s frame. Used after `relax()` to undo arbitrary MDS
+        re-orientation before showing the result."""
+        if isinstance(master, (str, Path)):
+            master = self._be.chart_v3.Chart(str(master))
+        self.chart.orient_to(master, self.projection_no)
+
+    def snapshot(self):
+        "An independent clone of the current chart (round-trips through json)."
+        return self._be.chart_v3.chart_from_json(self.chart.export())
+
     def save(self, filename):
         "Write the adjusted chart to *filename* (compression by extension)."
         self.chart.write(str(filename))
         return Path(filename)
+
+# ----------------------------------------------------------------------
+
+def _sample_frames(frames, max_frames):
+    "Evenly subsample *frames* to at most *max_frames*, always keeping the first and last."
+    n = len(frames)
+    if max_frames <= 1 or n <= max_frames:
+        return list(frames)
+    return [frames[round(i * (n - 1) / (max_frames - 1))] for i in range(max_frames)]
+
+
+def _kabsch_align(reference, frame):
+    """Procrustes/Kabsch-align *frame* onto *reference* — translation + rotation +
+    reflection, **no scale**. Both are lists of `[x, y]` or `None`, same order/length.
+    The optimiser returns each layout in an arbitrary MDS gauge, so without this every
+    streamed frame would rotate/flip/fly off-screen relative to what the operator sees;
+    aligning onto the pre-relax layout keeps the animation visually stable. Returns a
+    new list with `None` preserved for disconnected points."""
+    import numpy as np
+    idx = [i for i in range(len(frame))
+           if frame[i] is not None and i < len(reference) and reference[i] is not None]
+    if len(idx) < 2:
+        return [list(p) if p is not None else None for p in frame]
+    A = np.array([reference[i] for i in idx], dtype=float)   # target gauge (kept)
+    B = np.array([frame[i] for i in idx], dtype=float)       # aligned onto A
+    cA, cB = A.mean(0), B.mean(0)
+    U, _, Vt = np.linalg.svd((B - cB).T @ (A - cA))
+    R = Vt.T @ U.T                                            # orthogonal; reflection allowed
+    out = []
+    for p in frame:
+        if p is None:
+            out.append(None)
+        else:
+            q = (np.asarray(p, dtype=float) - cB) @ R.T + cA
+            out.append([float(q[0]), float(q[1])])
+    return out
+
+
+async def adjust_from_kateri(comm: "Communicator", projection_no: int = 0,
+                             rough: bool = False, max_frames: int = 40,
+                             frame_delay: float = 0.02, save=None) -> "Adjust":
+    """Interactive (human-facing) half of the adjust stage — the kateri
+    point-drag → relax → animate-in-GUI flow (see py/ae/report/MIGRATION.md Stage B).
+
+    The operator drags antigen/serum points in a running kateri; kateri only
+    *moves* points (it does not relax). Pressing "Relax" sends `RLAX`, and this:
+
+      1. pulls the edited chart back over the socket (`get_chart`, a `CHRT` payload);
+      2. relaxes it with **all points free to move** — the dragged positions are not
+         pinned, they are only better *starting* coordinates that help the optimiser
+         escape the local optimum — **capturing the optimiser's intermediate layouts**;
+      3. subsamples those to ~`max_frames`, Procrustes/Kabsch-aligns each onto the
+         pre-relax layout the operator currently sees (so frames don't flip/fly off
+         from the optimiser's arbitrary MDS gauge), and streams each as a `LAYT` frame
+         (`{"l": coords, "final": bool}`) — kateri repaints each, animating the relax;
+      4. marks the last frame `"final": true` (kateri commits that layout, so a later
+         `get_chart` returns the relaxed coordinates); the final frame is the true
+         optimum, not just the last captured iterate. Optionally writes the adjusted
+         `.ace` (`save=<path>`).
+
+    `frame_delay` paces the stream (~`max_frames` frames over a fraction of a second).
+    No full `CHRT` is sent for the result — the `LAYT` stream carries it, and kateri
+    keeps its own viewport / plot-style / selection stable across frames.
+
+    Note: nothing is pinned, so the relaxed positions of the dragged points generally
+    differ from where the operator dropped them. `get_moved_points` is *not* used here
+    — it remains available purely as informational reporting.
+
+    *comm* is a connected ``ae.utils.kateri.Communicator``. Returns the `Adjust`
+    wrapping the relaxed chart — the same shared `ae_backend.chart_v3` core the
+    programmatic front-end (`Adjust`) uses.
+    """
+    chart = await comm.get_chart()            # ae_backend.chart_v3.Chart with the operator's edits
+    adj = Adjust(chart, projection_no=projection_no)
+    npoints = adj.number_of_antigens + adj.number_of_sera
+    start = [adj.coordinates(i) for i in range(npoints)]     # pre-relax layout kateri shows
+    frames = adj.relax_capturing_intermediates(rough=rough)  # projection now holds the final layout
+    final_coords = [adj.coordinates(i) for i in range(npoints)]
+    anim = [coords for (coords, _stress) in _sample_frames(frames, max_frames)]
+    if anim:
+        anim[-1] = final_coords               # commit the true optimum, not just the last iterate
+    else:
+        anim = [final_coords]                 # 0 iterations captured — commit the (already optimal) layout
+    for n, coords in enumerate(anim):
+        is_last = n == len(anim) - 1
+        comm.send_layout(_kabsch_align(start, coords), final=is_last)
+        await comm.drain()
+        if frame_delay and not is_last:
+            await asyncio.sleep(frame_delay)
+    if save is not None:
+        adj.save(save)
+    return adj
 
 # ----------------------------------------------------------------------
 

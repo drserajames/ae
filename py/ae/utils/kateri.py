@@ -75,6 +75,19 @@ class Communicator:
     def send_chart(self, chart: ae_backend.chart_v3.Chart):
         self._send(b"CHRT", chart.export())
 
+    def send_layout(self, coords: list, final: bool):
+        """Send a `LAYT` frame for live relax animation: the full layout in raw projection
+        coordinates (one `[x, y]` per point, `null` for disconnected), same order/length as
+        the chart layout. kateri applies the projection transform + a fixed recenter and
+        repaints, keeping its viewport/plot-style/selection stable. `final=True` commits the
+        coordinates into kateri's model (so a later `get_chart` returns the relaxed layout)."""
+        self._send(b"LAYT", json.dumps({"l": coords, "final": final}).encode("utf-8"))
+
+    async def drain(self):
+        "Flush the write buffer (used between streamed LAYT frames)."
+        if self.writer:
+            await self.writer.drain()
+
     def set_style(self, style: str):
         self.send_command({"C": "set_style", "style": style})
 
@@ -93,6 +106,13 @@ class Communicator:
         self.send_command_expect(command={"C": "get_viewport"}, expect={"C": "JSON", "future": futu})
         viewport = await futu
         return viewport
+
+    async def get_moved_points(self) -> list[int]:
+        "layout indices the operator dragged in kateri (antigens 0..nAg-1, then sera), sorted+deduplicated"
+        futu = asyncio.get_running_loop().create_future()
+        self.send_command_expect(command={"C": "get_moved_points"}, expect={"C": "JSON", "future": futu})
+        result = await futu
+        return result.get("moved", [])
 
     async def get_pdf(self, style: str = None, width: float = 800.0) -> bytes:
         if style:
@@ -139,6 +159,11 @@ class Communicator:
             # print(f">>>> received from kateri: {request}", file=sys.stderr)
             if request == "HELO":
                 pass
+            elif request == "RLAX":
+                # operator pressed Relax in kateri — bare 4-byte code, no length/payload (like HELO/QUIT).
+                # pin the moved points and relax, then push the result back. Run as a task so this read
+                # loop keeps draining — the get_chart/get_moved_points replies come back through it.
+                asyncio.create_task(handle_relax(self))
             elif request in ["PDFB", "CHRT", "JSON"]:
                 payload_length = int.from_bytes(await reader.read(4), byteorder=sys.byteorder)
                 # print(f">>>> [kateri.Communicator] {request} {payload_length} bytes", file=sys.stderr)
@@ -186,6 +211,26 @@ class Communicator:
                 futu.set_result(json.loads(data))
         else:
             print(f">> [kateri.Communicator] not implemented processing for expected {expected}", file=sys.stderr)
+
+# ----------------------------------------------------------------------
+
+async def handle_relax(comm: "Communicator"):
+    """Handle a kateri `RLAX` notification (operator pressed Relax after dragging):
+    pull the edited chart, relax it with **all points free** (the dragged positions
+    are only better starting coordinates, not pinned) while capturing the optimiser's
+    intermediate layouts, and stream those back as `LAYT` frames so kateri animates the
+    relax (last frame commits the layout). Implemented by `ae.adjust.adjust_from_kateri`
+    (imported lazily to keep this transport module free of the adjust/ae_backend/numpy
+    dependency at import time). Runs as a task off `connected()`'s read loop — it streams
+    frames with `await`s between them while the loop keeps draining `get_chart`'s reply —
+    so exceptions are logged here rather than lost."""
+    from ae.adjust import adjust_from_kateri
+    try:
+        await adjust_from_kateri(comm)   # send_back=True by default → the relaxed map reappears in kateri
+    except Exception:
+        import traceback
+        print(">> [kateri.Communicator] handle_relax failed:", file=sys.stderr)
+        traceback.print_exc()
 
 # ----------------------------------------------------------------------
 
