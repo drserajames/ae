@@ -557,6 +557,8 @@ std::shared_ptr<ae::tree::Tree> ae::tree::load(const std::filesystem::path& file
         tree = load_json(data, filename);
     else
         throw std::runtime_error{AD_FORMAT("cannot load tree from \"{}\": unknown file format", filename)};
+    if (!tree)
+        throw std::runtime_error{AD_FORMAT("cannot load tree from \"{}\": parsing failed", filename)};
     tree->calculate_cumulative();
     tree->set_node_id(Tree::reset_node_id::no);
     return tree;
