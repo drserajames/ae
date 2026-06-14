@@ -304,13 +304,14 @@ the `cc/draw/` surface API."*
     sub-array recursion, `?N` skipping, and command mapping — `canvas`→image_size,
     `clades`/`clades-whocc`→clade column, `time-series`→time-series, `draw-aa-transitions`
     (`method`/`min-leaves`)→aa-transitions, `hz-sections`→hz-sections, `dash-bar-aa-at`→dash
-    column, `nodes` select/apply→node-mods. `tal-signature-page --tal CONFIG.tal -D name=val`
-    translates + renders. **Structural, not pixel-perfect:** the few remaining unsupported bits
-    (exact layout ratios, `if`/`then` conditionals) are collected as `warnings`, not silently
-    dropped; `apply.text` positioned labels and per-clade `show:false` now map (see #20). **Verify:**
-    `python3 cc/tal/test/test-settings-v3.py` (synthetic config, 13 mapping checks); a **real** h3.tal
-    + its 70k-leaf tree translated and rendered in ~1.3 s (clade column + monthly time-series +
-    labels all present).
+    column, `nodes` select/apply→node-mods, `tree` `color-by`→leaf colouring (see #21), and
+    `if`/`then`/`else` conditionals (see #23). `tal-signature-page --tal CONFIG.tal -D name[=val]`
+    translates + renders (`-D name` is a truthy flag for conditions). **Structural, not pixel-perfect:**
+    the few remaining unsupported bits (exact layout ratios, `for-each`) are collected as `warnings`,
+    not silently dropped; `apply.text` positioned labels, per-clade `show:false`, colouring, and
+    conditionals now all map. **Verify:** `python3 cc/tal/test/test-settings-v3.py` (synthetic config,
+    28 mapping + grammar checks); a **real** h3.tal + its 70k-leaf tree translated and rendered in
+    ~1.3 s (clade column + monthly time-series + labels all present).
 20. **DrawOnTree positioned labels + per-clade hiding — DONE.** `nodes` `apply.text` now draws a
     positioned text label at a leaf tip (`NodeText{text, offset, color, size}`; offset/size as
     fractions of image_size) — port of acmacs-tal `DrawOnTree`. Per-clade `show:false` (settings
@@ -332,8 +333,15 @@ the `cc/draw/` surface API."*
     + `legend.show`). **Verify:** `sh cc/tal/test/test-draw-tree.sh` (continent + by-pos cases on
     `tree-geo.json` / `tree-aa.json`) + PDF-text check (continent legend `EUROPE/ASIA/NORTH-AMERICA
     /AFRICA`, by-pos legend `3T`/`3A`); `python3 cc/tal/test/test-settings-v3.py` (15 checks).
-22. **Low-value tail:** `if`/`then` conditional settings, `-D`-conditional logic, `max-edge-length`
-    ladderize, finer signature-page layout (map grids, captions), other `tal` outputs (`.names`/`.html`).
+22. **`if`/`then` conditionals + `-D` defines — DONE.** The settings-v3 reader now interprets
+    `{"N":"if","condition":…,"then":[…],"else":[…]}` instead of dropping it: `_eval_condition`
+    ports the AD grammar (`$var` resolve, `and`/`or`/`not`/`empty`/`not-empty`/`equal`/`not-equal`,
+    bool/number literals) and the matching branch is run as a sub-program. `bin/tal-signature-page`
+    now accepts bare `-D name` (truthy flag) as well as `-D name=value`. **Verify:** `python3
+    cc/tal/test/test-settings-v3.py` (12 direct grammar checks + an `if`-gated dash-bar in the
+    synthetic config: pos 145 included when `$enable_extra` set, pos 999 `not`-branch excluded).
+23. **Low-value tail:** `for-each` loops, `max-edge-length` ladderize, finer signature-page layout
+    (map grids, captions), other `tal` outputs (`.names`/`.html`).
 
 **Not a remaining item — `clades-whocc` (clade-from-sequence assignment).** This was struck off
 after auditing the AD source. In acmacs-tal `clades-whocc` is a draw-time settings macro that

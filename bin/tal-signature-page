@@ -61,7 +61,11 @@ def main() -> int:
         import json
         import tempfile
         from ae.tal.settings_v3 import load_tal
-        defines = dict(d.split("=", 1) for d in args.define if "=" in d)
+        # -D name=value sets a $variable; bare -D name is a truthy flag (used by `if` conditions)
+        defines = {}
+        for d in args.define:
+            name, eq, value = d.partition("=")
+            defines[name] = value if eq else "true"
         schema, warnings = load_tal(args.tal, defines)
         for warning in warnings:
             print(f"  [tal] {warning}", file=sys.stderr)

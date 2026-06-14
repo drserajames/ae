@@ -13,6 +13,12 @@
         {"N": "dash-bar-aa-at", "pos": 159},
         {"N": "nodes", "select": {"seq_id": "A"}, "apply": {"hide": true}},
         {"N": "nodes", "select": {"seq_id": "B"}, "apply": {"text": {"text": "x", "offset": [0.02, 0.0]}}},
+        {"N": "if", "condition": "$enable_extra", "then": [
+            {"N": "dash-bar-aa-at", "pos": 145},
+        ]},
+        {"N": "if", "condition": {"not": "$enable_extra"}, "then": [
+            {"N": "dash-bar-aa-at", "pos": 999},
+        ]},
         {"?N": "gap", "width-to-height-ratio": 0.02},
     ],
     "hz": [

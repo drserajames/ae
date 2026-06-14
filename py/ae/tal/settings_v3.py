@@ -38,6 +38,88 @@ def _substitute(obj: Any, defines: dict) -> Any:
     return obj
 
 
+# Strings that count as false for a `$var` / bare-string condition. Everything else
+# non-empty is truthy. Mirrors how `-D name` (truthy flag) vs `-D name=false` read.
+_FALSY_STRINGS = {"", "false", "no", "0", "off", "null", "none"}
+
+
+def _resolve(value: Any, defines: dict) -> Any:
+    """Resolve a "$name" reference against defines (None if undefined); else pass through."""
+    if isinstance(value, str) and value.startswith("$"):
+        return defines.get(value[1:])
+    return value
+
+
+def _truthy(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() not in _FALSY_STRINGS
+    if isinstance(value, (list, dict)):
+        return len(value) > 0
+    return bool(value)
+
+
+def _eval_condition(cond: Any, defines: dict, warnings: list) -> bool:
+    """Evaluate an acmacs-tal settings-v3 `if` condition (port of Data::eval_condition).
+
+    Grammar: null->false, bool/number as-is, "$var" resolves+truthy, and one-key objects
+    `and`/`or`/`not`/`empty`/`not-empty`/`equal`/`not-equal`.
+    """
+    if cond is None:
+        return False
+    if isinstance(cond, bool):
+        return cond
+    if isinstance(cond, (int, float)):
+        return cond != 0
+    if isinstance(cond, str):
+        if cond.startswith("$"):
+            return _truthy(_resolve(cond, defines))
+        low = cond.strip().lower()
+        if low in ("true", "yes", "1", "on"):
+            return True
+        if low in _FALSY_STRINGS:
+            return False
+        warnings.append(f"if: unsupported string condition {cond!r} — treated as false")
+        return False
+    if isinstance(cond, dict):
+        if len(cond) != 1:
+            warnings.append(f"if: condition object must have exactly one key: {cond!r} — false")
+            return False
+        key, val = next(iter(cond.items()))
+        if key == "and":
+            return bool(val) and all(_eval_condition(c, defines, warnings) for c in val)
+        if key == "or":
+            return bool(val) and any(_eval_condition(c, defines, warnings) for c in val)
+        if key == "not":
+            return not _eval_condition(val, defines, warnings)
+        if key in ("empty", "not-empty"):
+            resolved = _resolve(val, defines)
+            if resolved is None:
+                is_empty = True
+            elif isinstance(resolved, str):
+                is_empty = resolved == ""
+            else:
+                warnings.append(f"if: {key} on non-string {resolved!r} — false")
+                return False
+            return is_empty if key == "empty" else not is_empty
+        if key in ("equal", "not-equal"):
+            if not isinstance(val, list) or len(val) < 2:
+                warnings.append(f"if: {key} needs an array of 2+ — false")
+                return False
+            resolved = [_resolve(x, defines) for x in val]
+            equal = all(x == resolved[0] for x in resolved[1:])
+            return equal if key == "equal" else not equal
+        warnings.append(f"if: unrecognized condition clause {key!r} — false")
+        return False
+    warnings.append(f"if: unsupported condition {cond!r} — false")
+    return False
+
+
 def _select(select: dict, warnings: list) -> dict:
     out: dict = {}
     if "seq_id" in select:
@@ -101,6 +183,15 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 continue  # {"?N": …} disabled, or a comment
             cmd = _substitute(item, defines)
             name = cmd["N"]
+            if name == "if":
+                # conditional sub-program: run "then" (or "else") if the condition holds.
+                # Evaluate against the raw item so "$var" condition refs stay explicit.
+                branch = item.get("then") if _eval_condition(item.get("condition"), defines, warnings) else item.get("else")
+                if isinstance(branch, list):
+                    run(branch)
+                elif branch is not None:
+                    warnings.append("if: 'then'/'else' must be an array — skipped")
+                continue
             if name == "canvas":
                 if "height" in cmd:
                     try:

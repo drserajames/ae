@@ -13,11 +13,32 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "py"))
 
-from ae.tal.settings_v3 import load_tal
+from ae.tal.settings_v3 import load_tal, _eval_condition
+
+
+def check_eval_condition() -> dict:
+    """Direct grammar checks for the if-condition evaluator (port of eval_condition)."""
+    d = {"whocc": "true", "off_flag": "false", "region": "EUROPE", "blank": ""}
+    w: list = []
+    return {
+        "cond $var truthy": _eval_condition("$whocc", d, w) is True,
+        "cond $var falsy string": _eval_condition("$off_flag", d, w) is False,
+        "cond $var undefined": _eval_condition("$missing", d, w) is False,
+        "cond and": _eval_condition({"and": ["$whocc", {"not-empty": "$region"}]}, d, w) is True,
+        "cond and short-circuits false": _eval_condition({"and": ["$whocc", "$off_flag"]}, d, w) is False,
+        "cond or": _eval_condition({"or": ["$off_flag", "$whocc"]}, d, w) is True,
+        "cond not": _eval_condition({"not": "$off_flag"}, d, w) is True,
+        "cond empty (blank)": _eval_condition({"empty": "$blank"}, d, w) is True,
+        "cond not-empty (set)": _eval_condition({"not-empty": "$region"}, d, w) is True,
+        "cond not-empty (undefined)": _eval_condition({"not-empty": "$missing"}, d, w) is False,
+        "cond equal": _eval_condition({"equal": ["$region", "EUROPE"]}, d, w) is True,
+        "cond not-equal": _eval_condition({"not-equal": ["$region", "ASIA"]}, d, w) is True,
+    }
 
 
 def main():
-    schema, warnings = load_tal(os.path.join(HERE, "config-test.tal"), {})
+    # defines enable the first `if` block (pos 145) and disable the `not` block (pos 999)
+    schema, warnings = load_tal(os.path.join(HERE, "config-test.tal"), {"enable_extra": "true"})
     checks = {
         "canvas->image_size": schema.get("image_size") == 600,
         "clades.show": schema.get("clades", {}).get("show") is True,
@@ -25,7 +46,7 @@ def main():
         "time-series.end": schema.get("time_series", {}).get("end") == "2021-01",
         "aa-transitions imported (not computed)": schema.get("aa_transitions", {}).get("compute") is False,
         "aa-transitions.min_leaves": schema.get("aa_transitions", {}).get("min_leaves") == 5,
-        "dash-bar pos": [b.get("pos") for b in schema.get("dash_bars", [])] == [159],
+        "if/then gated dash-bars (145 in, 999 out)": [b.get("pos") for b in schema.get("dash_bars", [])] == [159, 145],
         "hz-sections (via sub-array)": len(schema.get("hz_sections", [])) == 1,
         "nodes: hide + positioned-text both mapped": len(schema.get("nodes", [])) == 2,
         "apply.text -> positioned label": any(
@@ -42,7 +63,9 @@ def main():
         "tree color-by continent": schema.get("color_by_continent") is True,
         "tree legend.show": schema.get("legend", {}).get("show") is True,
         "no apply.text warning": not any("apply.text" in w for w in warnings),
+        "no if-related warning": not any(w.startswith("if:") for w in warnings),
     }
+    checks.update(check_eval_condition())
     failures = [name for name, ok in checks.items() if not ok]
     if failures:
         print("FAIL:")
