@@ -31,6 +31,29 @@ namespace ae::py
         ae::chart::v3::Transformation& transformation() { return projection.transformation(); }
         ae::chart::v3::Layout& layout() { return projection.layout(); }
 
+        // move a point (antigens are indexed 0..n_ag-1, sera continue at n_ag..) to the given coordinates
+        void set_coordinates(size_t point_no, const std::vector<double>& coordinates)
+        {
+            auto& lt = projection.layout();
+            if (point_index{point_no} >= lt.number_of_points())
+                throw std::invalid_argument{fmt::format("set_coordinates: wrong point index: {}, number of points in layout: {}", point_no, lt.number_of_points())};
+            if (coordinates.size() != *lt.number_of_dimensions())
+                throw std::invalid_argument{fmt::format("set_coordinates: wrong number of coordinates: {}, layout dimensions: {}", coordinates.size(), lt.number_of_dimensions())};
+            for (const auto dim : lt.number_of_dimensions())
+                lt(point_index{point_no}, dim) = coordinates[*dim];
+            projection.reset_stress();
+        }
+
+        // pin points so a subsequent relax keeps them fixed (replaces the current unmovable set)
+        void set_unmovable(const std::vector<size_t>& points)
+        {
+            auto& unmovable = projection.unmovable().get();
+            unmovable.clear();
+            unmovable.reserve(points.size());
+            for (const auto pnt : points)
+                unmovable.push_back(point_index{pnt});
+        }
+
         double relax(ae::chart::v3::optimization_precision precision)
         {
             // optimization_options opt;

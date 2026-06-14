@@ -1,14 +1,81 @@
 # ssm-report → ae: vcm consolidation migration plan
 
-Status: **largely done.** Phases 0–3 + 1b complete: the AD-faithful `py/ae/report/`
-port was shelved (branch `report-shelved`) and the team's ae-based report engine
-(`vcm`) is consolidated into `py/ae/report/`. All four figure families generate on ae
-(kateri antigenic maps · `stat`/`stat_tables` · `geo-draw` geographic · `tal-draw`
-trees), the adjust stage is ported (`ae.adjust` programmatic + kateri point-drag
-interactive), and a bootstrap `skeleton/` exists. **Remaining:** a full assembled-report
-end-to-end run, and geo clade/lineage colouring (geo-draw pies, owned by map-draw #1).
+Status: **engine consolidated; not yet remake-ready end-to-end.** Phases 0–3 + 1b
+complete: the AD-faithful `py/ae/report/` port was shelved (branch `report-shelved`)
+and the **library tier** of the team's ae-based report engine (`vcm`) is consolidated
+into `py/ae/report/`. The library tier is a **verified faithful** copy (see the
+[2026-0223 gap analysis](#gap-analysis-2026-0223-capstone-attempt) below). But a full
+faithful **remake** of a real report on `ae.report` is **not yet achievable** — three
+genuine gaps remain (geographic clade/aa colouring, tree `.tal` fidelity, per-report
+glue). The adjust stage is ported (`ae.adjust` programmatic + kateri point-drag
+interactive). **Remaining:** the three gaps below, then the full assembled-report run.
 This document records the plan and the as-built decisions. Read it before touching
 report code. (Sections below are kept as the historical plan + rationale.)
+
+---
+
+## Gap analysis (2026-0223 capstone attempt)
+
+Done 2026-06-14 while attempting a full assembled-report remake against a copy of the
+real `2026-0223-ssm` report (a **later** report than the `2026-0119-tc2` the
+consolidation was built from). Diffed that report's `py/vcm/v2` against `ae.report`.
+**The capstone run is what surfaces these — they were not visible from import checks.**
+
+**Verified faithful (ready).** After normalising `vcm.v2.*`→`ae.report.*`, the
+library/engine tier differs only by header comments, the deliberate engine/per-report
+decoupling, and raw-string `SyntaxWarning` fixes — **no missing logic**:
+
+| module | real divergence from this report's vcm |
+|---|---|
+| `commander`, `download`, `main_loop`, `dirs`, `modules` | none (import-rewrite artifacts only) |
+| `chart_modifier` | only base-class swap (`conference_data_base`) + guarded `semantic_*`/`serology` imports |
+| `latex` | only `r"..."` warning fixes — byte-identical rendered output |
+
+**Three genuine gaps (NOT ready for a faithful remake):**
+
+1. **`geographic.py` — ✅ CLOSED 2026-06-14.** This report's vcm shells the AD
+   **`geographic-draw`** binary with a full `-s settings.json` **clade/aa colouring**
+   spec from `ConferenceData.geographic_coloring(subtype)` / `geographic_settings()`
+   (`apply` rules like `["156N","155G"]`), `--time-series monthly`. `ae.report.geographic`
+   now has a **`color_by="coloring"`** mode that consumes that spec faithfully: `_Coloring`
+   is a Python port of AD `ColoringByAminoAcid::color` (ordered `apply` rules; a `sequenced`
+   rule sets fill only; an `aa` rule matched via seqdb's `SequenceAA.matches_all` — incl. `!`
+   negation and `-` deletions — overrides fill/outline/outline_width; later matches win;
+   unmatched → `default`). geo-draw gained a packed-dots renderer (one dot per antigen,
+   AD's concentric-ring packing via `point_size`/`density`; `CairoPdf::sector` + per-point
+   `outline_width`; `circle()` skips the stroke on transparent/zero outline). **✅ Verified**
+   on real H1 hidb (Dec 2023 window — local hidb is stale so the exact 2025-12 reference
+   month can't be reproduced here): dots are clade-coloured by the report's exact palette
+   (`#5b00d3`=D, `#BE187D`=C.1, `#98e1d7`=C.1.9; unmatched = faint grey rings), packed in
+   rings per location, month-name title, no on-map legend — the AD representation. The older
+   **continent** dot and **clade pie** modes still work (no regression). Residual cosmetic
+   diffs: geo-draw's base map fills land light-grey (AD: white); a few unicode location names
+   don't resolve in the local locdb.
+
+2. **Trees — new path, fidelity unverified.** vcm/v2 has **no** `trees.py`; trees are
+   produced by `tree/0do` shelling the **AD `tal`** binary (`tal -s X.tal X.tjz out.pdf`).
+   `ae.report.trees` is a *new* wrapper over ae's `tal-draw` + a `.tal`→settings-v3
+   translator that is **known-incomplete** (skips positioned labels, `edge >=` selection,
+   non-object select/apply — see `cc/tal/PORTING.md`). Not yet diffed against this
+   report's `.tal` files; may not reproduce them.
+
+3. **Per-report glue not written for this report.** `conference_data.py`, `serology.py`,
+   `h1/h3/b_chart_modifier.py` intentionally stay in the report dir, but a run on
+   `ae.report` needs the documented adaptations applied to *these* files (subclass
+   `conference_data_base.ConferenceData`; mix the concrete `ConferenceData` into each
+   subtype modifier). Not done in the `2026-0223` copy.
+
+**Plus a non-mechanical rewire detail.** `stat.py` means **different things** in the two
+trees — `ae.report.stat` is the new hidb writer; vcm's `stat.py` is `ae.report.stat_tables`.
+So `0do`'s `from vcm.v2.stat import make_stat` → `from ae.report.stat_tables import make_stat`
+is **not** a blind `s/vcm.v2/ae.report/`.
+
+**Remake order (fix gaps as they surface):** (1) build + verify the geo-pie work → then
+extend `ae.report.geographic` to consume `geographic_coloring`; (2) rewire one subtype-lab
+dir (`h1-cdc`) + write per-report glue → diff the map PDF vs the existing `out.1.clades.pdf`;
+(3) stat → geo(clade) → trees, each diffed vs the reference figures already in the folder;
+(4) `report.py` → assembled `report.pdf`. **No real report data is copied into `ae`** — the
+copy lives under `~/AC/eu/ac/results/ssm/`, outputs/verification stay there or in `/tmp`.
 
 ---
 
@@ -267,26 +334,28 @@ core ✅    └─ programmatic : ae.zero_do move/select/relax (Python)  ─┘
   synthetic `test/chart1.ace`: geometric selection correct; pinned points stay exactly through
   relax while others move; flip reflects correctly; save/reload + procrustes(self)=0. This is the
   AD `0do` workflow, scriptable: `select region → move → relax → save`. (kateri snapshots optional.)
-- ✅ **Interactive (human-facing) — DONE.** kateri now drags antigen/serum points (it only
-  *moves* them — no relax) and the ae-side glue is in place:
-  [`ae.adjust.adjust_from_kateri`](../adjust.py), dispatched from the new `RLAX` notification in
-  [`Communicator.connected`](../utils/kateri.py) (`handle_relax`). When the operator presses
-  "Relax", kateri sends a bare `RLAX`; the ae side then does `get_chart` (edited layout) →
-  `Adjust.relax` with **all points free** → `Adjust.orient_to` the pre-relax layout (procrustes; so
-  the map doesn't flip/rotate from MDS reorientation) → `send_chart` back to kateri + optional
-  `.ace` write. **Nothing is pinned** — the dragged positions are only better *starting* coordinates
-  that let the optimiser escape the local optimum it was trapped in, so all points (including the
-  dragged ones) settle freely. `Communicator.get_moved_points` remains as **informational reporting
-  only** (not used by the relax flow). **Verified** on synthetic `test/chart1.ace`
-  ([`test/adjust_from_kateri.py`](../../../test/adjust_from_kateri.py), fake transport): free relax
-  lowers the perturbed-layout stress to the known optimum, the dragged points move (not held fixed),
-  re-orient undoes a known reflection, the relaxed chart is pushed back, `get_moved_points`
-  round-trips, and the full `RLAX` notification round trip works through the real `connected()` loop.
-  - **Future enhancement — live relax animation (not built).** The GUI currently shows one jump
-    from dragged → relaxed because `relax()` is a single blocking `ae_backend` call returning only
-    the final layout. Animating the optimization would require `ae_backend` to expose intermediate
-    layouts (a per-iteration / periodic callback); the glue would stream each as its own
-    `send_chart` (`CHRT`) frame. kateri needs no change — every `CHRT` already repaints.
+- ✅ **Interactive (human-facing) — DONE, with live relax animation.** kateri drags antigen/serum
+  points (it only *moves* them — no relax) and the ae-side glue is in place:
+  [`ae.adjust.adjust_from_kateri`](../adjust.py), dispatched from the `RLAX` notification in
+  [`Communicator.connected`](../utils/kateri.py) (`handle_relax`). When the operator presses "Relax",
+  kateri sends a bare `RLAX`; the ae side then does `get_chart` (edited layout) →
+  `Adjust.relax_capturing_intermediates` (**all points free**, no pinning) → subsample the
+  optimiser's per-iteration layouts to ~40 frames → Procrustes/Kabsch-align each onto the pre-relax
+  layout (so frames don't flip/fly off from the optimiser's arbitrary MDS gauge) → stream each as a
+  `LAYT` frame (`{"l": coords, "final": bool}`, same framing as `CHRT`). kateri repaints each frame,
+  **animating the relax**; the last frame is `"final": true` and commits the layout (no full `CHRT`
+  needed for the result). **Nothing is pinned** — the dragged positions are only better *starting*
+  coordinates that let the optimiser escape the local optimum. `Communicator.get_moved_points`
+  remains **informational only** (not used by the relax flow).
+  - **C++ support:** `ae_backend.chart_v3.Projection.relax_capturing_intermediates(rough=False)`
+    (new pybind binding over the existing `optimize(chart, projection, IntermediateLayouts&, …)`
+    overload) relaxes in place and returns the per-iteration `(coords, stress)` sequence.
+  - **Verified.** Automated ([`test/adjust_from_kateri.py`](../../../test/adjust_from_kateri.py),
+    fake transport): a multi-frame `LAYT` stream (last=final) over the real `connected()` loop,
+    frame 0 anchored exactly at the operator's drag, dragged points move freely, stress falls to the
+    known optimum, Kabsch keeps non-dragged points in their original frame. **Live against real
+    kateri:** `RLAX`/`handle_relax` round-tripped `get_chart` with the running GUI and streamed 40
+    `LAYT` frames (last=final) that kateri rendered without error.
 
 The report engine already follows this both/and pattern elsewhere (programmatic `make_geo`/
 `make_trees`/`make_stat` for agents; interactive `0do`/kateri for humans) — the adjust stage now
@@ -367,23 +436,37 @@ same either way.
       `out.1.clades.pdf`**. Surfaced + fixed a kateri-launcher bug (symlink → `@executable_path`
       framework-load failure) in `ae.utils.kateri`. Per-report adaptation: the subtype modifier
       mixes in the concrete `ConferenceData` (`class H1_ChartModifier(ChartModifier, ConferenceData)`).
-- [x] **Geographic wired to `geo-draw`.** `geographic.make_geo` now extracts per-month
+- [x] **Geographic wired to `geo-draw`.** `geographic.make_geo` extracts per-month
       `{location, count}` from hidb, writes geo-draw's `--data` records JSON, and renders
       `<geo_dir>/<subtype>-<YYYY-MM>.pdf` (continent-coloured, count-sized). Decoupled from
-      `ConferenceData`. **✅ Verified** on real H3 hidb. (Clade/lineage colouring awaits
-      geo-draw pies — continent colouring works now.)
+      `ConferenceData`. **✅ Verified** on real H3 hidb.
+- [x] **Geographic clade/lineage colouring — BUILT + VERIFIED 2026-06-14.** Two paths landed on
+      `geo-draw`: (a) a **clade pie** mode (`color_by="clade"`: wedges per clade, stable palette +
+      legend; `CairoPdf::sector` + `GeoWedge`/`LegendEntry`) — built, synthetic-verified; and (b)
+      the **report-faithful `color_by="coloring"`** mode that consumes the report's
+      `geographic_coloring(subtype)` aa/clade `apply` rules (`_Coloring` = port of AD
+      `ColoringByAminoAcid`; seqdb `SequenceAA.matches_all`) and renders AD-style packed per-antigen
+      dots (concentric-ring packing; per-point `outline_width`; `circle()` no-stroke on
+      transparent). **✅ Verified** on real H1 hidb (clade palette correct, packed clusters,
+      month-name title) — this closes [gap #1](#gap-analysis-2026-0223-capstone-attempt). Continent
+      + pie modes unaffected.
 - [x] **Trees wired to `tal-draw`.** `trees.make_trees` translates the report's settings-v3
       `.tal` (`ae.tal.settings_v3`) → tal-draw schema and renders the tree `.tjz` → the embedded
       `<subtype>.pdf` (replaces AD `tal -s …`). **✅ Verified** on a real H1 report tree (88 k
       leaves, clades, time-series). A few `.tal` features the translator skips are TAL follow-ups;
       signature-page composition is `bin/tal-signature-page` (TAL).
-- [x] **Adjust stage (Stage B).** kateri point-dragging + ae-side free-relax glue
-      (`ae.adjust.adjust_from_kateri`, dispatched from the `RLAX` notification) — both front-ends
-      done. Drags are starting seeds, not pins; all points relax freely. Possible future
-      enhancement: live relax animation (needs an `ae_backend` intermediate-layout callback — see
-      Stage B above).
-- [ ] **Remaining:** geo clade/lineage colouring (geo-draw pies, map-draw); TAL `.tal`
-      translation fidelity (TAL); optional per-report skeleton.
+- [x] **Adjust stage (Stage B), incl. live relax animation.** kateri point-dragging + ae-side
+      free-relax glue (`ae.adjust.adjust_from_kateri`, dispatched from the `RLAX` notification) — both
+      front-ends done. Drags are starting seeds, not pins; all points relax freely. The relax now
+      **animates**: `Projection.relax_capturing_intermediates` (new pybind binding) feeds the
+      optimiser's per-iteration layouts, which are Kabsch-aligned and streamed as `LAYT` frames to
+      kateri (last=final commits). Verified automated + live against real kateri (see Stage B above).
+- [ ] **Remaining (see [gap analysis](#gap-analysis-2026-0223-capstone-attempt)):**
+      (1) ✅ **DONE** — `ae.report.geographic` consumes `geographic_coloring` (clade/aa `apply`
+      rules), built + verified on real H1 hidb; (2) tree `.tal` translation fidelity diffed
+      against a real report's `.tal` (TAL); (3) per-report glue applied to a real report's
+      `conference_data.py`/subtype modifiers; (4) then the full assembled-report end-to-end run
+      (capstone).
 
 ---
 
