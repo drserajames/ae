@@ -1,7 +1,10 @@
 # ae.report — seasonal / SSM WHO CC report tooling
 
-**Consolidation in progress** — see [`MIGRATION.md`](MIGRATION.md) for the full plan,
-history (AD → `vcm`), audit, and phased steps.
+**Consolidation largely done** (see [`MIGRATION.md`](MIGRATION.md) for the full plan,
+history (AD → `vcm`), audit, and as-built notes). The ae-based report **engine** is in
+place; all four figure families generate on ae (kateri maps · `stat` · `geo-draw` ·
+`tal-draw`) and the adjust stage is ported (`ae.adjust` + kateri point-drag). Remaining:
+a full assembled-report run, and geo clade colouring (geo-draw pies, map-draw #1).
 
 This package holds the ae-based **report engine** (the library tier of the team's
 `vcm` tool). The AD-faithful re-port that previously lived here (`report.py`,

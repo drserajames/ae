@@ -1,8 +1,14 @@
 # ssm-report → ae: vcm consolidation migration plan
 
-Status: **planning** (Phase 0 done). This document is the agreed plan for retiring
-the AD-faithful `py/ae/report/` port and bringing the team's actual ae-based report
-tooling (`vcm`) into the `ae` repo. Read this before touching report code.
+Status: **largely done.** Phases 0–3 + 1b complete: the AD-faithful `py/ae/report/`
+port was shelved (branch `report-shelved`) and the team's ae-based report engine
+(`vcm`) is consolidated into `py/ae/report/`. All four figure families generate on ae
+(kateri antigenic maps · `stat`/`stat_tables` · `geo-draw` geographic · `tal-draw`
+trees), the adjust stage is ported (`ae.adjust` programmatic + kateri point-drag
+interactive), and a bootstrap `skeleton/` exists. **Remaining:** a full assembled-report
+end-to-end run, and geo clade/lineage colouring (geo-draw pies, owned by map-draw #1).
+This document records the plan and the as-built decisions. Read it before touching
+report code. (Sections below are kept as the historical plan + rationale.)
 
 ---
 
@@ -37,8 +43,8 @@ already moved into `ae`; the *report logic* (`latex.py`, `conference_data.py`,
 exactly what `ae` TODO #4 ("ssm-report → `py/ae/report/`") points at.
 
 **No `import acmacs` (AD) anywhere in vcm** — it is pure `ae`. The only AD that remains
-in the report workflow is the interactive map-adjustment `0do`/`zero_do` framework (see
-[Stage B](#stage-b--interactive-map-adjustment-still-ad)).
+in the report workflow was the interactive map-adjustment `0do`/`zero_do` framework — now
+ported to ae (see [Stage B](#stage-b--interactive-map-adjustment-ported-to-ae--port-plan)).
 
 **Canonical source for the port: the latest vcm, `~/AC/eu/ac/results/ssm/2026-0119-tc2/py/vcm/v2`**
 (not the 2022 snapshot). Same 15-module structure, ~3,330 lines.
@@ -57,7 +63,7 @@ in the report workflow is the interactive map-adjustment `0do`/`zero_do` framewo
 | Chart prep / styling | — | `download.py`, `chart_modifier*`, `commander.py` (`download`/`populate`/`prestyle`/`style`/`export`) via `ae.semantic`+kateri | vcm-only |
 | Geographic / serology | — | `geographic.py`, `serology.py` | vcm-only |
 | Orchestration | `cli.py` + `bin/ssm-report*` | `commander.py` + `main_loop.py` (kateri loop) + `modules.py` | vcm supersedes |
-| Interactive adjustment | — | — (`adjust/0do` scripts) | **still AD** |
+| Interactive adjustment | — | — (`adjust/0do` scripts) | **ported to ae** (`ae.adjust`, Stage B) |
 
 ---
 
@@ -192,7 +198,7 @@ H1/H3 hidb. (⚠ B is currently skipped — open hidb-side B-load bug, `STRING_E
 
 ---
 
-## Stage B — interactive map adjustment (still AD) — port plan
+## Stage B — interactive map adjustment (ported to ae) — port plan
 
 The per-map fine-tuning in each `<map>/adjust/0do` script (select outlier antigens, `move`,
 `relax`, `procrustes`) runs on **AD `acmacs` + `acmacs_py.zero_do_5`**
@@ -261,14 +267,31 @@ core ✅    └─ programmatic : ae.zero_do move/select/relax (Python)  ─┘
   synthetic `test/chart1.ace`: geometric selection correct; pinned points stay exactly through
   relax while others move; flip reflects correctly; save/reload + procrustes(self)=0. This is the
   AD `0do` workflow, scriptable: `select region → move → relax → save`. (kateri snapshots optional.)
-- **Interactive (human-facing) — remaining.** kateri grows antigen-point dragging (small Dart
-  change; it already has the hit-test + `get_chart`) → relax-with-pinned (`set_unmovable`, done).
-  Owner: kateri.
+- ✅ **Interactive (human-facing) — DONE.** kateri now drags antigen/serum points (it only
+  *moves* them — no relax) and the ae-side glue is in place:
+  [`ae.adjust.adjust_from_kateri`](../adjust.py), dispatched from the new `RLAX` notification in
+  [`Communicator.connected`](../utils/kateri.py) (`handle_relax`). When the operator presses
+  "Relax", kateri sends a bare `RLAX`; the ae side then does `get_chart` (edited layout) →
+  `Adjust.relax` with **all points free** → `Adjust.orient_to` the pre-relax layout (procrustes; so
+  the map doesn't flip/rotate from MDS reorientation) → `send_chart` back to kateri + optional
+  `.ace` write. **Nothing is pinned** — the dragged positions are only better *starting* coordinates
+  that let the optimiser escape the local optimum it was trapped in, so all points (including the
+  dragged ones) settle freely. `Communicator.get_moved_points` remains as **informational reporting
+  only** (not used by the relax flow). **Verified** on synthetic `test/chart1.ace`
+  ([`test/adjust_from_kateri.py`](../../../test/adjust_from_kateri.py), fake transport): free relax
+  lowers the perturbed-layout stress to the known optimum, the dragged points move (not held fixed),
+  re-orient undoes a known reflection, the relaxed chart is pushed back, `get_moved_points`
+  round-trips, and the full `RLAX` notification round trip works through the real `connected()` loop.
+  - **Future enhancement — live relax animation (not built).** The GUI currently shows one jump
+    from dragged → relaxed because `relax()` is a single blocking `ae_backend` call returning only
+    the final layout. Animating the optimization would require `ae_backend` to expose intermediate
+    layouts (a per-iteration / periodic callback); the glue would stream each as its own
+    `send_chart` (`CHRT`) frame. kateri needs no change — every `CHRT` already repaints.
 
 The report engine already follows this both/and pattern elsewhere (programmatic `make_geo`/
-`make_trees`/`make_stat` for agents; interactive `0do`/kateri for humans) — the adjust stage
-should match. **Owner decision is only sequencing** (which front-end first), not either/or; the
-shared core is in place.
+`make_trees`/`make_stat` for agents; interactive `0do`/kateri for humans) — the adjust stage now
+matches: **both front-ends are built** on the shared `ae_backend` core. The only residual call is
+whether to retire the AD `acmacs_py.zero_do_5` path or keep it as a transition fallback.
 
 ---
 
@@ -354,9 +377,13 @@ same either way.
       `<subtype>.pdf` (replaces AD `tal -s …`). **✅ Verified** on a real H1 report tree (88 k
       leaves, clades, time-series). A few `.tal` features the translator skips are TAL follow-ups;
       signature-page composition is `bin/tal-signature-page` (TAL).
+- [x] **Adjust stage (Stage B).** kateri point-dragging + ae-side free-relax glue
+      (`ae.adjust.adjust_from_kateri`, dispatched from the `RLAX` notification) — both front-ends
+      done. Drags are starting seeds, not pins; all points relax freely. Possible future
+      enhancement: live relax animation (needs an `ae_backend` intermediate-layout callback — see
+      Stage B above).
 - [ ] **Remaining:** geo clade/lineage colouring (geo-draw pies, map-draw); TAL `.tal`
-      translation fidelity (TAL); optional per-report skeleton; the **adjust stage** (Stage B —
-      likely a kateri point-drag feature, design call for kateri's owner).
+      translation fidelity (TAL); optional per-report skeleton.
 
 ---
 
@@ -380,4 +407,9 @@ same either way.
    dir a report copies wholesale.
 4. **Ownership/sequencing:** this crosses into the team's live workflow code — confirm the
    `2026-0119-tc2` vcm is canonical before copying, and that no newer in-flight vcm exists.
-5. **Phase 4 (`zero_do`)**: schedule as its own subsystem, or leave on AD indefinitely?
+5. **Phase 4 (`zero_do` / adjust)**: ✅ **landed** — the adjust stage is now ported to ae, no AD
+   dependency. Both front-ends are done on `ae_backend.chart_v3`: programmatic ([`Adjust`](../adjust.py),
+   the scriptable `0do` workflow) and interactive (kateri point-drag → `RLAX` → `handle_relax` →
+   [`adjust_from_kateri`](../adjust.py), free relax + re-orient + push-back). See [Stage B](#stage-b--interactive-map-adjustment-ported-to-ae--port-plan).
+   Residual decision is narrower: **retire the AD `acmacs_py.zero_do_5` path entirely, or keep it as
+   a fallback during the transition?**
