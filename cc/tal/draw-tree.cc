@@ -72,6 +72,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     std::unordered_map<node_index_base_t, Color> edge_color_override;
     std::unordered_map<node_index_base_t, Color> label_color_override;
     std::unordered_map<node_index_base_t, double> label_scale_override;
+    std::unordered_map<node_index_base_t, NodeText> text_override; // positioned labels (DrawOnTree)
     if (!params.node_mods.empty()) {
         tree.calculate_cumulative();
         const auto apply_mods = [&](node_index_base_t idx, Node& base, const std::string* name, const std::string* date) {
@@ -100,6 +101,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 }
                 if (name != nullptr && ap.label_scale)
                     label_scale_override[idx] = *ap.label_scale;
+                if (name != nullptr && ap.text && !ap.text->text.empty())
+                    text_override[idx] = *ap.text;
             }
         };
         struct Frame
@@ -144,11 +147,16 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
 
     // --- clade sections + clade colour map (first-seen order) ---
     std::vector<Clade> clade_sections;
-    std::unordered_map<std::string, std::size_t> clade_rank; // clade name -> palette/slot index
+    std::unordered_map<std::string, std::size_t> clade_rank; // clade name -> palette/slot index (all clades; colours stay stable)
+    std::vector<std::size_t> visible_clades;                 // ranks of clades shown in the column/legend (per-clade hide removes them)
     if (params.clades || params.color_by_clade || params.legend) {
         clade_sections = compute_clade_sections(tree);
-        for (std::size_t k = 0; k < clade_sections.size(); ++k)
+        for (std::size_t k = 0; k < clade_sections.size(); ++k) {
             clade_rank.emplace(clade_sections[k].name, k);
+            const auto style = params.clade_styles.find(clade_sections[k].name);
+            if (style == params.clade_styles.end() || !style->second.hide)
+                visible_clades.push_back(k);
+        }
     }
 
     // clade colour/name with optional per-clade overrides from the settings DSL
@@ -190,7 +198,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double gap = 0.012 * image_size;
     const double hz_w = params.hz_sections.empty() ? 0.0 : 0.045 * drawable_w; // left marker column
     const double label_w = params.labels ? 0.16 * drawable_w : 0.0;
-    const double clade_w = params.clades && !clade_sections.empty() ? 0.09 * drawable_w : 0.0;
+    const double clade_w = params.clades && !visible_clades.empty() ? 0.09 * drawable_w : 0.0;
     const double ts_w = params.time_series && !time_series.slots.empty() ? 0.34 * drawable_w : 0.0;
     const double dash_col_w = 0.022 * drawable_w;                       // width of one dash-bar column
     const double dash_w = static_cast<double>(params.dash_bars.size()) * dash_col_w;
@@ -205,7 +213,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     if (dash_w > 0.0)  { cursor += gap; x_dash0 = cursor;  cursor += dash_w; }
 
     // --- vertical reserves: title (top), legend + time-series slot labels (bottom) ---
-    const bool want_legend = params.legend && !clade_sections.empty();
+    const bool want_legend = params.legend && !visible_clades.empty();
     const double top_reserve = params.title.empty() ? 0.0 : 0.05 * image_size;
     const double bottom_reserve = (want_legend || ts_w > 0.0 || dash_w > 0.0) ? 0.07 * image_size : 0.0;
 
@@ -322,11 +330,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
 
     // --- clades column: one vertical bar per section, at a per-clade slot ---
     if (clade_w > 0.0) {
-        const double slot_w = clade_w / static_cast<double>(clade_sections.size());
+        const double slot_w = clade_w / static_cast<double>(visible_clades.size());
         const double bar_w = std::clamp(slot_w * 0.30, 1.0, 8.0);
-        for (std::size_t k = 0; k < clade_sections.size(); ++k) {
+        for (std::size_t vi = 0; vi < visible_clades.size(); ++vi) {
+            const std::size_t k = visible_clades[vi];
             const Clade& clade = clade_sections[k];
-            const double cx = x_clade0 + (static_cast<double>(k) + 0.5) * slot_w;
+            const double cx = x_clade0 + (static_cast<double>(vi) + 0.5) * slot_w;
             const Color color = clade_color_for(k, clade.name);
             const CladeSection* widest = nullptr;
             for (const auto& section : clade.sections) {
@@ -426,7 +435,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double swatch_h = legend_fs * 0.9;
         const double ly = image_size - margin - bottom_reserve * 0.35;
         double lx = margin;
-        for (std::size_t k = 0; k < clade_sections.size(); ++k) {
+        for (const std::size_t k : visible_clades) {
             const Color color = clade_color_for(k, clade_sections[k].name);
             const std::string name = clade_display_for(clade_sections[k].name);
             pdf.rectangle(lx, ly - swatch_h / 2.0, swatch_w, swatch_h, color, 0.5, color);
@@ -434,6 +443,21 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             pdf.text(lx + swatch_w + 4.0 + tw / 2.0, ly, name, legend_fs, BLACK, /*center=*/true);
             lx += swatch_w + 4.0 + tw + 16.0;
         }
+    }
+
+    // --- positioned text labels at leaf tips (port of DrawOnTree / nodes apply.text) ---
+    for (const auto& [idx, label] : text_override) {
+        const auto found = pos.find(idx);
+        if (found == pos.end())
+            continue; // node hidden / not in layout
+        const double label_fs = label.size > 0.0 ? label.size * image_size : font_size;
+        Color color = BLACK;
+        if (!label.color.empty()) {
+            try { color = Color{label.color}; } catch (const std::exception&) { }
+        }
+        const double tx = dev_x(found->second.first) + label.offset_x * image_size;
+        const double ty = dev_y(found->second.second) + label.offset_y * image_size + label_fs * 0.3;
+        pdf.text(tx, ty, label.text, label_fs, color, /*center=*/false);
     }
 
     return labels_hidden;

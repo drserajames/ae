@@ -79,7 +79,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
             if (!entry.is_object())
                 continue;
             if (std::string name = get_string(entry["name"]); !name.empty())
-                params.clade_styles.insert_or_assign(std::move(name), CladeStyle{.color = get_string(entry["color"]), .display_name = get_string(entry["display_name"])});
+                params.clade_styles.insert_or_assign(std::move(name), CladeStyle{.color = get_string(entry["color"]), .display_name = get_string(entry["display_name"]), .hide = get_bool(entry["hide"])});
         }
     }
 
@@ -101,6 +101,16 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                 mod.apply.edge_color = get_string(apply["edge_color"]);
                 mod.apply.label_color = get_string(apply["label_color"]);
                 mod.apply.label_scale = get_opt_double(apply["label_scale"]);
+                if (const auto& text = apply["text"]; text.is_object()) {
+                    if (std::string str = get_string(text["text"]); !str.empty()) {
+                        NodeText nt{.text = std::move(str), .color = get_string(text["color"]), .size = get_double(text["size"], 0.0)};
+                        if (const auto& offset = text["offset"]; offset.is_array() && offset.array().size() == 2) {
+                            nt.offset_x = get_double(offset.array()[0], nt.offset_x);
+                            nt.offset_y = get_double(offset.array()[1], nt.offset_y);
+                        }
+                        mod.apply.text = std::move(nt);
+                    }
+                }
             }
             params.node_mods.push_back(std::move(mod));
         }

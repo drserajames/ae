@@ -305,16 +305,24 @@ the `cc/draw/` surface API."*
     `clades`/`clades-whocc`→clade column, `time-series`→time-series, `draw-aa-transitions`
     (`method`/`min-leaves`)→aa-transitions, `hz-sections`→hz-sections, `dash-bar-aa-at`→dash
     column, `nodes` select/apply→node-mods. `tal-signature-page --tal CONFIG.tal -D name=val`
-    translates + renders. **Structural, not pixel-perfect:** unsupported bits (arbitrary
-    `apply.text` strain labels, per-clade `show:false` hiding, exact layout ratios) are
-    collected as `warnings`, not silently dropped. **Verify:** `python3
-    cc/tal/test/test-settings-v3.py` (synthetic config, 10 mapping checks); a **real** h3.tal +
-    its 70k-leaf tree translated and rendered in ~1.3 s (clade column + monthly time-series +
-    labels all present; ~2000 text-label `nodes` reported as warnings).
-20. **Remaining (smaller, toward full `.tal` fidelity):** `DrawOnTree` (`apply.text` positioned
-    strain labels) + per-clade `show:false` hiding — these lift the two main settings-v3
-    approximations; then continent/aa-pos leaf colouring.
-21. **Low-value tail:** `if`/`then` conditional settings, `-D`-conditional logic, `max-edge-length`
+    translates + renders. **Structural, not pixel-perfect:** the few remaining unsupported bits
+    (exact layout ratios, `if`/`then` conditionals) are collected as `warnings`, not silently
+    dropped; `apply.text` positioned labels and per-clade `show:false` now map (see #20). **Verify:**
+    `python3 cc/tal/test/test-settings-v3.py` (synthetic config, 13 mapping checks); a **real** h3.tal
+    + its 70k-leaf tree translated and rendered in ~1.3 s (clade column + monthly time-series +
+    labels all present).
+20. **DrawOnTree positioned labels + per-clade hiding — DONE.** `nodes` `apply.text` now draws a
+    positioned text label at a leaf tip (`NodeText{text, offset, color, size}`; offset/size as
+    fractions of image_size) — port of acmacs-tal `DrawOnTree`. Per-clade `show:false` (settings
+    `clade_styles[].hide`) suppresses a clade's bar + label from the clades column and legend while
+    keeping its leaves drawn (AD semantics — `show:false` hides the annotation, not the subtree).
+    Both wired through `draw-tree.{hh,cc}`, `settings.cc`, and the settings-v3 reader
+    (`apply.text`→node text; `clades` `per-clade`→`clade_styles`). **Verify:**
+    `sh cc/tal/test/test-draw-tree.sh` (per-clade-hide + positioned-labels case) + a PDF-text check
+    (display-name `clade-X` and labels `vaccine`/`ref` present; hidden clade `Y` gone from the column
+    /legend, its leaves still drawn).
+21. **Remaining (smaller, toward full `.tal` fidelity):** continent / aa-pos leaf colouring.
+22. **Low-value tail:** `if`/`then` conditional settings, `-D`-conditional logic, `max-edge-length`
     ladderize, finer signature-page layout (map grids, captions), other `tal` outputs (`.names`/`.html`).
 
 **Not a remaining item — `clades-whocc` (clade-from-sequence assignment).** This was struck off

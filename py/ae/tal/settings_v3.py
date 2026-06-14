@@ -64,7 +64,19 @@ def _apply(apply: dict, warnings: list) -> dict:
     if "label" in apply and isinstance(apply["label"], dict) and "color" in apply["label"]:
         out["label_color"] = apply["label"]["color"]
     if "text" in apply:
-        warnings.append("nodes.apply.text (arbitrary positioned label) has no tal-draw equivalent yet — skipped")
+        text = apply["text"]
+        if isinstance(text, dict) and text.get("text"):
+            node_text: dict = {"text": text["text"]}
+            offset = text.get("offset")
+            if isinstance(offset, list) and len(offset) == 2:
+                node_text["offset"] = offset
+            if "color" in text:
+                node_text["color"] = text["color"]
+            if "size" in text:
+                node_text["size"] = text["size"]
+            out["text"] = node_text
+        else:
+            warnings.append("nodes.apply.text without a 'text' string — skipped")
     return out
 
 
@@ -99,6 +111,18 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 clades = schema.setdefault("clades", {})
                 clades["show"] = True
                 schema["color_by_clade"] = True
+                for pc in cmd.get("per-clade", []):
+                    if not isinstance(pc, dict) or not pc.get("name"):
+                        continue
+                    style: dict = {"name": pc["name"]}
+                    if pc.get("show") is False:
+                        style["hide"] = True
+                    if "color" in pc:
+                        style["color"] = pc["color"]
+                    if isinstance(pc.get("label"), dict) and "text" in pc["label"]:
+                        style["display_name"] = pc["label"]["text"]
+                    if len(style) > 1:  # name + at least one styling key
+                        schema.setdefault("clade_styles", []).append(style)
             elif name == "time-series":
                 ts = schema.setdefault("time_series", {})
                 ts["show"] = True

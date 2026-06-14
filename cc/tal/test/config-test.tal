@@ -2,13 +2,16 @@
     "_": "synthetic acmacs-tal settings-v3 config for test-settings-v3.py (no real data). Note the trailing commas + ?N disabled entries, which the relaxed loader must tolerate.",
     "tal": [
         {"N": "canvas", "height": 600},
-        {"N": "clades"},
+        {"N": "clades", "per-clade": [
+            {"name": "C1", "show": false},
+            {"name": "C2", "color": "#1f78b4"},
+        ]},
         "hz",
         {"N": "time-series", "start": "2020-01", "end": "2021-01"},
         {"N": "draw-aa-transitions", "method": "imported", "minimum-number-leaves-in-subtree": 5},
         {"N": "dash-bar-aa-at", "pos": 159},
         {"N": "nodes", "select": {"seq_id": "A"}, "apply": {"hide": true}},
-        {"N": "nodes", "select": {"seq_id": "B"}, "apply": {"text": {"text": "x"}}},
+        {"N": "nodes", "select": {"seq_id": "B"}, "apply": {"text": {"text": "x", "offset": [0.02, 0.0]}}},
         {"?N": "gap", "width-to-height-ratio": 0.02},
     ],
     "hz": [

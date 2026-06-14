@@ -1,0 +1,17 @@
+{
+  "_": "tal-draw settings DSL — per-clade hide + positioned text labels (DrawOnTree). Works with tree-clades.json (synthetic leaves A-E; clades X, Y).",
+  "image_size": 700,
+  "title": "per-clade hide + positioned labels",
+  "labels": true,
+  "color_by_clade": true,
+  "clades": { "show": true },
+  "legend": { "show": true },
+  "clade_styles": [
+    { "name": "Y", "hide": true },
+    { "name": "X", "display_name": "clade-X" }
+  ],
+  "nodes": [
+    { "select": { "seq_id": "A" }, "apply": { "text": { "text": "vaccine", "offset": [0.02, 0.0], "color": "#e31a1c" } } },
+    { "select": { "seq_id": "E" }, "apply": { "text": { "text": "ref", "offset": [0.015, -0.01], "size": 0.02 } } }
+  ]
+}

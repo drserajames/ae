@@ -58,4 +58,8 @@ check "tree-clades.json (hz-sections)" "$tmp/hz.pdf"
 "$bin" --labels --dash-bar=3 "$here/tree-aa.json" "$tmp/dash.pdf" 400 >/dev/null
 check "tree-aa.json (dash-bar-aa-at pos 3)" "$tmp/dash.pdf"
 
+# per-clade show:false hiding + positioned text labels (DrawOnTree / apply.text)
+"$bin" --settings="$here/draw-settings-labels-hide.json" "$here/tree-clades.json" "$tmp/labels-hide.pdf" >/dev/null
+check "tree-clades.json (per-clade hide + positioned labels)" "$tmp/labels-hide.pdf"
+
 echo "OK: tal-draw renders valid PDFs"

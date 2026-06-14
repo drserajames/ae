@@ -37,6 +37,7 @@ namespace ae::tal
     {
         std::string color{};
         std::string display_name{};
+        bool hide{false}; // suppress this clade's bar + label from the clades column / legend (acmacs-tal per-clade show:false)
     };
 
     // A node-select / node-apply mod — the core of the acmacs-tal settings pipeline.
@@ -49,12 +50,25 @@ namespace ae::tal
         std::string date_max{};                 // leaf date <  this "YYYY-MM-DD" (leaves only)
     };
 
+    // A positioned text label drawn at a leaf's tip (acmacs-tal DrawOnTree / nodes apply.text).
+    // Offsets and size are fractions of image_size; offset is relative to the leaf tip
+    // (default places the text just to its right).
+    struct NodeText
+    {
+        std::string text{};         // the label string
+        double offset_x{0.01};      // x offset from the leaf tip, fraction of image_size
+        double offset_y{0.0};       // y offset, fraction of image_size (down is positive)
+        std::string color{};        // "" -> black
+        double size{0.0};           // font size as fraction of image_size; 0 -> default leaf font
+    };
+
     struct NodeApply
     {
         std::optional<bool> hide{};       // hide the node (and its subtree) from the layout
         std::string edge_color{};         // recolour the node's edge line ("#rrggbb"/name)
         std::string label_color{};        // recolour the leaf label (leaves only)
         std::optional<double> label_scale{}; // scale the leaf-label font (leaves only)
+        std::optional<NodeText> text{};   // positioned text label at the leaf tip (leaves only)
     };
 
     struct NodeMod

@@ -27,8 +27,19 @@ def main():
         "aa-transitions.min_leaves": schema.get("aa_transitions", {}).get("min_leaves") == 5,
         "dash-bar pos": [b.get("pos") for b in schema.get("dash_bars", [])] == [159],
         "hz-sections (via sub-array)": len(schema.get("hz_sections", [])) == 1,
-        "nodes: only the hide one mapped": len(schema.get("nodes", [])) == 1,
-        "warning for apply.text": any("text" in w for w in warnings),
+        "nodes: hide + positioned-text both mapped": len(schema.get("nodes", [])) == 2,
+        "apply.text -> positioned label": any(
+            n.get("apply", {}).get("text", {}).get("text") == "x"
+            and n.get("apply", {}).get("text", {}).get("offset") == [0.02, 0.0]
+            for n in schema.get("nodes", [])
+        ),
+        "per-clade show:false -> hide": any(
+            s.get("name") == "C1" and s.get("hide") is True for s in schema.get("clade_styles", [])
+        ),
+        "per-clade color preserved": any(
+            s.get("name") == "C2" and s.get("color") == "#1f78b4" for s in schema.get("clade_styles", [])
+        ),
+        "no apply.text warning": not any("apply.text" in w for w in warnings),
     }
     failures = [name for name, ok in checks.items() if not ok]
     if failures:
