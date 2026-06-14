@@ -394,10 +394,13 @@ C++ renderer; TAL composes them with the tree.
       fixing a `cc/tree` stub** — the consensus `set_transitions` in `cc/tree/aa-transitions.cc`
       was commented out (computed 0). Implemented it; `cc/tal/test/test-aa-transitions.py` →
       `T3A`.
-- [ ] **Remaining toward parity:** the **settings-v3 reader** (run real `{"N":…}` `.tal` configs,
-      not just the simplified schema) — the biggest item. Then `DashBar` (aa-at-pos columns),
-      continent/aa-pos colouring, `clades-whocc`. Low-value tail: `if/then` / `-D` defines /
-      `max-edge-length` ladderize / finer map-grid layout.
+- [ ] **Remaining toward parity:** `DrawOnTree` (positioned `apply.text` strain labels) +
+      per-clade `show:false` hiding (the two main settings-v3 approximations), then continent/aa-pos
+      colouring. Low-value tail: `if/then` / `-D` defines / `max-edge-length` ladderize / finer
+      map-grid layout. **`clades-whocc` struck** — obsolete in AD (clades are assigned upstream at
+      tree-build and stored in the `.tjz`, which `tal-draw` reads; persisted relabelling is covered
+      by `Tree::set_clades` + `export`). The **settings-v3 reader** and `DashBar` (aa-at-pos
+      columns) are **done**.
 
 ---
 

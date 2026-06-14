@@ -312,18 +312,23 @@ the `cc/draw/` surface API."*
     its 70k-leaf tree translated and rendered in ~1.3 s (clade column + monthly time-series +
     labels all present; ~2000 text-label `nodes` reported as warnings).
 20. **Remaining (smaller, toward full `.tal` fidelity):** `DrawOnTree` (`apply.text` positioned
-    strain labels) + per-clade `show:false` hiding — these would lift the two main settings-v3
-    approximations; then continent/aa-pos leaf colouring and `clades-whocc` (clade-from-sequence
-    assignment). **Note — clade recomputation already exists in ae:** `Tree::set_clades(clades_json)`
-    (`cc/tree/tree.cc:305`, bound as `tree.set_clades("clades.json")` in `cc/py/tree.cc`) walks the
-    leaves and sets each leaf's clades from its aa/nuc sequence via the `cc/sequences/clades.hh`
-    `Clades` engine (the WHOCC aa-at-position rules, e.g. `acmacs-data/clades.json` /
-    `semantic_clades.py`). So a tree can be (re)populated with updated clades today — leaves need
-    sequences (the `.tjz` trees carry them; otherwise populate from seqdb first). The remaining
-    `clades-whocc` work is only *wiring this into the `tal` program / settings-v3 reader* as a step,
-    not building the engine.
+    strain labels) + per-clade `show:false` hiding — these lift the two main settings-v3
+    approximations; then continent/aa-pos leaf colouring.
 21. **Low-value tail:** `if`/`then` conditional settings, `-D`-conditional logic, `max-edge-length`
     ladderize, finer signature-page layout (map grids, captions), other `tal` outputs (`.names`/`.html`).
+
+**Not a remaining item — `clades-whocc` (clade-from-sequence assignment).** This was struck off
+after auditing the AD source. In acmacs-tal `clades-whocc` is a draw-time settings macro that
+expands to per-clade `clade_set_by_aa_at_pos` calls — and it is **obsolete in AD itself**
+(`conf/tal.json` marks it `"clades-whocc obsolete"`; the "forgot to add clades-whocc?" warning in
+AD `cc/tree.cc` is commented out), because clades are now assigned **upstream at tree-build time
+(seqdb-3)** and stored in the `.tjz`, which ae's `tal-draw` already reads. Where persisted
+relabelling *is* wanted, ae already has the engine: `Tree::set_clades(clades_json)`
+(`cc/tree/tree.cc:305`, bound as `tree.set_clades("clades.json")` in `cc/py/tree.cc`) re-derives
+each leaf's clades from its aa/nuc sequence via the `cc/sequences/clades.hh` `Clades` engine (WHOCC
+aa-at-position rules, e.g. `acmacs-data/clades.json` / `semantic_clades.py`) and `export` writes
+them back. So nothing to port here — a draw-time recompute would only duplicate the tree's stored
+clades.
 
 ---
 
