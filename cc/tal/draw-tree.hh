@@ -98,6 +98,12 @@ namespace ae::tal
 
     struct TreeDrawParameters
     {
+        // Overall page aspect (width / height). When > 0 the canvas is drawn portrait —
+        // width = height * width_to_height_ratio — instead of square (acmacs-tal sizes the
+        // canvas width from the tree's width-to-height-ratio plus the right-hand columns;
+        // the report .tal's give the tree ratio ~0.4, columns push the page to ~0.63).
+        // 0 (default) keeps the historical square canvas.
+        double width_to_height_ratio{0.0};
         bool labels{false};                  // draw each leaf's name to the right of its tip
         bool labels_avoid_collisions{true};  // suppress leaf labels that would overlap the one above
         bool color_by_clade{false};  // colour leaf edges/labels/dashes by first clade
@@ -121,9 +127,11 @@ namespace ae::tal
         std::vector<DashBarAAAt> dash_bars{};             // per-leaf aa-at-position dash columns
     };
 
-    // Render `tree` to a square PDF of side `image_size` device units. Takes
-    // Tree& because layout computes cumulative edges. Returns the number of leaf
-    // labels suppressed by collision avoidance (0 when disabled or none overlap).
+    // Render `tree` to a PDF whose height is `image_size` device units. The width is
+    // `image_size` (square) unless params.width_to_height_ratio > 0, in which case the
+    // page is portrait (width = image_size * width_to_height_ratio). Takes Tree& because
+    // layout computes cumulative edges. Returns the number of leaf labels suppressed by
+    // collision avoidance (0 when disabled or none overlap).
     std::size_t export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size = 1000.0, const TreeDrawParameters& params = {});
 
 } // namespace ae::tal

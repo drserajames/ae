@@ -7,9 +7,15 @@ string (a built-in or the name of another array to run) or an object `{"N": cmd,
 the simplified schema that `tal-draw --settings` consumes.
 
 It is **structural, not pixel-perfect**: it reproduces which clades/sections/columns/
-transitions appear, but a few styling details have no tal-draw equivalent yet (arbitrary
-positioned `apply.text` labels, per-clade hiding, exact layout ratios). Those are
-collected in the returned `warnings` rather than silently dropped.
+transitions appear and the overall portrait page aspect (tree `width-to-height-ratio`
+plus a column allowance), but a few things have no tal-draw equivalent yet and are
+collected in the returned `warnings` rather than silently dropped:
+  - `draw-aa-transitions` curated `per-node` labels select by AD's draw-time
+    `node_id` ("vertical.horizontal"), which ae's tree does not carry (it stores a
+    single integer id); they are reported, not placed. seq_id-selected `apply.text`
+    labels DO translate.
+  - the exact WHOCC clade hex palette (ae uses its own stable palette), the full
+    vertical clade legend, and the geographic world-map inset.
 """
 
 from __future__ import annotations
@@ -166,14 +172,21 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
     """Translate a loaded `.tal` settings-v3 object into (schema, warnings)."""
     defines = dict(defines or {})
     warnings: list = []
-    schema: dict = {"labels": True}
+    # No per-leaf name labels by default: the production trees have tens of thousands of
+    # leaves (AD shows none), and the strain names that *are* wanted come through as
+    # positioned `apply.text` labels (DrawOnTree). A `.tal` can re-enable via a `tree`
+    # `show-leaf-names` flag (handled below) if ever needed.
+    schema: dict = {"labels": False}
     node_mods: list = []
 
     def run(program) -> None:
         for item in program:
             if isinstance(item, str):
+                if item.startswith("?"):
+                    continue                                          # "?name" = disabled reference, skip silently
                 if item == "clades-whocc":
                     schema.setdefault("clades", {})["show"] = True   # clades already in the tree
+                    schema["color_by_clade"] = True                  # WHOCC clade colouring of the matrix/leaves
                 elif item in tal and isinstance(tal[item], list):
                     run(tal[item])                                    # named sub-array
                 else:
@@ -223,13 +236,29 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                     ts["end"] = cmd["end"]
                 ts.setdefault("interval", "month")
             elif name == "draw-aa-transitions":
-                aa = schema.setdefault("aa_transitions", {})
-                aa["show"] = True
-                # method "imported" -> use the tree's stored transitions; otherwise compute
-                aa["compute"] = cmd.get("method", "imported") != "imported"
-                mn = cmd.get("minimum-number-leaves-in-subtree")
-                if isinstance(mn, (int, float)) and mn >= 1:
-                    aa["min_leaves"] = int(mn)
+                # AD's draw-aa-transitions labels the *curated* `per-node` set, not every
+                # inode: each entry picks one node by AD's draw-time node_id
+                # ("vertical.horizontal") and places its label at an offset. ae's tree has
+                # no equivalent node_id (it stores a single integer id), so the curated
+                # per-node labels cannot be matched here — report them, don't place them.
+                # Crucially, do NOT translate a non-"imported" method to consensus
+                # computation: that would label every inode (a purple flood), the opposite
+                # of the AD reference. Only the explicit "imported" method (use the tree's
+                # stored transitions) shows transitions.
+                pernode = cmd.get("per-node")
+                if isinstance(pernode, list):
+                    n_curated = sum(1 for e in pernode if isinstance(e, dict) and e.get("show", True) and e.get("name"))
+                    if n_curated:
+                        warnings.append(
+                            f"draw-aa-transitions: {n_curated} curated per-node label(s) select by AD "
+                            "node_id, which ae's tree does not carry — labels skipped (no equivalent yet)")
+                if cmd.get("method", "imported") == "imported":
+                    aa = schema.setdefault("aa_transitions", {})
+                    aa["show"] = True
+                    aa["compute"] = False  # use the tree's stored ("imported") transitions
+                    mn = cmd.get("minimum-number-leaves-in-subtree")
+                    if isinstance(mn, (int, float)) and mn >= 1:
+                        aa["min_leaves"] = int(mn)
             elif name == "hz-sections":
                 schema["hz_sections"] = [
                     {"first": s.get("first", ""), "last": s.get("last", ""), "label": s.get("label", "")}
@@ -247,6 +276,12 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                     if sel and ap:
                         node_mods.append({"select": sel, "apply": ap})
             elif name == "tree":
+                # canvas aspect: the tree's width-to-height-ratio sizes the page width
+                # (acmacs-tal then adds the right-hand columns; we approximate the column
+                # allowance below so the page comes out portrait like the AD references).
+                wh = cmd.get("width-to-height-ratio")
+                if isinstance(wh, (int, float)) and wh > 0:
+                    schema["tree_width_to_height_ratio"] = float(wh)
                 # leaf colouring: color-by is a string ("continent") or an object
                 # ({"N": "pos-aa-frequency"|"pos-aa-colors", "pos": N}). Both pos modes
                 # map to color_by_pos (frequency colouring; explicit aa scheme approximated).
@@ -274,6 +309,26 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
     run(tal.get("tal", []))
     if node_mods:
         schema["nodes"] = node_mods
+
+    # Overall page aspect (width / height). acmacs-tal sizes the canvas width from the
+    # tree's width-to-height-ratio plus the accumulated widths of the right-hand columns
+    # (clades / time-series / dash bars). We approximate that column allowance from which
+    # columns are present so the page comes out portrait (the AD references are ~0.63/0.65
+    # for tree ratios 0.41/0.40). tal-draw lays the columns out internally as fractions of
+    # the page width, so the page ratio = tree ratio + column allowance.
+    tree_ratio = schema.pop("tree_width_to_height_ratio", None)
+    if tree_ratio:
+        allowance = 0.0
+        if schema.get("clades", {}).get("show"):
+            allowance += 0.07
+        if schema.get("time_series", {}).get("show"):
+            allowance += 0.13
+        allowance += 0.025 * len(schema.get("dash_bars", []))
+        if schema.get("hz_sections"):
+            allowance += 0.03
+        if schema.get("labels"):
+            allowance += 0.10
+        schema["width_to_height_ratio"] = round(tree_ratio + allowance, 4)
     # de-duplicate warnings, keep order
     seen: set = set()
     schema_warnings = [w for w in warnings if not (w in seen or seen.add(w))]

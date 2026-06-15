@@ -350,6 +350,31 @@ the `cc/draw/` surface API."*
     title → one landscape A4 page; pdftotext confirms title + all captions present).
 24. **Low-value tail:** `for-each` loops, `max-edge-length` ladderize, other `tal` outputs
     (`.names`/`.html`).
+25. **Report-tree fidelity (from ssm-report #4 (b), 2026-06-15) — IN PROGRESS (code landed, build/verify
+    pending).** Rendering the real report `.tal` (`{bvic.after-2021, h3.after-2021}.tal`) via
+    `ae.report.trees` → `tal-draw` produced *square* PDFs with a purple aa-transition flood, monochrome
+    matrix and 38k/70k leaf labels — unfaithful to the AD portrait references (bvic 631×1000, h3 648×1000).
+    Fixed (in code):
+    - **Portrait canvas.** `TreeDrawParameters.width_to_height_ratio`; `export_tree_pdf` draws a page of
+      width = height × ratio (square when 0). The X axis uses `width`/`margin`, the Y axis `height`/`vmargin`
+      (split out a vertical margin + reworked the title/legend/positioned-label coordinates accordingly).
+      Positioned-label offsets are now fractions of width (x) / height (y); label `size` a fraction of height.
+    - **Aspect from the `.tal`.** `py/ae/tal/settings_v3` reads `{"N":"tree","width-to-height-ratio":r}` and
+      computes the overall page ratio = r + a column allowance derived from which columns are present
+      (clades +0.07, time-series +0.13, dash +0.025 each, hz +0.03, labels +0.10) → bvic≈0.64, h3≈0.63.
+    - **Clade-coloured matrix, black edges.** `clades-whocc` → `color_by_clade`; a new `edge_color_for`
+      keeps tree edges BLACK under clade colouring while `leaf_color` colours the matrix (time-series dashes
+      / clade column) by clade. Only by-continent / by-aa-pos recolour edges (acmacs-tal semantics).
+    - **No aa-transition flood.** `draw-aa-transitions` was being translated to consensus `compute=True`,
+      labelling every inode (the purple). Now compute is off; the curated `per-node` labels — which select by
+      AD's draw-time `node_id` "vertical.horizontal" — are reported as a warning because ae's tree carries no
+      such id (only a single integer `"I"` in the `.tjz`). Matching them needs AD's exact node-numbering ported.
+    - **Translator nits.** `?`-prefixed string refs (e.g. `"?dash-bars"`) skipped silently (were recursing
+      into the disabled array); per-leaf name labels default off for these dense trees.
+    **Still open:** #2 curated per-node aa-transition labels (need node_id), exact WHOCC clade hex palette,
+    full vertical clade legend (#4), geographic world-map inset (#5). **Verify (pending build):** rebuild
+    `tal-draw`, run the §reproduce loop, `pdftoppm -png -r 100` + eyeball; confirm bvic/h3 come out ~0.63/0.65
+    portrait, edges black, matrix clade-coloured, no purple flood.
 
 **Not a remaining item — `clades-whocc` (clade-from-sequence assignment).** This was struck off
 after auditing the AD source. In acmacs-tal `clades-whocc` is a draw-time settings macro that

@@ -230,7 +230,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         return GREY50;
     };
 
-    // leaf colour: by aa-at-pos > by continent > by first clade > black
+    // matrix colour (time-series dashes / dash-bar cells): by aa-at-pos > by continent
+    // > by first clade > black. This is what the WHOCC report colours by clade.
     const auto leaf_color = [&](const Leaf& leaf) -> Color {
         if (params.color_by_pos > 0)
             return leaf.aa.size() > color_pos0 ? pos_color_for(leaf.aa[color_pos0]) : GREY50;
@@ -245,10 +246,27 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         return BLACK;
     };
 
+    // tree-edge colour. The WHOCC report draws tree edges BLACK while colouring the
+    // right-hand matrix by clade — so clade colouring does NOT recolour edges (only the
+    // explicit by-continent / by-aa-pos colourings do, matching acmacs-tal which recolours
+    // edges only for those modes). Keeps the tree black under clades-whocc.
+    const auto edge_color_for = [&](const Leaf& leaf) -> Color {
+        if (params.color_by_pos > 0)
+            return leaf.aa.size() > color_pos0 ? pos_color_for(leaf.aa[color_pos0]) : GREY50;
+        if (params.color_by_continent)
+            return continent_color(leaf.continent);
+        return BLACK;
+    };
+
+    // --- page geometry: height is image_size; width is portrait when a tree
+    //     width-to-height ratio is set (acmacs-tal canvas sizing), else square. ---
+    const double height = image_size;
+    const double width = params.width_to_height_ratio > 0.0 ? image_size * params.width_to_height_ratio : image_size;
+
     // --- horizontal layout: hz-marker column | tree | labels | clades column | time-series column ---
-    const double margin = 0.03 * image_size;
-    const double drawable_w = image_size - 2.0 * margin;
-    const double gap = 0.012 * image_size;
+    const double margin = 0.03 * width;
+    const double drawable_w = width - 2.0 * margin;
+    const double gap = 0.012 * width;
     const double hz_w = params.hz_sections.empty() ? 0.0 : 0.045 * drawable_w; // left marker column
     const double label_w = params.labels ? 0.16 * drawable_w : 0.0;
     const double clade_w = params.clades && !visible_clades.empty() ? 0.09 * drawable_w : 0.0;
@@ -289,28 +307,29 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     }
 
     // --- vertical reserves: title (top), legend + time-series slot labels (bottom) ---
+    const double vmargin = 0.03 * height;
     const bool want_legend = !legend_items.empty();
-    const double top_reserve = params.title.empty() ? 0.0 : 0.05 * image_size;
-    const double bottom_reserve = (want_legend || ts_w > 0.0 || dash_w > 0.0) ? 0.07 * image_size : 0.0;
+    const double top_reserve = params.title.empty() ? 0.0 : 0.05 * height;
+    const double bottom_reserve = (want_legend || ts_w > 0.0 || dash_w > 0.0) ? 0.07 * height : 0.0;
 
     // --- vertical (shared) + tree horizontal transforms ---
     const double height_units = layout.height > 0.0 ? layout.height : 1.0;
     const double max_cum = layout.max_cumulative > 0.0 ? layout.max_cumulative : 1.0;
-    const double vstep = (image_size - 2.0 * margin - top_reserve - bottom_reserve) / height_units;
+    const double vstep = (height - 2.0 * vmargin - top_reserve - bottom_reserve) / height_units;
     const double hstep = tree_w / max_cum;
     const auto dev_x = [&](double cumulative) { return margin + hz_w + cumulative * hstep; };
-    const auto dev_y = [&](double vertical_offset) { return margin + top_reserve + (vertical_offset - 0.5) * vstep; };
+    const auto dev_y = [&](double vertical_offset) { return vmargin + top_reserve + (vertical_offset - 0.5) * vstep; };
 
     const double line_width = std::clamp(vstep * 0.5, 0.2, 3.0);
     const double font_size = std::clamp(vstep * 0.8, 3.0, 14.0);
 
-    ae::draw::CairoPdf pdf{output, image_size, image_size};
+    ae::draw::CairoPdf pdf{output, width, height};
     pdf.background(WHITE);
 
     // --- title (top, centred) ---
     if (!params.title.empty()) {
         const double title_fs = std::clamp(top_reserve * 0.45, 8.0, 26.0);
-        pdf.text(image_size / 2.0, margin + top_reserve * 0.5, params.title, title_fs, BLACK, /*center=*/true);
+        pdf.text(width / 2.0, vmargin + top_reserve * 0.5, params.title, title_fs, BLACK, /*center=*/true);
     }
 
     // --- hz-sections: left marker column (bracket + rotated label) + separator across the tree ---
@@ -349,9 +368,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     for (const auto& node : layout.leaves) {
         const Leaf& leaf = tree.leaf(node_index_t{node.node});
         const double y = dev_y(node.y);
-        const Color color = leaf_color(leaf);
+        const Color color = leaf_color(leaf);        // matrix / label colour (may be clade)
+        const Color edge_col = edge_color_for(leaf); // tree edge colour (black under clades-whocc)
         const auto edge_it = edge_color_override.find(node.node);
-        pdf.line(dev_x(node.x - leaf.edge.get()), y, dev_x(node.x), y, edge_it != edge_color_override.end() ? edge_it->second : color, line_width);
+        pdf.line(dev_x(node.x - leaf.edge.get()), y, dev_x(node.x), y, edge_it != edge_color_override.end() ? edge_it->second : edge_col, line_width);
         if (params.labels && !leaf.name.empty()) {
             const auto lcol_it = label_color_override.find(node.node);
             const auto lscale_it = label_scale_override.find(node.node);
@@ -509,7 +529,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double legend_fs = std::clamp(bottom_reserve * 0.28, 7.0, 12.0);
         const double swatch_w = legend_fs * 1.4;
         const double swatch_h = legend_fs * 0.9;
-        const double ly = image_size - margin - bottom_reserve * 0.35;
+        const double ly = height - vmargin - bottom_reserve * 0.35;
         double lx = margin;
         for (const auto& [name, color] : legend_items) {
             pdf.rectangle(lx, ly - swatch_h / 2.0, swatch_w, swatch_h, color, 0.5, color);
@@ -524,13 +544,14 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const auto found = pos.find(idx);
         if (found == pos.end())
             continue; // node hidden / not in layout
-        const double label_fs = label.size > 0.0 ? label.size * image_size : font_size;
+        const double label_fs = label.size > 0.0 ? label.size * height : font_size;
         Color color = BLACK;
         if (!label.color.empty()) {
             try { color = Color{label.color}; } catch (const std::exception&) { }
         }
-        const double tx = dev_x(found->second.first) + label.offset_x * image_size;
-        const double ty = dev_y(found->second.second) + label.offset_y * image_size + label_fs * 0.3;
+        // offset_x is a fraction of page width, offset_y a fraction of page height (acmacs-tal DrawOnTree)
+        const double tx = dev_x(found->second.first) + label.offset_x * width;
+        const double ty = dev_y(found->second.second) + label.offset_y * height + label_fs * 0.3;
         pdf.text(tx, ty, label.text, label_fs, color, /*center=*/false);
     }
 

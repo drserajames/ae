@@ -15,7 +15,8 @@
 //
 // Schema (all keys optional):
 //   {
-//     "image_size": 1000,
+//     "image_size": 1000,                 // canvas height in device units
+//     "width_to_height_ratio": 0.64,      // >0 -> portrait page (width = height*ratio); 0 -> square
 //     "title": "A(H3N2) HA",
 //     "labels": true,
 //     "color_by_clade": true,

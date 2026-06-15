@@ -48,6 +48,8 @@ int main(int argc, char* const argv[])
                 params.dash_bars.push_back(ae::tal::DashBarAAAt{.pos = std::stoi(std::string{arg.substr(11)})});
             else if (arg.substr(0, 8) == "--title=")
                 params.title = std::string{arg.substr(8)};
+            else if (arg.substr(0, 24) == "--width-to-height-ratio=")
+                params.width_to_height_ratio = std::stod(std::string{arg.substr(24)});
             else if (arg.substr(0, 11) == "--settings=")
                 settings_file = arg.substr(11);
             else
