@@ -475,8 +475,18 @@ C++ renderer; TAL composes them with the tree.
       - **#4 clade legend — PARTIAL.** Clade column draws per-clade names beside its bars; the full
         vertical colour-bar legend is not ported. **#5 geographic map inset — OPEN** (AD builtin/world-map
         legend; not ported).
+      - **#7 h1 tree too narrow — OPEN** (found regenerating the real report trees, 2026-06-15). The
+        column-width allowance heuristic in `settings_v3` underestimates h1: ae renders h1 **640×1000**
+        vs AD **794×1000** (h3 630/648 ✓, bvic 640/631 ✓ are close). h1 carries more aa-transition / wider
+        right-hand columns than the fixed per-column allowances assume, so the page comes out too narrow
+        (tree is complete + faithful, just doesn't fill the width). Make the allowance reflect the actual
+        column set / counts rather than fixed increments.
+      - **#8 `nodes.select: {"edge >=": N}` — OPEN** (h1 `.tal`). The translator skips this criterion
+        (emits "nodes.select: unsupported criterion 'edge >=' ignored"); AD uses it to hide
+        long-edge / outlier nodes. Add `edge >=` (edge-length threshold) selection so those nodes hide.
       Files: `cc/tal/draw-tree.{hh,cc}`, `cc/tal/settings.{hh,cc}`, `cc/tal/tal-draw-main.cc`,
-      `py/ae/tal/settings_v3.py`. **Verification pending a build run** (was blocked).
+      `py/ae/tal/settings_v3.py`. **#1/#3/#6 + translator nits built + verified 2026-06-15** (report
+      agent); **#2/#4/#5/#7/#8 open.**
       Original gap list (priority order) retained below:
       1. **Canvas width / aspect** — `tal-draw` renders square; AD computes canvas *width* from the
          tree `width-to-height-ratio` (0.41) + accumulated column (time-series/dash/aa) widths.
