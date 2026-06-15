@@ -52,12 +52,33 @@ decoupling, and raw-string `SyntaxWarning` fixes — **no missing logic**:
    diffs: geo-draw's base map fills land light-grey (AD: white); a few unicode location names
    don't resolve in the local locdb.
 
-2. **Trees — new path, fidelity unverified.** vcm/v2 has **no** `trees.py`; trees are
-   produced by `tree/0do` shelling the **AD `tal`** binary (`tal -s X.tal X.tjz out.pdf`).
-   `ae.report.trees` is a *new* wrapper over ae's `tal-draw` + a `.tal`→settings-v3
-   translator that is **known-incomplete** (skips positioned labels, `edge >=` selection,
-   non-object select/apply — see `cc/tal/PORTING.md`). Not yet diffed against this
-   report's `.tal` files; may not reproduce them.
+2. **Trees — ⚠ DIFFED 2026-06-15; report glue OK, but NOT yet faithful (TAL gaps).**
+   vcm/v2 has **no** `trees.py`; trees are produced by `tree/0do` shelling the **AD `tal`**
+   binary, which auto-loads the builtin `$ACMACSD_ROOT/share/conf/{tal,vaccines}.json`
+   (defines `$canvas-height`, `clades-whocc`, `eu-aa-transitions`, …) before the user `.tal`.
+   `ae.report.trees` is a *new* wrapper over ae's `tal-draw` + the `ae.tal.settings_v3`
+   `.tal`→schema translator. The **report glue itself works** — it translated + rendered the
+   real bvic / h3 `.tal` (38 k / 70 k leaves) and named the output correctly. But diffing the
+   ae PDFs against the AD references (`tree/{bvic.after-2021,h3.asr.after-2021}.pdf`) shows
+   they are **not visually faithful**. All gaps are **TAL-subsystem** (`cc/tal` + `py/ae/tal`),
+   not report-side:
+   - **Canvas width / aspect.** ae renders **1000×1000 square**; AD is **portrait** (bvic
+     631×1000, h3 648×1000) — tal-draw doesn't compute canvas *width* from the tree
+     `width-to-height-ratio` (0.41) + accumulated column widths (`$canvas-height`=1000 matches).
+   - **`draw-aa-transitions` positioned labels.** The biggest content gap: the report's
+     manually-curated per-node clade/transition labels (a `{"N":"draw-aa-transitions", per_nodes:[{name, node_id, label:{offset…}, show}]}`
+     section) are **not translated** by `settings_v3`, so most on-tree clade labels are missing.
+     (tal-draw *does* support positioned `apply.text` labels per TODO #3 — so this is mostly a
+     translation mapping `draw-aa-transitions[*]` → `nodes select{node_id} apply{text}`.)
+   - **Clade-coloured matrix.** AD colours the right-side time-series / dash-bar matrix cells by
+     clade; ae renders them monochrome black.
+   - **Clade legend** is partial vs AD's full vertical colour-bar legend.
+   - **Geographic map inset** (small world map, lower-left, from clades-whocc/builtin) is absent.
+   - **Tree edge colour**: ae draws edges purple (a default/clade colouring); AD black.
+   - **Translator robustness nits:** `?`-disabled keys inside objects (e.g. `?last`) emit
+     spurious "unknown built-in … ignored" warnings (should be silently skipped); `nodes` with
+     a string `apply` ("report") are skipped (informational-only — harmless).
+   See the handoff list appended to TODO #3 (TAL). The report side needs no change.
 
 3. **Per-report glue not written for this report.** `conference_data.py`, `serology.py`,
    `h1/h3/b_chart_modifier.py` intentionally stay in the report dir, but a run on
@@ -463,10 +484,12 @@ same either way.
       kateri (last=final commits). Verified automated + live against real kateri (see Stage B above).
 - [ ] **Remaining (see [gap analysis](#gap-analysis-2026-0223-capstone-attempt)):**
       (1) ✅ **DONE** — `ae.report.geographic` consumes `geographic_coloring` (clade/aa `apply`
-      rules), built + verified on real H1 hidb; (2) tree `.tal` translation fidelity diffed
-      against a real report's `.tal` (TAL); (3) per-report glue applied to a real report's
-      `conference_data.py`/subtype modifiers; (4) then the full assembled-report end-to-end run
-      (capstone).
+      rules), built + verified on real H1 hidb; (2) ⚠ **DIFFED** — tree `.tal` fidelity assessed
+      vs real bvic/h3 `.tal`: report glue works, but 6 TAL-subsystem rendering/translation gaps
+      remain (canvas width, `draw-aa-transitions` labels, clade-coloured matrix, legend, geo
+      inset, edge colour) — handed to TAL (TODO #3); report side unchanged; (3) per-report glue
+      applied to a real report's `conference_data.py`/subtype modifiers; (4) then the full
+      assembled-report end-to-end run (capstone).
 
 ---
 
