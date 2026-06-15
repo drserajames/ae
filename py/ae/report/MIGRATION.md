@@ -1,14 +1,17 @@
 # ssm-report → ae: vcm consolidation migration plan
 
-Status: **engine consolidated; not yet remake-ready end-to-end.** Phases 0–3 + 1b
-complete: the AD-faithful `py/ae/report/` port was shelved (branch `report-shelved`)
-and the **library tier** of the team's ae-based report engine (`vcm`) is consolidated
-into `py/ae/report/`. The library tier is a **verified faithful** copy (see the
-[2026-0223 gap analysis](#gap-analysis-2026-0223-capstone-attempt) below). But a full
-faithful **remake** of a real report on `ae.report` is **not yet achievable** — three
-genuine gaps remain (geographic clade/aa colouring, tree `.tal` fidelity, per-report
-glue). The adjust stage is ported (`ae.adjust` programmatic + kateri point-drag
-interactive). **Remaining:** the three gaps below, then the full assembled-report run.
+Status: **engine consolidated; assembled-report run ✅ reproduced (capstone done).** Phases
+0–3 + 1b complete: the AD-faithful `py/ae/report/` port was shelved (branch `report-shelved`)
+and the **library tier** of the team's ae-based report engine (`vcm`) is consolidated into
+`py/ae/report/`. The library tier is a **verified faithful** copy (see the [2026-0223 gap
+analysis](#gap-analysis-2026-0223-capstone-attempt) below). The **full assembled report** of
+the real `2026-0223-ssm` now builds on `ae.report` (`report.py` → 36-page `report.pdf`,
+visually identical to the AD/vcm reference) after a **2-file / 3-edit** per-report adaptation.
+Gap #1 (geographic clade/aa colouring) is **closed**; gap #2 (tree `.tal` fidelity) is **diffed
++ handed to TAL**. The adjust stage is ported (`ae.adjust` programmatic + kateri point-drag
+interactive). **Remaining:** from-scratch regeneration of every figure on ae (current hidb +
+kateri maps + TAL tree fidelity + per-map `style`/`export` rewiring) — separate from, and
+larger than, the assembled-report milestone.
 This document records the plan and the as-built decisions. Read it before touching
 report code. (Sections below are kept as the historical plan + rationale.)
 
@@ -80,11 +83,36 @@ decoupling, and raw-string `SyntaxWarning` fixes — **no missing logic**:
      a string `apply` ("report") are skipped (informational-only — harmless).
    See the handoff list appended to TODO #3 (TAL). The report side needs no change.
 
-3. **Per-report glue not written for this report.** `conference_data.py`, `serology.py`,
-   `h1/h3/b_chart_modifier.py` intentionally stay in the report dir, but a run on
-   `ae.report` needs the documented adaptations applied to *these* files (subclass
-   `conference_data_base.ConferenceData`; mix the concrete `ConferenceData` into each
-   subtype modifier). Not done in the `2026-0223` copy.
+3. **Per-report glue + assembled-report run — ✅ DONE 2026-06-15 (capstone).** Applied the
+   per-report adaptation to a copy of the real `2026-0223-ssm` report and ran the full
+   **assembled report** (`report.py` → `report.pdf`) on `ae.report`. The adaptation was
+   **minimal — 2 files, 3 edits** (the library tier is faithful, so almost nothing changed):
+   - `report.py`: `from vcm.v2 import latex, conference_data` → `from ae.report import latex`
+     + `from vcm.v2 import conference_data`.
+   - `conference_data.py`: `from . import latex` → `from ae.report import latex`; and
+     `import vcm.v2.dirs` + `class ConferenceData(vcm.v2.dirs.VcmDirs)` →
+     `from ae.report import conference_data_base` + `class ConferenceData(conference_data_base.ConferenceData)`.
+
+   `conference_data.report_content()` drove `ae.report.latex` (cover / toc / section_title /
+   geographic / phylogenetic_tree / maps_in_columns) to assemble the report's figures. **✅
+   Verified:** `pdflatex` ran clean (rc=0, two passes) → a **36-page `report.pdf`** byte-for-byte
+   the same page count and ~size (11.99 MB vs the AD/vcm reference 11.98 MB) with **visually
+   identical** cover, geographic, and content pages. This proves the `ae.report` assembly engine
+   reproduces the real report end-to-end.
+   - *Scope note:* this **assembled the report's existing figure PDFs** (maps/geo/trees/stat,
+     produced earlier by the report's own tooling) via the `ae.report` engine. It is the
+     "assembled-report run" milestone — **not** a from-scratch regeneration of every figure on ae
+     (that additionally needs a current hidb, kateri for the antigenic maps, the TAL tree-fidelity
+     fixes from gap #2, and rewiring each per-map `0do` `style`/`export` to `ae.report`).
+   - *Gotcha:* `\includepdf` (pdfpages) can't handle **spaces in absolute paths** (`latex` uses
+     `Path.resolve()`); the working copy's `" copy"` dir-name broke the 3 tree pages until renamed
+     to `2026-0223-ssm-copy`. Real report dirs have no spaces.
+   - The `serology.py` + subtype `chart_modifier` mix-ins (`class H1_ChartModifier(ChartModifier,
+     ConferenceData)`) are only needed for the per-map **style/export** (figure generation), not for
+     assembly — so they remain for the from-scratch-regeneration follow-up, not the capstone.
+
+   **No real report data entered the `ae` repo** — these 2 edits live in the report working copy
+   under `~/AC/eu/ac/results/ssm/2026-0223-ssm-copy`, not in `ae`.
 
 **Plus a non-mechanical rewire detail.** `stat.py` means **different things** in the two
 trees — `ae.report.stat` is the new hidb writer; vcm's `stat.py` is `ae.report.stat_tables`.
@@ -486,10 +514,14 @@ same either way.
       (1) ✅ **DONE** — `ae.report.geographic` consumes `geographic_coloring` (clade/aa `apply`
       rules), built + verified on real H1 hidb; (2) ⚠ **DIFFED** — tree `.tal` fidelity assessed
       vs real bvic/h3 `.tal`: report glue works, but 6 TAL-subsystem rendering/translation gaps
-      remain (canvas width, `draw-aa-transitions` labels, clade-coloured matrix, legend, geo
-      inset, edge colour) — handed to TAL (TODO #3); report side unchanged; (3) per-report glue
-      applied to a real report's `conference_data.py`/subtype modifiers; (4) then the full
-      assembled-report end-to-end run (capstone).
+      (canvas width, `draw-aa-transitions` labels, clade-coloured matrix, legend, geo inset, edge
+      colour) — handed to TAL (TODO #3; a TAL agent has landed canvas/edge/matrix/nit fixes,
+      build+verify pending); (3) ✅ **DONE** — per-report glue (2 files, 3 edits) applied to a copy
+      of the real `2026-0223-ssm`; (4) ✅ **DONE (capstone)** — full assembled-report run on
+      `ae.report` → 36-page `report.pdf` visually identical to the AD/vcm reference.
+      **Remaining:** from-scratch figure regeneration on ae (current hidb + kateri maps + TAL tree
+      fidelity + per-map `style`/`export` rewiring) — a larger, separate effort beyond the
+      assembled-report milestone.
 
 ---
 

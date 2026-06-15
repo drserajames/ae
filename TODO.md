@@ -20,7 +20,7 @@ status, and respect the shared-file rules below.
 | 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ **SHELVED** — maps already done in **kateri** (Dart, separate repo). `cc/map-draw/` is redundant; `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
 | 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` + `py/ae/tal/` | *(tal agent)* | 🟢 feature-complete (core) — tree render; clades / time-series / **dash-bar-aa-at** columns; **leaf colouring by clade / continent / aa-at-pos** + mode-aware legend; title / **aa-transitions** (+ computation — fixed a `cc/tree` stub); **hz-sections**; node select/apply + **positioned `apply.text` labels (DrawOnTree)**; **per-clade `show:false` hiding**; **settings-v3 `.tal` reader** (`tal-signature-page --tal`); signature page = tree + **kateri** map + **WHOCC vaccine** marks. Only low-value tail left (`for-each`, ladderize, `.names`/`.html` outputs) — see [`cc/tal/PORTING.md`](cc/tal/PORTING.md) |
-| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (vcm engine consolidated) | *(report agent)* | 🟡 vcm **library tier** in `ae.report` (Phases 0–3 + 1b) — **verified faithful** vs a real later report's vcm (`2026-0223`): `commander`/`download`/`main_loop`/`dirs`/`modules`/`chart_modifier`/`latex` differ only by the deliberate decoupling + warning fixes. **adjust ported** — `ae.adjust` + kateri point-drag. **NOT yet remake-ready** — capstone (full report on `ae.report`) surfaced 3 gaps: (a) ✅ **geographic CLOSED** — `geo-draw` + `geographic.make_geo(color_by="coloring")` now consume the report's `geographic_coloring` aa/clade `apply` rules (AD `ColoringByAminoAcid` port via seqdb `SequenceAA.matches_all` + packed per-antigen dots); built + verified on real H1 hidb (clade palette + clusters); clade-pie & continent modes also present; (b) ⚠ **tree DIFFED** vs real bvic/h3 `.tal` — report glue (`trees.make_tree`) works (translates + renders 38k/70k-leaf trees), but PDFs are **not yet faithful**: 6 **TAL-subsystem** gaps (canvas width→square not portrait, `draw-aa-transitions` positioned labels untranslated, clade-coloured matrix→black, partial legend, no geo inset, edge colour) — handed to TAL (#3); report side unchanged; (c) per-report glue not applied to a real report's `conference_data.py`/modifiers. Remaining: (c) → then assembled-report run (tree fidelity tracked under #3). See [`py/ae/report/MIGRATION.md` gap analysis](py/ae/report/MIGRATION.md#gap-analysis-2026-0223-capstone-attempt) |
+| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (vcm engine consolidated) | *(report agent)* | 🟡 vcm **library tier** in `ae.report` (Phases 0–3 + 1b) — **verified faithful** vs a real later report's vcm (`2026-0223`): `commander`/`download`/`main_loop`/`dirs`/`modules`/`chart_modifier`/`latex` differ only by the deliberate decoupling + warning fixes. **adjust ported** — `ae.adjust` + kateri point-drag. ✅ **ASSEMBLED-REPORT RUN REPRODUCED (capstone)** — the full real `2026-0223-ssm` report builds on `ae.report` (`report.py` → **36-page `report.pdf`, visually identical** to the AD/vcm reference) after a **2-file/3-edit** per-report adaptation (`report.py` + `conference_data.py` → `from ae.report import latex`/`conference_data_base`). Capstone gaps: (a) ✅ **geographic CLOSED** — `geo-draw` + `geographic.make_geo(color_by="coloring")` consume the report's `geographic_coloring` aa/clade `apply` rules (AD `ColoringByAminoAcid` port via seqdb + packed per-antigen dots; built + verified on real H1 hidb); (b) ⚠ **tree DIFFED** vs real bvic/h3 `.tal` — report glue works, 6 TAL-subsystem fidelity gaps handed to #3 (a TAL agent landed canvas/edge/matrix fixes, build-verify pending); (c) ✅ **per-report glue DONE**. **Remaining (separate, larger):** from-scratch regeneration of every figure on ae (current hidb + kateri maps + TAL tree fidelity + per-map `style`/`export` rewiring) — the assembled-report milestone embeds the report's existing figures. See [`py/ae/report/MIGRATION.md` gap analysis](py/ae/report/MIGRATION.md#gap-analysis-2026-0223-capstone-attempt) |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data endpoints verified end-to-end |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 
@@ -444,11 +444,39 @@ C++ renderer; TAL composes them with the tree.
       upstream at tree-build, stored in the `.tjz`, which `tal-draw` reads; persisted relabelling is
       covered by `Tree::set_clades` + `export`).
 
-- [ ] **⚠ Report-tree fidelity gaps (from ssm-report #4 (b), diffed 2026-06-15).** Rendering the
-      real report `.tal` (`2026-0223-ssm/tree/{bvic.after-2021,h3.asr.after-2021}.tal`) via
-      `ae.report.trees` → `tal-draw` works but the PDFs aren't faithful to the AD `tal` references.
+- [~] **⚠ Report-tree fidelity gaps (from ssm-report #4 (b), diffed 2026-06-15) — owner: tal agent, in progress.**
+      Rendering the real report `.tal` (`2026-0223-ssm/tree/{bvic.after-2021,h3.asr.after-2021}.tal`) via
+      `ae.report.trees` → `tal-draw` works but the PDFs weren't faithful to the AD `tal` references.
       `tal-draw` references (AD portrait, ae square): `bvic` 631×1000 / `h3` 648×1000 vs ae 1000×1000.
-      In priority order:
+      **Code changes landed (NOT yet built/verified here — Bash/build access was denied in the
+      authoring session; needs a build + the reproduce loop run):**
+      - **#1 canvas aspect — FIXED (code).** `TreeDrawParameters.width_to_height_ratio` + portrait page
+        (`export_tree_pdf` now draws width = height × ratio; all X uses `width`/`margin`, Y uses
+        `height`/`vmargin`). Translator reads `tree` `width-to-height-ratio` and adds a column allowance
+        (clades +0.07, time-series +0.13, dash +0.025 each, hz +0.03, labels +0.10) → bvic≈0.64,
+        h3≈0.63 (refs 0.631/0.648). `tal-draw --width-to-height-ratio=` + settings `width_to_height_ratio`.
+      - **#3 clade-coloured matrix — FIXED (code, palette approximate).** `clades-whocc` now sets
+        `color_by_clade` → time-series dashes + clade column coloured by clade (ae stable palette, not the
+        exact WHOCC hex colours — those live in AD's builtin `tal.json`; a refinement).
+      - **#6 tree edges black — FIXED (code).** Added `edge_color_for`: clade colouring colours the
+        *matrix* but NOT the tree edges (edges stay black; only by-continent/by-pos recolour edges).
+        Also removed the aa-transition *flood*: the report `.tal` `draw-aa-transitions` curated `per-node`
+        labels were being mistranslated to consensus-`compute=True`, which labelled every inode purple;
+        now compute is off and the curated labels are reported as a warning (see #2).
+      - **translator robustness — FIXED.** `?`-prefixed string references (e.g. `"?dash-bars"`) skipped
+        silently (were recursing into the disabled array); per-leaf name labels now default **off** (the
+        trees have 38k/70k leaves; AD shows none). `?`-keyed objects (`{"?N":…}`) already skipped.
+      - **#2 draw-aa-transitions positioned labels — OPEN (architectural).** The curated `per-node`
+        labels select by AD's draw-time `node_id` ("vertical.horizontal"), which ae's tree does **not**
+        carry (it stores a single integer id in the `.tjz`). They cannot be matched without porting AD's
+        exact node-numbering; the translator now records "N curated per-node label(s) … skipped". **The
+        seq_id-selected `apply.text` labels DO translate** (h3's A/DC, A/SY, A/SP vaccine labels render).
+      - **#4 clade legend — PARTIAL.** Clade column draws per-clade names beside its bars; the full
+        vertical colour-bar legend is not ported. **#5 geographic map inset — OPEN** (AD builtin/world-map
+        legend; not ported).
+      Files: `cc/tal/draw-tree.{hh,cc}`, `cc/tal/settings.{hh,cc}`, `cc/tal/tal-draw-main.cc`,
+      `py/ae/tal/settings_v3.py`. **Verification pending a build run** (was blocked).
+      Original gap list (priority order) retained below:
       1. **Canvas width / aspect** — `tal-draw` renders square; AD computes canvas *width* from the
          tree `width-to-height-ratio` (0.41) + accumulated column (time-series/dash/aa) widths.
          `$canvas-height`=1000 (builtin) already matches; only width is wrong.
