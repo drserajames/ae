@@ -28,12 +28,13 @@ namespace ae::py
     // ----------------------------------------------------------------------
 
     static inline std::pair<std::shared_ptr<Chart>, ae::chart::v3::merge_data_t> merge(std::shared_ptr<Chart> chart1, std::shared_ptr<Chart> chart2, std::string_view match,
-                                                                                       std::string_view merge_type, bool cca)
+                                                                                       std::string_view merge_type, bool cca, double sd_limit)
     {
         using namespace ae::chart::v3;
         merge_settings_t settings{
             .match_level = antigens_sera_match_level(match),
             .combine_cheating_assays_ = cca ? combine_cheating_assays::yes : combine_cheating_assays::no,
+            .sd_limit = sd_limit,
         };
 
         if (merge_type == "simple" || merge_type == "type1")
@@ -311,7 +312,8 @@ void ae::py::chart_v3_antigens(pybind11::module_& chart_v3_submodule)
         .def("sera", &common_sera)                                                                                          //
         .def("report", &common_antigens_sera_t::report, "indent"_a = 0)                                                     //
         ;
-    chart_v3_submodule.def("merge", &ae::py::merge, "chart1"_a, "chart2"_a, "match"_a = "auto", "merge_type"_a = "simple", "combine_cheating_assays"_a = false);
+    chart_v3_submodule.def("merge", &ae::py::merge, "chart1"_a, "chart2"_a, "match"_a = "auto", "merge_type"_a = "simple", "combine_cheating_assays"_a = false,
+                           "sd_limit"_a = std::numeric_limits<double>::quiet_NaN());
 
     // ----------------------------------------------------------------------
 

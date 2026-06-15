@@ -498,12 +498,12 @@ void ae::chart::v3::Titers::set_titer(sparse_t& titers, antigen_index aAntigenNo
 // is 'dont-care', ignore them, if more_than_thresholded is
 // 'adjust-to-next', those titers are converted to the next value,
 // e.g. >5120 to 10240.
-ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_titers_from_layers(more_than_thresholded mtt)
+ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_titers_from_layers(more_than_thresholded mtt, double sd_limit)
 {
     // core/antigenic_table.py:266
     // backend/antigenic-table.hh:892
 
-    const titer_merge_report merge_report = set_from_layers_report(mtt);
+    const titer_merge_report merge_report = set_from_layers_report(mtt, sd_limit);
     const antigen_index number_of_antigens{layers_[0].size()};
 
     if (merge_report.size() < (number_of_antigens.get() * number_of_sera_.get() / 2))
@@ -521,14 +521,15 @@ ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_titers_from
 
 // ----------------------------------------------------------------------
 
-ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_from_layers_report(more_than_thresholded mtt) const
+ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_from_layers_report(more_than_thresholded mtt, double sd_limit) const
 {
-    constexpr double standard_deviation_threshold = 1.0; // lispmds: average-multiples-unless-sd-gt-1-ignore-thresholded-unless-only-entries-then-min-threshold
+    // lispmds: average-multiples-unless-sd-gt-1-ignore-thresholded-unless-only-entries-then-min-threshold
+    // sd_limit: NaN means no SD check; historical lispmds default is 1.0
     const antigen_index number_of_antigens{layers_[0].size()};
     titer_merge_report merge_report;
     for (const auto ag_no : number_of_antigens) {
         for (const auto sr_no : number_of_sera_) {
-            auto [titer, report] = titer_from_layers(ag_no, sr_no, mtt, standard_deviation_threshold);
+            auto [titer, report] = titer_from_layers(ag_no, sr_no, mtt, sd_limit);
             merge_report.emplace_back(std::move(titer), ag_no, sr_no, report);
         }
     }
@@ -539,7 +540,7 @@ ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_from_layers
 
 // ----------------------------------------------------------------------
 
-ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_from_layers(Chart& chart)
+ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_from_layers(Chart& chart, double sd_limit)
 {
     // merge titers from layers
     // ~/ac/acmacs/acmacs/core/chart.py:1281
@@ -552,10 +553,10 @@ ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_from_layers
     column_bases cb;
     if (has_morethan_in_layers()) {
           // std::cerr << AD_FORMAT("DEBUG: has_morethan_in_layers");
-        set_titers_from_layers(more_than_thresholded::adjust_to_next);
+        set_titers_from_layers(more_than_thresholded::adjust_to_next, sd_limit);
         cb = raw_column_bases();
     }
-    auto merge_report = set_titers_from_layers(more_than_thresholded::to_dont_care);
+    auto merge_report = set_titers_from_layers(more_than_thresholded::to_dont_care, sd_limit);
     if (!cb.empty()) {
         chart.forced_column_bases(cb);
         AD_INFO("forced column bases: {}", chart.forced_column_bases());
@@ -566,7 +567,7 @@ ae::chart::v3::Titers::titer_merge_report ae::chart::v3::Titers::set_from_layers
 
 // ----------------------------------------------------------------------
 
-std::pair<ae::chart::v3::Titer, ae::chart::v3::Titers::titer_merge> ae::chart::v3::Titers::titer_from_layers(antigen_index aAntigenNo, serum_index aSerumNo, more_than_thresholded mtt, double standard_deviation_threshold) const
+std::pair<ae::chart::v3::Titer, ae::chart::v3::Titers::titer_merge> ae::chart::v3::Titers::titer_from_layers(antigen_index aAntigenNo, serum_index aSerumNo, more_than_thresholded mtt, double sd_limit) const
 {
     std::vector<Titer> titers;
     for (const auto layer_no : number_of_layers()) {
@@ -575,7 +576,7 @@ std::pair<ae::chart::v3::Titer, ae::chart::v3::Titers::titer_merge> ae::chart::v
         }
     }
 
-    return merge_titers(titers, mtt, standard_deviation_threshold);
+    return merge_titers(titers, mtt, sd_limit);
 
 } // ae::chart::v3::Titers::titer_from_layers
 
@@ -595,7 +596,7 @@ std::pair<ae::chart::v3::Titer, ae::chart::v3::Titers::titer_merge> ae::chart::v
 
 // backend/antigenic-table.hh:1087
 
-std::pair<ae::chart::v3::Titer, ae::chart::v3::Titers::titer_merge> ae::chart::v3::Titers::merge_titers(const std::vector<Titer>& titers, more_than_thresholded mtt, double standard_deviation_threshold) const
+std::pair<ae::chart::v3::Titer, ae::chart::v3::Titers::titer_merge> ae::chart::v3::Titers::merge_titers(const std::vector<Titer>& titers, more_than_thresholded mtt, double sd_limit) const
 {
     constexpr auto max_limit = std::numeric_limits<decltype(std::declval<Titer>().value())>::max();
     size_t min_less_than = max_limit, min_more_than = max_limit, min_regular = max_limit;
@@ -639,8 +640,10 @@ std::pair<ae::chart::v3::Titer, ae::chart::v3::Titers::titer_merge> ae::chart::v
     std::vector<double> adjusted_log(titers.size());
     std::transform(titers.begin(), titers.end(), adjusted_log.begin(), [](const auto& titer) -> double { return titer.logged_with_thresholded(); }); // 4.
     const auto sd_mean = ae::statistics::standard_deviation(adjusted_log.begin(), adjusted_log.end());
-    if (sd_mean.population_sd() > standard_deviation_threshold)
-        return {Titer{}, titer_merge::sd_too_big};        // 5. if SD > 1, result is *
+    // NaN sd_limit means no limit; NaN comparisons are always false so the check is skipped.
+    // Uses sample SD (n-1 denominator), matching Racmacs behaviour.
+    if (sd_mean.sample_sd() > sd_limit)
+        return {Titer{}, titer_merge::sd_too_big};        // 5. if SD > threshold, result is *
     if (max_less_than == 0 && min_more_than == max_limit) // 6. just regular
         return {Titer::from_logged(sd_mean.mean()), titer_merge::regular_only};
     if (max_less_than) { // 7.
