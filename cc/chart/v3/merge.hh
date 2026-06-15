@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <unordered_map>
 
 #include "chart/v3/common.hh"
@@ -21,6 +22,9 @@ namespace ae::chart::v3
         projection_merge_t projection_merge{projection_merge_t::type1};
         combine_cheating_assays combine_cheating_assays_{combine_cheating_assays::no};
         remove_distinct remove_distinct_{remove_distinct::no};
+        // Sample SD limit (log2 scale): titers whose sample SD across layers exceeds this become "*".
+        // NaN (default) means no limit. Uses n-1 denominator (matches Racmacs / R sd()).
+        double sd_limit{std::numeric_limits<double>::quiet_NaN()};
     };
 
     // ----------------------------------------------------------------------
