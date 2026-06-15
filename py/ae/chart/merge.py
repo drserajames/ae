@@ -1,3 +1,4 @@
+import math
 import sys
 from pathlib import Path
 from typing import Optional
@@ -5,10 +6,15 @@ import ae_backend.chart_v3
 
 # ======================================================================
 
-def merge(sources: list[Path]|list[ae_backend.chart_v3.Chart], match: str, merge_type: str, combine_cheating_assays: bool, duplicates_distinct: bool, report: bool, remove_semantic: bool = True) -> ae_backend.chart_v3.Chart:
+def merge(sources: list[Path]|list[ae_backend.chart_v3.Chart], match: str, merge_type: str, combine_cheating_assays: bool, duplicates_distinct: bool, report: bool, remove_semantic: bool = True,
+          sd_limit: Optional[float] = None) -> ae_backend.chart_v3.Chart:
     """match: "strict", "relaxed", "ignored", "auto"
     merge_type: "type1", "simple", "type2", "incremental", "type3", "overlay", "type4", "type5"
+    sd_limit: sample SD threshold (log2 scale, n-1 denominator, matches R sd()) above which titers are set to "*". None or float("nan") means no limit (default).
     """
+
+    # None and NaN both map to NaN, which the C++ layer treats as "no limit"
+    sd_limit = math.nan if (sd_limit is None or math.isnan(sd_limit)) else float(sd_limit)
 
     def get(src: Path|ae_backend.chart_v3.Chart) -> ae_backend.chart_v3.Chart:
         if not isinstance(src, ae_backend.chart_v3.Chart):
@@ -30,7 +36,7 @@ def merge(sources: list[Path]|list[ae_backend.chart_v3.Chart], match: str, merge
     merge: ae_backend.chart_v3.Chart = get(sources[0])
     for src in sources[1:]:
         chart = get(src)
-        merge, merge_data = ae_backend.chart_v3.merge(merge, chart, match=match, merge_type=merge_type, combine_cheating_assays=combine_cheating_assays)
+        merge, merge_data = ae_backend.chart_v3.merge(merge, chart, match=match, merge_type=merge_type, combine_cheating_assays=combine_cheating_assays, sd_limit=sd_limit)
         if report:
             print(report_chart(merge), report_chart(chart), merge_data.common(), "-" * 70, sep="\n", end="\n\n")
     if remove_semantic:

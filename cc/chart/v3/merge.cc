@@ -7,7 +7,7 @@
 namespace ae::chart::v3
 {
     static void merge_info(Chart& merge, const Chart& chart1, const Chart& chart2);
-    static Titers::titer_merge_report merge_titers(Chart& merge, const Chart& chart1, const Chart& chart2, const merge_data_t& merge_data);
+    static Titers::titer_merge_report merge_titers(Chart& merge, const Chart& chart1, const Chart& chart2, const merge_data_t& merge_data, double sd_limit);
     static void merge_projections(Chart& merge, const Chart& chart1, const Chart& chart2, projection_merge_t projection_merge, const merge_data_t& merge_data);
     static void merge_projections_type2(Chart& merge, const Chart& chart1, const Chart& chart2, const merge_data_t& merge_data);
     static void merge_projections_type3(Chart& merge, const Chart& chart1, const Chart& chart2, const merge_data_t& merge_data);
@@ -58,7 +58,7 @@ std::pair<std::shared_ptr<ae::chart::v3::Chart>, ae::chart::v3::merge_data_t> ae
         merge_antigens_sera(merged->sera(), chart1->sera(), merge_data.sera_primary_target(), true);
         merge_antigens_sera(merged->sera(), chart2->sera(), merge_data.sera_secondary_target(), false);
         merged->throw_if_duplicates();
-        merge_data.titer_report(merge_titers(*merged, *chart1, *chart2, merge_data));
+        merge_data.titer_report(merge_titers(*merged, *chart1, *chart2, merge_data, settings.sd_limit));
         merge_projections(*merged, *chart1, *chart2, settings.projection_merge, merge_data);
         if (!chart1->styles().empty() || !chart2->styles().empty()) {
             AD_WARNING("ae::chart::v3::merge: merging semantic styles not implemented");
@@ -233,7 +233,7 @@ void ae::chart::v3::merge_info(Chart& merge, const Chart& chart1, const Chart& c
 
 // ----------------------------------------------------------------------
 
-ae::chart::v3::Titers::titer_merge_report ae::chart::v3::merge_titers(Chart& merge, const Chart& chart1, const Chart& chart2, const merge_data_t& merge_data)
+ae::chart::v3::Titers::titer_merge_report ae::chart::v3::merge_titers(Chart& merge, const Chart& chart1, const Chart& chart2, const merge_data_t& merge_data, double sd_limit)
 {
     auto &titers = merge.titers(), titers1 = chart1.titers(), titers2 = chart2.titers();
     auto layers1 = titers1.number_of_layers(), layers2 = titers2.number_of_layers();
@@ -264,7 +264,7 @@ ae::chart::v3::Titers::titer_merge_report ae::chart::v3::merge_titers(Chart& mer
     };
     copy_layers(layers1, titers1, merge_data.antigens_primary_target(), merge_data.sera_primary_target());
     copy_layers(layers2, titers2, merge_data.antigens_secondary_target(), merge_data.sera_secondary_target());
-    return titers.set_from_layers(merge);
+    return titers.set_from_layers(merge, sd_limit);
 
 } // ae::chart::v3::merge_titers
 
