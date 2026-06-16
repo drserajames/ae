@@ -1,6 +1,6 @@
 # Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/download.py — Phase 1 engine/library tier.
 # chart download/relax/orient/merge (ae_backend.chart_v3). See py/ae/report/MIGRATION.md.
-import sys, subprocess
+import sys, os, subprocess
 from pathlib import Path
 from typing import Callable
 from ae.utils.open_file import backup
@@ -28,7 +28,13 @@ class Downloader:
             chain_dir = subprocess.check_output(["ssh", "o", f"ls -1d {subtype_dir}/f-* | tail -n 1"]).decode("ascii").strip()
         else:
             chain_dir = subtype_dir.joinpath(chain_name)
-        remote_ace_file = subprocess.check_output(["ssh", "o", f"ls -1 {chain_dir}/*.incremental.ace | tail -n 1"]).decode("ascii").strip()
+        # By default take the latest incremental in the chain. To reproduce a historical report,
+        # pin to an older chain point via $VCM_CHAIN_INCREMENTAL (a substring of the incremental
+        # filename, e.g. "018" or the data-cutoff date "20260129") — then the latest *matching*
+        # file is used instead of the most recent overall.
+        pin = os.environ.get("VCM_CHAIN_INCREMENTAL", "").strip()
+        glob = f"*{pin}*.incremental.ace" if pin else "*.incremental.ace"
+        remote_ace_file = subprocess.check_output(["ssh", "o", f"ls -1 {chain_dir}/{glob} | tail -n 1"]).decode("ascii").strip()
         ace_remote_sha1 = self._remote_sha1(remote_ace_file)
         local_ace_file = ae.report.dirs.VcmDirs.downloaded_raw_filename()
         local_sha1_filename = local_ace_file.with_suffix(".sha1")
