@@ -190,8 +190,12 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 if item.startswith("?"):
                     continue                                          # "?name" = disabled reference, skip silently
                 if item == "clades-whocc":
-                    schema.setdefault("clades", {})["show"] = True   # clades already in the tree
-                    schema["color_by_clade"] = True                  # WHOCC clade colouring of the matrix/leaves
+                    schema.setdefault("clades", {})["show"] = True   # show the clade column (clades already in the tree)
+                    # AD's WHOCC builtin colours the tree + time-series matrix by *continent*
+                    # (its `{"N":"tree","color-by":"continent"}` + time-series color-by). The user
+                    # .tal relies on that builtin default, so mirror it here (ae has the exact AD
+                    # continent palette). Not colour-by-clade — clades are the labelled column.
+                    schema.setdefault("color_by_continent", True)
                 elif item in tal and isinstance(tal[item], list):
                     run(tal[item])                                    # named sub-array
                 else:
@@ -240,6 +244,11 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 if "end" in cmd:
                     ts["end"] = cmd["end"]
                 ts.setdefault("interval", "month")
+                # the matrix is coloured by the time-series color-by (AD reports use continent;
+                # ae has the exact AD continent palette). Set the leaf colour mode accordingly.
+                if cmd.get("color-by") == "continent":
+                    schema["color_by_continent"] = True
+                    schema.pop("color_by_clade", None)  # continent wins over the clades-whocc default
             elif name == "draw-aa-transitions":
                 # AD's draw-aa-transitions labels the *curated* `per-node` set, not every
                 # inode: each entry picks one node by AD's draw-time node_id

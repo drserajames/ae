@@ -456,9 +456,14 @@ C++ renderer; TAL composes them with the tree.
         `height`/`vmargin`). Translator reads `tree` `width-to-height-ratio` and adds a column allowance
         (clades +0.07, time-series +0.13, dash +0.025 each, hz +0.03, labels +0.10) → bvic≈0.64,
         h3≈0.63 (refs 0.631/0.648). `tal-draw --width-to-height-ratio=` + settings `width_to_height_ratio`.
-      - **#3 clade-coloured matrix — FIXED (code, palette approximate).** `clades-whocc` now sets
-        `color_by_clade` → time-series dashes + clade column coloured by clade (ae stable palette, not the
-        exact WHOCC hex colours — those live in AD's builtin `tal.json`; a refinement).
+      - **#3/#4(a) matrix colours — FIXED (continent mode, exact AD palette) 2026-06-16.** Root cause
+        was a colour-*mode* bug, not a missing clade palette: AD's WHOCC builtin colours the tree +
+        time-series matrix **by continent** (`{"N":"tree","color-by":"continent"}` + time-series
+        `color-by`), and ae already has AD's exact continent palette. ae was wrongly forcing
+        `color_by_clade` via the `clades-whocc` shortcut → flat orange. Now `clades-whocc` defaults
+        `color_by_continent` and the `time-series` handler reads `color-by`. **Verified (rasterise+eyeball
+        vs `/tmp/ad-*.pdf`): h1/h3/bvic matrices now multi-colour by continent, matching AD.** The scoped
+        WHOCC-clade-palette / `dash-bar-clades`-command port is therefore **not needed** for the matrix.
       - **#6 tree edges black — FIXED (code).** Added `edge_color_for`: clade colouring colours the
         *matrix* but NOT the tree edges (edges stay black; only by-continent/by-pos recolour edges).
         Also removed the aa-transition *flood*: the report `.tal` `draw-aa-transitions` curated `per-node`
