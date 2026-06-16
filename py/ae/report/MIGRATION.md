@@ -15,9 +15,12 @@ point at `ae.report.*`, and each subtype modifier (`h1`/`h3`/`b`) mixes in the c
 `ConferenceData`; verified end-to-end through kateri: **h1-cdc** `out.1.clades.pdf` is
 pixel-identical to the reference, and **bvic-crick** produces the full B clade set
 (`clades-v1`/`v2`/`-6m`/`-12m` + serology + ts) — see the [per-map export rewire](#per-map-export-rewire-to-aereport--kateri).
-**Remaining:** from-scratch regeneration of the *other* figure families on ae for a full report
-(current hidb for geo/stat, the TAL tree-fidelity gaps) — separate from, and larger than, the
-assembled-report milestone.
+The **from-scratch figure regeneration** has now been run on `ae.report` against a **current
+hidb**: **17/19** per-map dirs regenerated via kateri, **stat** reproduced (structurally
+identical, monotonic superset of the report's), and **geo** reproduced (same clade-coloured
+representation) — see [from-scratch figure regeneration](#from-scratch-figure-regeneration-current-hidb).
+**Remaining:** the 2 `-vidrl` dirs' 2-back previous-chart chain, and the TAL tree-fidelity gaps
+(#3) — neither an `ae.report` blocker.
 This document records the plan and the as-built decisions. Read it before touching
 report code. (Sections below are kept as the historical plan + rationale.)
 
@@ -173,6 +176,44 @@ The 21 `0do` + 3 modifier edits live in the **report working copy** (not `ae`). 
 export for all dirs (the bulk figure regeneration) is mechanical from here, but heavy (each
 `populate_export` launches kateri and writes the per-style PDFs); the rewire + cross-subtype
 verification is what makes it reproducible on `ae.report`.
+
+---
+
+## From-scratch figure regeneration (current hidb)
+
+Done 2026-06-16 — the full figure regeneration for the `2026-0223-ssm` report, run on
+`ae.report` against a **freshly-updated hidb** (the owner ran `whocc-hidb5-update` on the
+server + `hidb5-download`; coverage went from stale-2024-02 to **H1→2026-03 / H3→2026 /
+B→2026-04**). All three non-map families confirmed; **no AD binaries** (`hidb5-stat`,
+`geographic-draw`) and **no `vcm`** involved.
+
+- **Antigenic maps (kateri): 17/19 dirs** regenerated their full current-window style set via
+  `ae.report` + kateri (all of H1, H3, B across labs). The 2 `-vidrl` dirs (`h3-hi-guinea-pig-vidrl`,
+  `bvic-vidrl`) fail identically in `dirs.find_previous_chart` — their modifiers request a
+  **2-back** previous chart (`previous/previous/<dir>/styled.ace`) that isn't present in the
+  `2025-1217-tc1` report; a previous-chain/data gap (vcm raises the same `NotImplementedError`),
+  **not** a rewire bug.
+- **stat (`ae.report.stat` → `ae.report.stat_tables`):** reproduced the report's `stat.json.xz`
+  — **structurally identical** and a **monotonic superset**: all 1577 common numeric leaves
+  `ae ≥ ref`, exact match where data is unchanged (e.g. `VIDRL 202511 AUSTRALIA-OCEANIA 20=20`),
+  the higher ones pure hidb accretion Feb→Jun (e.g. `CDC NORTH-AMERICA 111→340`). This is the
+  Python `hidb5-stat` port over `ae_backend.hidb` — no AD C++ binary.
+- **geo (`ae.report.geographic`, `color_by="coloring"`):** reproduced the report's H1 monthly
+  maps (Aug 2025–Jan 2026) — same clade-coloured packed-dot representation + report palette;
+  more dots than the report-era reference, consistent with the same hidb accretion the stat
+  showed (US/CDC). Clade colouring resolved from seqdb (current enough for these strains).
+
+**Infra note (build contention).** The shared `build/ae_backend.so` had **lost its `hidb`
+submodule** — a concurrent agent on another branch (`fixed-column-bases`) had rebuilt it without
+hidb. So this run used a **clean `ae_backend` (+`geo-draw`) built from `ad-port` in an isolated
+worktree** (`ae-report/build-wt`), configured **offline** by copying the main checkout's
+`subprojects/packagecache/` (the network was blocked for wrap downloads). hidb currency was first
+confirmed with AD's `hidb5-dates` straight off the downloaded `.json.xz` (no rebuild needed for
+the check).
+
+**Data hygiene:** stat/geo outputs went to `/tmp`, maps to the report working copy under
+`~/AC/eu/ac/...`; **nothing real entered the `ae` repo**. The only `ae` change from the whole
+per-map/regeneration effort is the committed `ae.utils.org` ragged-row fix.
 
 ---
 
