@@ -9,9 +9,15 @@ the real `2026-0223-ssm` now builds on `ae.report` (`report.py` → 36-page `rep
 visually identical to the AD/vcm reference) after a **2-file / 3-edit** per-report adaptation.
 Gap #1 (geographic clade/aa colouring) is **closed**; gap #2 (tree `.tal` fidelity) is **diffed
 + handed to TAL**. The adjust stage is ported (`ae.adjust` programmatic + kateri point-drag
-interactive). **Remaining:** from-scratch regeneration of every figure on ae (current hidb +
-kateri maps + TAL tree fidelity + per-map `style`/`export` rewiring) — separate from, and
-larger than, the assembled-report milestone.
+interactive). The **per-map antigenic-map `style`/`export` is now also rewired to `ae.report`
+and kateri** — the per-map `0do` library imports (`main_loop`/`commander`/`download`/`dirs`)
+point at `ae.report.*`, and each subtype modifier (`h1`/`h3`/`b`) mixes in the concrete
+`ConferenceData`; verified end-to-end through kateri: **h1-cdc** `out.1.clades.pdf` is
+pixel-identical to the reference, and **bvic-crick** produces the full B clade set
+(`clades-v1`/`v2`/`-6m`/`-12m` + serology + ts) — see the [per-map export rewire](#per-map-export-rewire-to-aereport--kateri).
+**Remaining:** from-scratch regeneration of the *other* figure families on ae for a full report
+(current hidb for geo/stat, the TAL tree-fidelity gaps) — separate from, and larger than, the
+assembled-report milestone.
 This document records the plan and the as-built decisions. Read it before touching
 report code. (Sections below are kept as the historical plan + rationale.)
 
@@ -125,6 +131,48 @@ dir (`h1-cdc`) + write per-report glue → diff the map PDF vs the existing `out
 (3) stat → geo(clade) → trees, each diffed vs the reference figures already in the folder;
 (4) `report.py` → assembled `report.pdf`. **No real report data is copied into `ae`** — the
 copy lives under `~/AC/eu/ac/results/ssm/`, outputs/verification stay there or in `/tmp`.
+
+---
+
+## Per-map export rewire to ae.report + kateri
+
+Done 2026-06-16. The per-map antigenic-map generation (`<subtype>-<lab>/0do` `populate`/
+`style`/`export`, which drives **kateri** to render `out.1.<style>.pdf`) now runs on
+`ae.report` instead of `vcm.v2`. The rewire is mechanical and falls into two parts:
+
+- **Per-map `0do` (×21):** rewrite only the **library** imports —
+  `vcm.v2.{main_loop,commander,download,dirs}` → `ae.report.{…}`
+  (`sed -E 's/vcm\.v2\.(main_loop|commander|download|dirs)/ae.report.\1/g'`). The
+  per-report imports (`vcm.v2.<subtype>_chart_modifier`, `vcm.v2.conference_data`,
+  `vcm.v2.serology`) **stay** `vcm.v2` — they live with the report.
+- **Subtype modifiers (`h1`/`h3`/`b_chart_modifier.py`):** `import vcm.v2.chart_modifier as
+  cm_m` → `import ae.report.chart_modifier as cm_m`, add `import vcm.v2.conference_data as
+  conference_data`, and **mix the concrete ConferenceData into the subtype base** —
+  `class H1_ChartModifier(cm_m.ChartModifier, conference_data.ConferenceData)` (same for
+  `H3_ChartModifier`, `B_ChartModifier`; the `*_HI`/`*_Neut`/`B_Vic`/… subclasses inherit it).
+  Needed because `ae.report.chart_modifier.ChartModifier` now inherits the
+  `conference_data_base` stubs (so `ae.report` imports standalone); the mix-in puts the real
+  per-season data back in the MRO.
+
+**✅ Verified end-to-end through kateri** (worktree on `ad-port`; `PYTHONPATH` = report dirs +
+`acmacs-data` + the main checkout's `build/` for `ae_backend` + the worktree `py`):
+- **h1-cdc** `populate_export` → `out.1.clades.pdf` **pixel-identical** to the AD/vcm reference
+  (same title, clade legend + counts, antigen cloud, vaccine labels).
+- **bvic-crick** `populate_export` → the full **B** style set (`clades-v1`/`clades-v2` + `-6m`/
+  `-12m` + `serology` + `ts-*`; B uses `clades-vN`, not bare `clades`), the B/Vic clade map
+  renders correctly. (Exercises the `B_ChartModifier` mix-in.)
+- **h3-hint-cdc** / bvic import + MRO checks pass (concrete `ConferenceData` resolves through
+  the mix-in; commander base is `ae.report.commander`).
+
+**One engine fix this surfaced** (committed to `ae`): `ae.utils.org.org_table_to_dict` now
+tolerates **ragged rows** (a data row with fewer cells than the header) — the report's
+top-level `serology.py` (which `ae.report.chart_modifier`'s guarded `import serology` resolves
+to) tripped an `IndexError` otherwise.
+
+The 21 `0do` + 3 modifier edits live in the **report working copy** (not `ae`). Running the
+export for all dirs (the bulk figure regeneration) is mechanical from here, but heavy (each
+`populate_export` launches kateri and writes the per-style PDFs); the rewire + cross-subtype
+verification is what makes it reproducible on `ae.report`.
 
 ---
 

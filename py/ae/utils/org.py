@@ -16,7 +16,8 @@ def org_table_to_dict(data: str) -> list[dict[str, str | bool | int | float]]:
             if not field_names:
                 field_names = fields
             else:
-                result.append({key: _convert_value(fields[no], field_name=key) for no, key in enumerate(field_names) if fields[no]})
+                # tolerate ragged rows (fewer cells than headers): skip absent/empty trailing columns
+                result.append({key: _convert_value(fields[no], field_name=key) for no, key in enumerate(field_names) if no < len(fields) and fields[no]})
         elif field_names:
             break
     return result
