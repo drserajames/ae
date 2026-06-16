@@ -6,6 +6,7 @@
 
 #include "chart/v3/disconnected-points-handler.hh"
 #include "chart/v3/selected-antigens-sera.hh"
+#include "chart/v3/grid-test.hh"
 
 // ----------------------------------------------------------------------
 
@@ -215,6 +216,22 @@ void ae::chart::v3::Chart::relax_incremental(projection_index source_projection_
     }
 
 } // ae::chart::v3::Chart::relax_incremental
+
+// ----------------------------------------------------------------------
+
+void ae::chart::v3::Chart::move_trapped_points_relax(projection_index projection_no, size_t n_iter)
+{
+    auto& projection = projections()[projection_no];
+    const optimization_options options{};
+    for (size_t iter = 0; iter < n_iter; ++iter) {
+        auto results = grid_test::test(*this, projection_no);
+        if (results.count_trapped_hemisphering() == 0)
+            break;
+        results.apply(projection);
+        projection.relax(*this, options);
+    }
+
+} // ae::chart::v3::Chart::move_trapped_points_relax
 
 // ----------------------------------------------------------------------
 

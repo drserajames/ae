@@ -289,6 +289,11 @@ void ae::py::chart_v3(pybind11::module_& mdl)
 
         .def(
             "grid_test", [](Chart& chart, size_t projection_no) { return grid_test::test(chart, projection_index{projection_no}); }, "projection_no"_a = 0) //
+        .def(
+            "move_trapped_points_relax",
+            [](Chart& chart, size_t projection_no, size_t n_iter) { chart.move_trapped_points_relax(projection_index{projection_no}, n_iter); },
+            "projection_no"_a = 0, "n_iter"_a = 5,
+            pybind11::doc("interleave grid-test with LBFGS relaxation to resolve trapped/hemisphering points")) //
 
         // ----------------------------------------------------------------------
 
@@ -597,6 +602,28 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         .def("minmax", &Layout::minmax)                                                                                                           //
         .def(
             "connected", [](const Layout& layout, size_t index) { return layout.point_has_coordinates(point_index{index}); }, "index"_a) //
+        .def(
+            "set_from_numpy",
+            [](Layout& layout, pybind11::array_t<double, pybind11::array::c_style | pybind11::array::forcecast> arr) {
+                if (arr.ndim() != 2)
+                    throw std::invalid_argument{"set_from_numpy: array must be 2-D"};
+                const size_t n_pts = *layout.number_of_points();
+                const size_t n_dims = *layout.number_of_dimensions();
+                if (static_cast<size_t>(arr.shape(0)) != n_pts || static_cast<size_t>(arr.shape(1)) != n_dims)
+                    throw std::invalid_argument{fmt::format("set_from_numpy: expected shape ({}, {}), got ({}, {})", n_pts, n_dims, arr.shape(0), arr.shape(1))};
+                auto buf = arr.unchecked<2>();
+                for (size_t pt = 0; pt < n_pts; ++pt) {
+                    if (std::isnan(buf(pt, 0))) {
+                        layout.set_nan(point_index{pt});
+                    } else {
+                        auto ref = layout[point_index{pt}];
+                        for (size_t d = 0; d < n_dims; ++d)
+                            ref[number_of_dimensions_t{d}] = buf(pt, d);
+                    }
+                }
+            },
+            "coordinates"_a,
+            pybind11::doc("write (n_points, n_dims) float64 array into layout; NaN rows mark disconnected points")) //
         .def(
             "as_numpy",
             [](const Layout& layout) {
