@@ -16,12 +16,15 @@ point at `ae.report.*`, and each subtype modifier (`h1`/`h3`/`b`) mixes in the c
 pixel-identical to the reference, and **bvic-crick** produces the full B clade set
 (`clades-v1`/`v2`/`-6m`/`-12m` + serology + ts) — see the [per-map export rewire](#per-map-export-rewire-to-aereport--kateri).
 The **from-scratch figure regeneration** has been run on `ae.report` against a **current hidb**:
-**17/19** per-map dirs regenerated via kateri, **stat** reproduced (structurally identical,
+**19/19** per-map dirs regenerated via kateri (incl. a `find_previous_chart` graceful-None fix), **stat** reproduced (structurally identical,
 monotonic superset of the report's), **geo** reproduced for **all three subtypes (H1/H3/B)**, and
 a **fully ae-generated 36-page `report.pdf`** re-assembled from the regenerated figures (maps +
-trees + geo, no AD binaries/`vcm`) — see [from-scratch figure regeneration](#from-scratch-figure-regeneration-current-hidb).
-**Remaining:** the 2 `-vidrl` dirs' 2-back previous-chart chain, and the TAL tree-fidelity gaps
-(#3) — neither an `ae.report` blocker.
+trees + geo, no AD binaries/`vcm`) — and the regenerated maps are **pixel-verified** against the
+pristine original (content-identical; <1 % differing pixels, all anti-aliasing edges). See
+[from-scratch figure regeneration](#from-scratch-figure-regeneration-current-hidb).
+**Remaining:** only the TAL tree-fidelity gaps (#3) — not an `ae.report` blocker. The `ae.report`
+side of the seasonal report is **end-to-end reproducible** (engine, all four figure families,
+assembled PDF).
 This document records the plan and the as-built decisions. Read it before touching
 report code. (Sections below are kept as the historical plan + rationale.)
 
@@ -188,12 +191,20 @@ server + `hidb5-download`; coverage went from stale-2024-02 to **H1→2026-03 / 
 B→2026-04**). All three non-map families confirmed; **no AD binaries** (`hidb5-stat`,
 `geographic-draw`) and **no `vcm`** involved.
 
-- **Antigenic maps (kateri): 17/19 dirs** regenerated their full current-window style set via
-  `ae.report` + kateri (all of H1, H3, B across labs). The 2 `-vidrl` dirs (`h3-hi-guinea-pig-vidrl`,
-  `bvic-vidrl`) fail identically in `dirs.find_previous_chart` — their modifiers request a
-  **2-back** previous chart (`previous/previous/<dir>/styled.ace`) that isn't present in the
-  `2025-1217-tc1` report; a previous-chain/data gap (vcm raises the same `NotImplementedError`),
-  **not** a rewire bug.
+- **Antigenic maps (kateri): 19/19 dirs** regenerated their full current-window style set via
+  `ae.report` + kateri (all of H1, H3, B across labs). *(Initially 17/19 — the 2 `-vidrl` dirs,
+  which use the base `previous_charts()` requesting a **2-back** chart, hit
+  `dirs.find_previous_chart` raising `NotImplementedError` because `2025-1217-tc1` has no chart
+  for them. Fixed: `find_previous_chart` now returns `None` when the previous report exists but
+  lacks this dir's chart — matching its own merges-branch behaviour and the caller's "eliminate
+  not found" filter; only raises if the previous dir itself is missing. Both vidrl dirs then
+  regenerated.)*
+- **Pixel-verified against the pristine original report** (`2026-0223-ssm`, not the copy): 7
+  maps across H1/H3/B and 6 labs differ by only **0.25–0.97 %** of pixels, and the diff image
+  shows those are **anti-aliasing edges** on dots/text (sub-pixel kateri rendering), not content —
+  no recolours, no moved points, no clade changes. The maps are **content-identical**; the
+  A1-fixed `bvic-vidrl` matches at the same fidelity (0.29 %), confirming the fix yields a correct
+  map. (The chart `.ace` + styling are deterministic; clade colours from a stable seqdb.)
 - **stat (`ae.report.stat` → `ae.report.stat_tables`):** reproduced the report's `stat.json.xz`
   — **structurally identical** and a **monotonic superset**: all 1577 common numeric leaves
   `ae ≥ ref`, exact match where data is unchanged (e.g. `VIDRL 202511 AUSTRALIA-OCEANIA 20=20`),

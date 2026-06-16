@@ -88,8 +88,14 @@ class VcmDirs (ae.report.modules.Modules):
                 # raise RuntimeError(f"cannot find previous merge in {previous_dir} -> {previous_dir.resolve()}")
         elif (prev_ace := previous_dir.joinpath(current_name, "styled.ace")).exists():
             return prev_ace.resolve()
+        elif previous_dir.is_dir():
+            # the previous report exists but has no chart for this dir (e.g. this lab/subtype
+            # wasn't in that earlier report — common for the 2-back chart). Not an error:
+            # previous_charts() filters None out ("eliminate not found").
+            print(f">> no previous chart for {current_name} in {previous_dir}", file=sys.stderr)
+            return None
         else:
-            raise NotImplementedError(f"previous_dir: \"{previous_dir}\" current_name: \"{current_name}\"")
+            raise NotImplementedError(f"previous_dir does not exist: \"{previous_dir.resolve()}\" current_name: \"{current_name}\"")
 
     # ----------------------------------------------------------------------
 
