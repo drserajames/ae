@@ -84,6 +84,7 @@ namespace ae::chart::v3
                    const disconnected_points& disconnected = disconnected_points{}, const unmovable_points& unmovable = unmovable_points{});
         void relax_incremental(projection_index source_projection_no, number_of_optimizations_t number_of_optimizations, const optimization_options& options,
                                const disconnected_points& disconnected = disconnected_points{}, const unmovable_points& unmovable = unmovable_points{});
+        void move_trapped_points_relax(projection_index projection_no = projection_index{0}, size_t n_iter = 5);
 
         void combine_projections(const Chart& merge_in);
 
