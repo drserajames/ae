@@ -6,6 +6,8 @@
 #include "chart/v3/grid-test.hh"
 #include "chart/v3/chart-seqdb.hh"
 #include "pybind11/detail/common.h"
+#include "pybind11/numpy.h"
+#include <limits>
 
 // ======================================================================
 
@@ -191,6 +193,15 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         .def("number_of_projections", [](const Chart& chart) -> size_t { return *chart.projections().size(); }) //
         .def("forced_column_bases", [](const Chart& chart) { return chart.forced_column_bases().data(); })      //
         .def(
+            "set_forced_column_bases",
+            [](Chart& chart, const std::vector<double>& values) {
+                column_bases cb;
+                for (const auto v : values)
+                    cb.add(v);
+                chart.forced_column_bases(cb);
+            },
+            "column_bases"_a, pybind11::doc("set per-serum forced column bases (log2 scale); length must equal number of sera")) //
+        .def(
             "column_bases", [](const Chart& chart, std::string_view mcb) { return chart.column_bases(minimum_column_basis{mcb}).data(); }, "minimum_column_basis"_a = "none") //
 
         .def("info", [](std::shared_ptr<Chart> chart) { return new InfoRef{chart}; }) //
@@ -236,12 +247,15 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         .def(
             "relax", //
             [](Chart& chart, size_t number_of_dimensions, size_t number_of_optimizations, std::string_view mcb, bool dimension_annealing, bool rough,
-               size_t /*number_of_best_distinct_projections_to_keep*/, std::shared_ptr<SelectedAntigens> antigens_to_disconnect, std::shared_ptr<SelectedSera> sera_to_disconnect) {
+               size_t /*number_of_best_distinct_projections_to_keep*/, std::shared_ptr<SelectedAntigens> antigens_to_disconnect, std::shared_ptr<SelectedSera> sera_to_disconnect,
+               std::optional<size_t> seed) {
                 if (number_of_optimizations == 0)
                     number_of_optimizations = 100;
                 optimization_options opt;
                 opt.precision = rough ? optimization_precision::rough : optimization_precision::fine;
                 opt.dimension_annealing = use_dimension_annealing_from_bool(dimension_annealing);
+                if (seed.has_value())
+                    opt.seed = static_cast<std::uint_fast32_t>(*seed);
                 ae::disconnected_points disconnect;
                 if (antigens_to_disconnect && !antigens_to_disconnect->empty())
                     disconnect.insert_if_not_present(antigens_to_disconnect->points());
@@ -252,6 +266,7 @@ void ae::py::chart_v3(pybind11::module_& mdl)
             },                                                                                                                                                    //
             "number_of_dimensions"_a = 2, "number_of_optimizations"_a = 0, "minimum_column_basis"_a = "none", "dimension_annealing"_a = false, "rough"_a = false, //
             "unused_number_of_best_distinct_projections_to_keep"_a = 5, "disconnect_antigens"_a = nullptr, "disconnect_sera"_a = nullptr,                         //
+            "seed"_a = pybind11::none(),                                                                                                                           //
             pybind11::doc{"makes one or more antigenic maps from random starting layouts, adds new projections, projections are sorted by stress"})               //
 
         .def(
@@ -502,6 +517,22 @@ void ae::py::chart_v3(pybind11::module_& mdl)
             "serum_coverage",
             [](const Titers& titers, size_t antigen_no, size_t serum_no, double fold) { return serum_coverage(titers, antigen_index{antigen_no}, serum_index{serum_no}, serum_circle_fold{fold}); },
             "antigen_no"_a, "serum_no"_a, "fold"_a = 2.0) //
+        .def(
+            "logged_array",
+            [](const Titers& titers, size_t n_ag, size_t n_sr) {
+                pybind11::array_t<double> result({static_cast<pybind11::ssize_t>(n_ag), static_cast<pybind11::ssize_t>(n_sr)});
+                auto buf = result.mutable_unchecked<2>();
+                const double nan = std::numeric_limits<double>::quiet_NaN();
+                for (size_t ag = 0; ag < n_ag; ++ag) {
+                    for (size_t sr = 0; sr < n_sr; ++sr) {
+                        const auto t = titers.titer(antigen_index{ag}, serum_index{sr});
+                        buf(ag, sr) = t.is_dont_care() ? nan : t.logged();
+                    }
+                }
+                return result;
+            },
+            "n_antigens"_a, "n_sera"_a,
+            pybind11::doc("(n_ag, n_sr) float64 array of log2 titers; NaN for missing titers")) //
         ;
 
     pybind11::class_<Titer>(chart_v3_submodule, "Titer")                                                                      //
@@ -566,6 +597,27 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         .def("minmax", &Layout::minmax)                                                                                                           //
         .def(
             "connected", [](const Layout& layout, size_t index) { return layout.point_has_coordinates(point_index{index}); }, "index"_a) //
+        .def(
+            "as_numpy",
+            [](const Layout& layout) {
+                const size_t n_pts = *layout.number_of_points();
+                const size_t n_dims = *layout.number_of_dimensions();
+                pybind11::array_t<double> result({static_cast<pybind11::ssize_t>(n_pts), static_cast<pybind11::ssize_t>(n_dims)});
+                auto buf = result.mutable_unchecked<2>();
+                const double nan = std::numeric_limits<double>::quiet_NaN();
+                for (size_t pt = 0; pt < n_pts; ++pt) {
+                    if (layout.point_has_coordinates(point_index{pt})) {
+                        const auto c = layout[point_index{pt}];
+                        for (size_t d = 0; d < n_dims; ++d)
+                            buf(pt, d) = c[number_of_dimensions_t{d}];
+                    } else {
+                        for (size_t d = 0; d < n_dims; ++d)
+                            buf(pt, d) = nan;
+                    }
+                }
+                return result;
+            },
+            pybind11::doc("(n_points, n_dims) float64 array; NaN rows for disconnected points")) //
         // .def("__str__", [](const Layout& layout) { return fmt::format("{}", layout); }) //
         ;
 

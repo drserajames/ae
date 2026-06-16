@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 #include <algorithm>
@@ -40,6 +42,7 @@ namespace ae::chart::v3
         remove_source_projection rsp{remove_source_projection::yes};
         unmovable_non_nan_points unnp{unmovable_non_nan_points::no};
         dodgy_titer_is_regular_e dodgy_titer_is_regular{dodgy_titer_is_regular_e::no};
+        std::optional<std::uint_fast32_t> seed{std::nullopt}; // RNG seed; nullopt → std::random_device
 
     }; // struct optimization_options
 
