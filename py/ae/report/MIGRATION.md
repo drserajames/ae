@@ -15,10 +15,11 @@ point at `ae.report.*`, and each subtype modifier (`h1`/`h3`/`b`) mixes in the c
 `ConferenceData`; verified end-to-end through kateri: **h1-cdc** `out.1.clades.pdf` is
 pixel-identical to the reference, and **bvic-crick** produces the full B clade set
 (`clades-v1`/`v2`/`-6m`/`-12m` + serology + ts) — see the [per-map export rewire](#per-map-export-rewire-to-aereport--kateri).
-The **from-scratch figure regeneration** has now been run on `ae.report` against a **current
-hidb**: **17/19** per-map dirs regenerated via kateri, **stat** reproduced (structurally
-identical, monotonic superset of the report's), and **geo** reproduced (same clade-coloured
-representation) — see [from-scratch figure regeneration](#from-scratch-figure-regeneration-current-hidb).
+The **from-scratch figure regeneration** has been run on `ae.report` against a **current hidb**:
+**17/19** per-map dirs regenerated via kateri, **stat** reproduced (structurally identical,
+monotonic superset of the report's), **geo** reproduced for **all three subtypes (H1/H3/B)**, and
+a **fully ae-generated 36-page `report.pdf`** re-assembled from the regenerated figures (maps +
+trees + geo, no AD binaries/`vcm`) — see [from-scratch figure regeneration](#from-scratch-figure-regeneration-current-hidb).
 **Remaining:** the 2 `-vidrl` dirs' 2-back previous-chart chain, and the TAL tree-fidelity gaps
 (#3) — neither an `ae.report` blocker.
 This document records the plan and the as-built decisions. Read it before touching
@@ -198,10 +199,20 @@ B→2026-04**). All three non-map families confirmed; **no AD binaries** (`hidb5
   `ae ≥ ref`, exact match where data is unchanged (e.g. `VIDRL 202511 AUSTRALIA-OCEANIA 20=20`),
   the higher ones pure hidb accretion Feb→Jun (e.g. `CDC NORTH-AMERICA 111→340`). This is the
   Python `hidb5-stat` port over `ae_backend.hidb` — no AD C++ binary.
-- **geo (`ae.report.geographic`, `color_by="coloring"`):** reproduced the report's H1 monthly
-  maps (Aug 2025–Jan 2026) — same clade-coloured packed-dot representation + report palette;
-  more dots than the report-era reference, consistent with the same hidb accretion the stat
-  showed (US/CDC). Clade colouring resolved from seqdb (current enough for these strains).
+- **geo (`ae.report.geographic`, `color_by="coloring"`): all three subtypes (H1/H3/B)**
+  regenerated into `report/geo/` for the report window (Aug 2025–Jan 2026) — same clade-coloured
+  packed-dot representation + report palette; more dots than the report-era reference, consistent
+  with the same hidb accretion the stat showed (H3 is large: 223–1501 locations/month). Clade
+  colouring resolved from seqdb (current enough for these strains). A few Chinese-character
+  location names don't resolve in the local locdb (pre-existing — a handful of dropped dots).
+- **Fully ae-generated `report.pdf`:** re-ran `report.py` after the regeneration → a **36-page
+  A4 `report.pdf`** assembled on `ae.report` that embeds **only ae-regenerated figures**:
+  antigenic maps (kateri), phylogenetic trees (ae `tal-draw`), geographic maps (ae `geo-draw`
+  clade-colouring), cover/TOC/section pages (`ae.report.latex`). No AD binaries, no `vcm`. It is a
+  **refreshed** report (current hidb → more data), not a byte-repro of the Feb original; the 2
+  stale `-vidrl` maps are embedded where referenced (the previous-chart gap above); this report's
+  content doesn't include stat *tables* (its `latex.time_series` calls are commented out), though
+  stat itself is regenerated+verified separately.
 
 **Infra note (build contention).** The shared `build/ae_backend.so` had **lost its `hidb`
 submodule** — a concurrent agent on another branch (`fixed-column-bases`) had rebuilt it without
