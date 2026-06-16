@@ -1,0 +1,8 @@
+{"_": "synthetic tree with one long-edge outlier for the edge>= node-selection test (no real data). Edge lengths in the \"l\" field; OUTLIER has a 5.0 edge vs 0.1 for the rest.",
+ "  version": "phylogenetic-tree-v3",
+ "tree": {"t": [
+   {"l": 0.1, "n": "E1"},
+   {"l": 0.1, "n": "E2"},
+   {"l": 5.0, "n": "OUTLIER"},
+   {"l": 0.1, "n": "E3"}
+ ]}}

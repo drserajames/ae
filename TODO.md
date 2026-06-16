@@ -481,12 +481,14 @@ C++ renderer; TAL composes them with the tree.
         right-hand columns than the fixed per-column allowances assume, so the page comes out too narrow
         (tree is complete + faithful, just doesn't fill the width). Make the allowance reflect the actual
         column set / counts rather than fixed increments.
-      - **#8 `nodes.select: {"edge >=": N}` — OPEN** (h1 `.tal`). The translator skips this criterion
-        (emits "nodes.select: unsupported criterion 'edge >=' ignored"); AD uses it to hide
-        long-edge / outlier nodes. Add `edge >=` (edge-length threshold) selection so those nodes hide.
+      - **#8 `nodes.select: {"edge >=": N}` — ✅ DONE** (2026-06-15). `edge_min` wired through
+        `settings_v3` (`edge >=`→`edge_min`), `settings.cc`, and `draw-tree.{hh,cc}` (`NodeSelect.edge_min`,
+        checked against the node's own edge length); AD uses it to hide long-edge/outlier nodes.
+        **Verified:** `cc/tal/test/test-draw-tree.sh` (new `tree-edges.json` case — OUTLIER with edge 5.0
+        hidden by `edge_min:1.0`, E1–E3 kept) + `test-settings-v3.py` (translation).
       Files: `cc/tal/draw-tree.{hh,cc}`, `cc/tal/settings.{hh,cc}`, `cc/tal/tal-draw-main.cc`,
-      `py/ae/tal/settings_v3.py`. **#1/#3/#6 + translator nits built + verified 2026-06-15** (report
-      agent); **#2/#4/#5/#7/#8 open.**
+      `py/ae/tal/settings_v3.py`. **#1/#3/#6/#8 + translator nits built + verified** (the `?`-disabled-key
+      spurious-warning nit also fixed: `_select` now skips `?`-prefixed keys); **#2/#4/#5/#7 open.**
       Original gap list (priority order) retained below:
       1. **Canvas width / aspect** — `tal-draw` renders square; AD computes canvas *width* from the
          tree `width-to-height-ratio` (0.41) + accumulated column (time-series/dash/aa) widths.
@@ -501,9 +503,10 @@ C++ renderer; TAL composes them with the tree.
       4. **Clade legend** partial vs AD's full vertical colour-bar legend.
       5. **Geographic map inset** (small world map, lower-left) absent (AD builtin/clades-whocc).
       6. **Tree edge colour** — ae draws edges purple (default/clade colouring); AD black.
-      - **Translator robustness nits** (`py/ae/tal/settings_v3`): `?`-disabled keys inside objects
-        (e.g. `?last`) emit spurious "unknown built-in … ignored" warnings — should be silently
-        skipped; `nodes` with a string `apply` ("report") are skipped (informational; OK).
+      - **Translator robustness nits** (`py/ae/tal/settings_v3`): ✅ `?`-disabled keys inside `select`
+        objects (e.g. `?cumulative >=`) no longer emit spurious "unsupported criterion" warnings
+        (`_select` skips `?`-prefixed keys); `?`-prefixed string program items were already skipped.
+        `nodes` with a string `apply` ("report") are skipped (informational; OK).
       The **report side needs no change** — `ae.report.trees` translates + invokes `tal-draw`
       correctly; all of the above is `cc/tal` (layout/rendering) + `py/ae/tal/settings_v3`
       (translation). Reproduce: `make_tree("<tree>.tjz", "<tree>.tal", "/tmp/out.pdf")` with

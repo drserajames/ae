@@ -104,6 +104,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                     continue;
                 if (sel.cumulative_min && base.cumulative_edge.get() < *sel.cumulative_min)
                     continue;
+                if (sel.edge_min && base.edge.get() < *sel.edge_min)
+                    continue;
                 if (!sel.date_min.empty()) {
                     if (name == nullptr) continue;
                     if (const std::string day = canonical_date(*date); day.empty() || day < sel.date_min) continue;

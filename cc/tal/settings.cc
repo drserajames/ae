@@ -107,6 +107,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
             if (const auto& select = mod_value["select"]; select.is_object()) {
                 mod.select.seq_id = get_string_list(select["seq_id"]);
                 mod.select.cumulative_min = get_opt_double(select["cumulative_min"]);
+                mod.select.edge_min = get_opt_double(select["edge_min"]);
                 mod.select.date_min = get_string(select["date_min"]);
                 mod.select.date_max = get_string(select["date_max"]);
             }

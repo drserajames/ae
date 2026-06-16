@@ -13,6 +13,7 @@
         {"N": "dash-bar-aa-at", "pos": 159},
         {"N": "nodes", "select": {"seq_id": "A"}, "apply": {"hide": true}},
         {"N": "nodes", "select": {"seq_id": "B"}, "apply": {"text": {"text": "x", "offset": [0.02, 0.0]}}},
+        {"N": "nodes", "select": {"edge >=": 0.5, "?cumulative >=": 9}, "apply": {"hide": true}},
         {"N": "if", "condition": "$enable_extra", "then": [
             {"N": "dash-bar-aa-at", "pos": 145},
         ]},

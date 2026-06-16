@@ -208,7 +208,8 @@ the `cc/draw/` surface API."*
    the configured hex colours; clade labels/legend show the short display names).
 10. **M2 — node select/apply mods — DONE.** A `"nodes": [{ "select": {…}, "apply": {…} }]`
     array drives the core of acmacs-tal's mod pipeline. **Select** by `seq_id` (string or
-    list), `cumulative_min` (long branches), `date_min`/`date_max`; **apply** `hide` (drops
+    list), `cumulative_min` (long branches), `edge_min` (`.tal` `edge >=` — hide long-edge
+    outliers), `date_min`/`date_max`; **apply** `hide` (drops
     the node + subtree from the layout — applied before `compute_layout`), `edge_color`,
     `label_color`, `label_scale`. Resolved in `draw-tree.cc` via per-node override maps
     (keyed by node index) consulted while drawing. **Verify:** `sh cc/tal/test/test-draw-tree.sh`

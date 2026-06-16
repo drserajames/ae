@@ -133,12 +133,17 @@ def _select(select: dict, warnings: list) -> dict:
         out["seq_id"] = sid if isinstance(sid, list) else [sid]
     if "cumulative >=" in select:
         out["cumulative_min"] = select["cumulative >="]
+    if "edge >=" in select:
+        out["edge_min"] = select["edge >="]
     if "date_min" in select:
         out["date_min"] = select["date_min"]
     if "date_max" in select:
         out["date_max"] = select["date_max"]
+    known = ("seq_id", "cumulative >=", "edge >=", "date_min", "date_max", "report")
     for key in select:
-        if key not in ("seq_id", "cumulative >=", "date_min", "date_max", "report"):
+        if key.startswith("?"):
+            continue  # ?-disabled key — silently skip (not an unsupported criterion)
+        if key not in known:
             warnings.append(f"nodes.select: unsupported criterion {key!r} ignored")
     return out
 

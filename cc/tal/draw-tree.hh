@@ -46,6 +46,7 @@ namespace ae::tal
     {
         std::vector<std::string> seq_id{};      // leaf-name is one of these (leaves only)
         std::optional<double> cumulative_min{}; // node cumulative edge length >= this
+        std::optional<double> edge_min{};       // node's own edge length >= this (hide long-edge outliers)
         std::string date_min{};                 // leaf date >= this "YYYY-MM-DD" (leaves only)
         std::string date_max{};                 // leaf date <  this "YYYY-MM-DD" (leaves only)
     };

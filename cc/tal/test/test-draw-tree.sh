@@ -70,4 +70,17 @@ check "tree-geo.json (--color-by-continent --legend)" "$tmp/continent.pdf"
 "$bin" --labels --color-by-pos=3 --legend "$here/tree-aa.json" "$tmp/by-pos.pdf" 500 >/dev/null
 check "tree-aa.json (--color-by-pos=3 --legend)" "$tmp/by-pos.pdf"
 
+# nodes.select {edge_min} — hide the long-edge outlier; OUTLIER must be gone, E1-E3 kept
+printf '{"labels": true, "nodes": [{"select": {"edge_min": 1.0}, "apply": {"hide": true}}]}' > "$tmp/edge-hide.json"
+"$bin" --settings="$tmp/edge-hide.json" "$here/tree-edges.json" "$tmp/edge.pdf" 300 >/dev/null
+check "tree-edges.json (edge_min hides long-edge outlier)" "$tmp/edge.pdf"
+if command -v pdftotext >/dev/null 2>&1; then
+    txt=$(pdftotext "$tmp/edge.pdf" - 2>/dev/null)
+    case "$txt" in
+        *OUTLIER*) echo "FAIL: edge_min did not hide OUTLIER"; exit 1 ;;
+        *E1*) echo "  edge_min: OUTLIER hidden, kept leaves present" ;;
+        *) echo "FAIL: edge_min hid too much"; exit 1 ;;
+    esac
+fi
+
 echo "OK: tal-draw renders valid PDFs"

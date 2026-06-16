@@ -48,12 +48,16 @@ def main():
         "aa-transitions.min_leaves": schema.get("aa_transitions", {}).get("min_leaves") == 5,
         "if/then gated dash-bars (145 in, 999 out)": [b.get("pos") for b in schema.get("dash_bars", [])] == [159, 145],
         "hz-sections (via sub-array)": len(schema.get("hz_sections", [])) == 1,
-        "nodes: hide + positioned-text both mapped": len(schema.get("nodes", [])) == 2,
+        "nodes: hide + positioned-text + edge>= all mapped": len(schema.get("nodes", [])) == 3,
         "apply.text -> positioned label": any(
             n.get("apply", {}).get("text", {}).get("text") == "x"
             and n.get("apply", {}).get("text", {}).get("offset") == [0.02, 0.0]
             for n in schema.get("nodes", [])
         ),
+        "edge >= -> edge_min": any(
+            n.get("select", {}).get("edge_min") == 0.5 for n in schema.get("nodes", [])
+        ),
+        "no ?-disabled-key warning": not any("?" in w for w in warnings),
         "per-clade show:false -> hide": any(
             s.get("name") == "C1" and s.get("hide") is True for s in schema.get("clade_styles", [])
         ),
