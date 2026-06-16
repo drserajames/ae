@@ -126,6 +126,169 @@ def _eval_condition(cond: Any, defines: dict, warnings: list) -> bool:
     return False
 
 
+# --- page-width accounting (port of acmacs-tal Layout::width_relative_to_height) -----
+#
+# acmacs-tal sizes the portrait page from the SUM of every enabled normal-position
+# layout element's `width-to-height-ratio`, in program order, plus the left/right
+# margins, over (1 + top + bottom margins) — see acmacs-tal cc/draw.cc
+# Draw::set_width_to_height_ratio() and cc/layout.cc Layout::width_relative_to_height().
+# Each element contributes:
+#   tree                : its `width-to-height-ratio`
+#   gap                 : `pixels`/canvas-height if given, else `width-to-height-ratio`,
+#                         else the 0.05 default (Gap::prepare; pixels takes precedence)
+#   time-series         : n_slots * slot.width  (slot.width default 0.01; n_slots =
+#                         whole months in [start, end), i.e. end is exclusive)
+#   clades              : explicit `width-to-height-ratio` (the reports always set it),
+#                         else (n_slots+2)*slot.width — approximated when slots unknown
+#   dash-bar / -aa-at / -clades : explicit `width-to-height-ratio`, else the 0.009
+#                         DashBarBase default
+#   hz-section-marker   : explicit `width-to-height-ratio`, else 0.005
+#   tree-only hz-sections, title, draw-aa-transitions, nodes, … : 0 (absolute / no width)
+# Defaults from acmacs-tal: canvas-height 1000, margins {left .025, right 0, top .025,
+# bottom .025} (a `margins` command overrides only the keys it names).
+
+_DASH_BAR_DEFAULT_WIDTH = 0.009   # DashBarBase(tal, 0.009)
+_GAP_DEFAULT_WIDTH = 0.05         # Gap(tal, 0.05)
+_TS_SLOT_DEFAULT_WIDTH = 0.01     # TimeSeries::SlotParameters.width
+_CLADES_SLOT_DEFAULT_WIDTH = 0.02 # Clades::SlotParameters.width
+_HZ_MARKER_DEFAULT_WIDTH = 0.005  # builtin hz-section-marker width-to-height-ratio
+
+
+def _as_number(value: Any, defines: dict) -> float | None:
+    """Resolve a literal or "$ref" to a float, or None if not numeric."""
+    if isinstance(value, str) and value.startswith("$"):
+        value = _resolve(value, defines)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _time_series_slots(cmd: dict, warnings: list) -> int | None:
+    """Number of monthly slots acmacs-tal would draw for a `start`/`end` time-series.
+
+    Months in the half-open range [start, end) (end exclusive), matching
+    time_series::make. Only the monthly interval (the report default) is computed.
+    """
+    start, end = cmd.get("start"), cmd.get("end")
+    interval = cmd.get("interval", "month")
+    if not (isinstance(start, str) and isinstance(end, str)):
+        return None
+    m = re.match(r"^(\d{4})-(\d{2})", start)
+    n = re.match(r"^(\d{4})-(\d{2})", end)
+    if not (m and n):
+        return None
+    months = (int(n.group(1)) * 12 + int(n.group(2))) - (int(m.group(1)) * 12 + int(m.group(2)))
+    if months <= 0:
+        return None
+    if interval in ("month", "monthly"):
+        return months
+    if interval in ("year", "yearly"):
+        return max(1, months // 12)
+    warnings.append(f"time-series interval {interval!r} width not computed — page width approximated")
+    return None
+
+
+def _compute_layout_width(tal: dict, defines: dict, warnings: list) -> float:
+    """Replicate acmacs-tal's page width-to-height ratio for the `.tal` program.
+
+    Walks the `tal` program in order — following string and {"N": "<sub-array>"}
+    sub-array invocations, `if`/`then`/`else`, and skipping ?-disabled entries — and
+    sums each enabled normal-position element's width, then applies the margins.
+    """
+    canvas_height = 1000.0
+    margins = {"left": 0.025, "right": 0.0, "top": 0.025, "bottom": 0.025}
+    width = 0.0
+    visited: set = set()  # sub-array names already walked (so builtin hooks aren't doubled)
+
+    def walk(program) -> None:
+        nonlocal canvas_height, width
+        for item in program:
+            if isinstance(item, str):
+                if item.startswith("?"):
+                    continue
+                if item in tal and isinstance(tal[item], list):
+                    visited.add(item)
+                    walk(tal[item])
+                continue
+            if not isinstance(item, dict) or "N" not in item:
+                continue  # {"?N": …} disabled, or a comment
+            cmd = _substitute(item, defines)
+            name = cmd["N"]
+            if name == "if":
+                branch = item.get("then") if _eval_condition(item.get("condition"), defines, warnings) else item.get("else")
+                if isinstance(branch, list):
+                    walk(branch)
+                continue
+            if name == "canvas":
+                h = _as_number(cmd.get("height"), defines)
+                if h and h > 0:
+                    canvas_height = h
+            elif name == "margins":
+                for key in ("left", "right", "top", "bottom"):
+                    if key in cmd:
+                        val = _as_number(cmd[key], defines)
+                        if val is not None:
+                            margins[key] = val
+            elif name == "tree":
+                w = _as_number(cmd.get("width-to-height-ratio"), defines)
+                if w and w > 0:
+                    width += w
+            elif name == "gap":
+                if "pixels" in cmd:  # pixels override width-to-height-ratio (Gap::prepare)
+                    p = _as_number(cmd["pixels"], defines)
+                    if p is not None:
+                        width += p / canvas_height
+                elif "width-to-height-ratio" in cmd:
+                    w = _as_number(cmd["width-to-height-ratio"], defines)
+                    width += w if w is not None else _GAP_DEFAULT_WIDTH
+                else:
+                    width += _GAP_DEFAULT_WIDTH
+            elif name == "time-series":
+                slot = cmd.get("slot") if isinstance(cmd.get("slot"), dict) else {}
+                slot_width = _as_number(slot.get("width"), defines)
+                if slot_width is None:
+                    slot_width = _TS_SLOT_DEFAULT_WIDTH
+                slots = _time_series_slots(cmd, warnings)
+                if slots is not None:
+                    width += slots * slot_width
+            elif name == "clades":
+                w = _as_number(cmd.get("width-to-height-ratio"), defines)
+                if w is not None:
+                    width += w
+                else:
+                    # auto-sized: (n_slots+2)*slot.width. n_slots needs the tree, which
+                    # we don't have here; the reports always set width-to-height-ratio,
+                    # so this is only an approximation for atypical configs.
+                    slot = cmd.get("slot") if isinstance(cmd.get("slot"), dict) else {}
+                    slot_width = _as_number(slot.get("width"), defines) or _CLADES_SLOT_DEFAULT_WIDTH
+                    width += 2 * slot_width
+            elif name in ("dash-bar", "dash-bar-aa-at", "dash-bar-clades"):
+                w = _as_number(cmd.get("width-to-height-ratio"), defines)
+                width += w if w is not None else _DASH_BAR_DEFAULT_WIDTH
+            elif name == "hz-section-marker":
+                w = _as_number(cmd.get("width-to-height-ratio"), defines)
+                width += w if w is not None else _HZ_MARKER_DEFAULT_WIDTH
+            elif name in tal and isinstance(tal[name], list):
+                visited.add(name)
+                walk(tal[name])  # object-form sub-array invocation {"N": "<sub-array>"}
+            # all other commands (title, draw-aa-transitions, nodes, hz-sections in a
+            # tree-only layout, set, ladderize, …) are absolute / contribute no width
+
+    walk(tal.get("tal", []))
+    # acmacs-tal's builtin tree-only layout (conf/tal.json `layout-tree-only`) draws its
+    # tree/time-series/clades as singletons that the user `.tal` above overrides (settings
+    # find-or-update by element id), but it ALSO invokes three user-overridable column
+    # hooks between the tree and the time-series — `tal-dash-bar-left-1`,
+    # `tal-dash-bar-clades`, `tal-dash-bar-left-2` — that the user program does not invoke
+    # itself. The reports redefine `tal-dash-bar-clades` to add a per-subtype gap (h3 0.015,
+    # h1 0.009; empty for bvic), so its width must be included. Walk any not already visited.
+    for hook in ("tal-dash-bar-left-1", "tal-dash-bar-clades", "tal-dash-bar-left-2"):
+        if hook not in visited and hook in tal and isinstance(tal[hook], list):
+            walk(tal[hook])
+    return (width + margins["left"] + margins["right"]) / (1.0 + margins["top"] + margins["bottom"])
+
+
 def _select(select: dict, warnings: list) -> dict:
     out: dict = {}
     if "seq_id" in select:
@@ -328,25 +491,17 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
     if node_mods:
         schema["nodes"] = node_mods
 
-    # Overall page aspect (width / height). acmacs-tal sizes the canvas width from the
-    # tree's width-to-height-ratio plus the accumulated widths of the right-hand columns
-    # (clades / time-series / dash bars). We approximate that column allowance from which
-    # columns are present so the page comes out portrait (the AD references are ~0.63/0.65
-    # for tree ratios 0.41/0.40). tal-draw lays the columns out internally as fractions of
-    # the page width, so the page ratio = tree ratio + column allowance.
+    # Overall page aspect (width / height). acmacs-tal computes this as the program-order
+    # SUM of every enabled normal-position layout element's width-to-height-ratio plus the
+    # margins (cc/draw.cc Draw::set_width_to_height_ratio + cc/layout.cc
+    # Layout::width_relative_to_height) — not a per-column allowance: column COUNT does not
+    # predict width (h3 has the most dash columns yet is narrower than h1, whose clades
+    # column alone is 0.092 and whose time-series slots are wide). _compute_layout_width
+    # replicates that sum so the page matches the AD references (bvic 0.632, h3 0.649,
+    # h1 0.794). tal-draw lays the columns out internally as fractions of the page width.
     tree_ratio = schema.pop("tree_width_to_height_ratio", None)
-    if tree_ratio:
-        allowance = 0.0
-        if schema.get("clades", {}).get("show"):
-            allowance += 0.07
-        if schema.get("time_series", {}).get("show"):
-            allowance += 0.13
-        allowance += 0.025 * len(schema.get("dash_bars", []))
-        if schema.get("hz_sections"):
-            allowance += 0.03
-        if schema.get("labels"):
-            allowance += 0.10
-        schema["width_to_height_ratio"] = round(tree_ratio + allowance, 4)
+    if tree_ratio:  # a `tree` element with an explicit width-to-height-ratio sets the page
+        schema["width_to_height_ratio"] = round(_compute_layout_width(tal, defines, warnings), 4)
     # de-duplicate warnings, keep order
     seen: set = set()
     schema_warnings = [w for w in warnings if not (w in seen or seen.add(w))]

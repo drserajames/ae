@@ -361,8 +361,8 @@ the `cc/draw/` surface API."*
       (split out a vertical margin + reworked the title/legend/positioned-label coordinates accordingly).
       Positioned-label offsets are now fractions of width (x) / height (y); label `size` a fraction of height.
     - **Aspect from the `.tal`.** `py/ae/tal/settings_v3` reads `{"N":"tree","width-to-height-ratio":r}` and
-      computes the overall page ratio = r + a column allowance derived from which columns are present
-      (clades +0.07, time-series +0.13, dash +0.025 each, hz +0.03, labels +0.10) → bvic≈0.64, h3≈0.63.
+      computes the overall page ratio. *(Originally a per-column allowance — clades +0.07, time-series +0.13,
+      dash +0.025 each, hz +0.03, labels +0.10 — superseded by the faithful program-order sum in #26.)*
     - **Clade-coloured matrix, black edges.** `clades-whocc` → `color_by_clade`; a new `edge_color_for`
       keeps tree edges BLACK under clade colouring while `leaf_color` colours the matrix (time-series dashes
       / clade column) by clade. Only by-continent / by-aa-pos recolour edges (acmacs-tal semantics).
@@ -376,6 +376,31 @@ the `cc/draw/` surface API."*
     full vertical clade legend (#4), geographic world-map inset (#5). **Verify (pending build):** rebuild
     `tal-draw`, run the §reproduce loop, `pdftoppm -png -r 100` + eyeball; confirm bvic/h3 come out ~0.63/0.65
     portrait, edges black, matrix clade-coloured, no purple flood.
+26. **Faithful page-width accounting (from ssm-report #4, 2026-06-16) — DONE.** The #25 per-column
+    *allowance* (fixed increments by which columns are present) was structurally wrong: column COUNT does not
+    predict width — h3 has the most dash columns yet renders narrower than h1 (whose clades column alone is
+    0.092 and whose time-series slots are nearly 2× as wide). The old heuristic left h1 ~19% too narrow
+    (~640 vs the AD reference 794). Replaced by `_compute_layout_width` in
+    [`py/ae/tal/settings_v3.py`](../../py/ae/tal/settings_v3.py), a port of acmacs-tal's actual sizing
+    (cc/draw.cc `Draw::set_width_to_height_ratio` + cc/layout.cc `Layout::width_relative_to_height`):
+    `page_ratio = (Σ enabled normal-position element widths + margin.left + margin.right) / (1 + margin.top
+    + margin.bottom)`. The sum walks the `.tal` program in order (following string + `{"N":"<sub-array>"}`
+    invocations, `if`/`then`/`else`, skipping `?`-disabled), contributing per element: **tree** its
+    `width-to-height-ratio`; **gap** `pixels`/canvas-height (pixels wins) else `width-to-height-ratio` else
+    the 0.05 default; **time-series** `n_slots × slot.width` (slot 0.01 default; `n_slots` = whole months in
+    `[start, end)`, end exclusive); **clades** its explicit `width-to-height-ratio` (the reports always set
+    it) else `(n_slots+2)×slot.width`; **dash-bar / -aa-at / -clades** explicit `width-to-height-ratio` else
+    the 0.009 `DashBarBase` default; **hz-section-marker** 0.005; everything else (title, draw-aa-transitions,
+    tree-only hz-sections, nodes, …) absolute / 0. Margins default `{left .025, right 0, top .025, bottom
+    .025}`, a `margins` command overriding only named keys. **Builtin layout hook:** acmacs-tal's
+    `layout-tree-only` (conf/tal.json) draws tree/time-series/clades as id-keyed singletons the user `.tal`
+    overrides (settings find-or-update), but it *also* invokes three user-overridable column hooks between
+    tree and time-series — `tal-dash-bar-left-1`, `tal-dash-bar-clades`, `tal-dash-bar-left-2` — that the
+    user program never invokes itself; the reports redefine `tal-dash-bar-clades` to add a per-subtype gap
+    (h3 0.015, h1 0.009; empty for bvic), so those are walked (if not already visited) after the user
+    program. **Result:** ae now matches the AD references to <0.1px — bvic **631.6**, h3 **648.6**, h1
+    **794.3** (×1000), vs AD 631.6 / 648.6 / 794.3. **Verify:** `python3 cc/tal/test/test-settings-v3.py`
+    (30/30 green); render the three report `.tal` via `ae.report.trees.make_tree` → `pdfinfo` page size.
 
 **Not a remaining item — `clades-whocc` (clade-from-sequence assignment).** This was struck off
 after auditing the AD source. In acmacs-tal `clades-whocc` is a draw-time settings macro that
