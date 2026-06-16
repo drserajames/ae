@@ -24,20 +24,31 @@ class Downloader:
 
     def from_chain(self, subtype_dir_name: str, chain_name: str | None = None):
         subtype_dir: Path = self.CHAIN_ROOT.joinpath(subtype_dir_name)
-        if chain_name is None:
-            chain_dir = subprocess.check_output(["ssh", "o", f"ls -1d {subtype_dir}/f-* | tail -n 1"]).decode("ascii").strip()
-        else:
-            chain_dir = subtype_dir.joinpath(chain_name)
-        # By default take the latest incremental in the chain. To reproduce a historical report,
-        # pin to an older chain point via $VCM_CHAIN_INCREMENTAL (a substring of the incremental
-        # filename, e.g. "018" or the data-cutoff date "20260129") — then the latest *matching*
-        # file is used instead of the most recent overall.
-        pin = os.environ.get("VCM_CHAIN_INCREMENTAL", "").strip()
-        glob = f"*{pin}*.incremental.ace" if pin else "*.incremental.ace"
-        remote_ace_file = subprocess.check_output(["ssh", "o", f"ls -1 {chain_dir}/{glob} | tail -n 1"]).decode("ascii").strip()
-        ace_remote_sha1 = self._remote_sha1(remote_ace_file)
         local_ace_file = ae.report.dirs.VcmDirs.downloaded_raw_filename()
         local_sha1_filename = local_ace_file.with_suffix(".sha1")
+
+        # Reproduce mode ($VCM_CHAIN_REPRODUCE): fetch the chain file whose sha1 matches this dir's
+        # recorded downloaded.raw.sha1 — i.e. reconstruct the *exact* chart an earlier report used,
+        # regardless of how far the chain has since advanced. Searches newest chain dir first.
+        repro_sha1 = self._local_sha1(local_sha1_filename) if os.environ.get("VCM_CHAIN_REPRODUCE") else None
+        if repro_sha1:
+            cmd = (f"for d in $(ls -1dt {subtype_dir}/f-*); do for f in $d/*.incremental.ace; do "
+                   f"[ \"$(sha1sum \"$f\" | cut -d' ' -f1)\" = {repro_sha1} ] && {{ echo \"$f\"; exit 0; }}; done; done")
+            remote_ace_file = subprocess.check_output(["ssh", "o", cmd]).decode("ascii").strip()
+            if not remote_ace_file:
+                raise RuntimeError(f"reproduce: no chain file with sha1 {repro_sha1} under {subtype_dir}")
+        else:
+            if chain_name is None:
+                chain_dir = subprocess.check_output(["ssh", "o", f"ls -1d {subtype_dir}/f-* | tail -n 1"]).decode("ascii").strip()
+            else:
+                chain_dir = subtype_dir.joinpath(chain_name)
+            # By default take the latest incremental in the chain. To reproduce a historical report,
+            # pin to an older chain point via $VCM_CHAIN_INCREMENTAL (a substring of the incremental
+            # filename, e.g. the data-cutoff date "20260129") — the latest *matching* file is used.
+            pin = os.environ.get("VCM_CHAIN_INCREMENTAL", "").strip()
+            glob = f"*{pin}*.incremental.ace" if pin else "*.incremental.ace"
+            remote_ace_file = subprocess.check_output(["ssh", "o", f"ls -1 {chain_dir}/{glob} | tail -n 1"]).decode("ascii").strip()
+        ace_remote_sha1 = self._remote_sha1(remote_ace_file)
         if not local_ace_file.exists() or not (ace_local_sha1 := self._local_sha1(local_sha1_filename)) or ace_local_sha1 != ace_remote_sha1:
             backup(local_ace_file)
             print(f">>> {local_ace_file} <-- {remote_ace_file}   {ace_remote_sha1}", file=sys.stderr)
