@@ -6,6 +6,7 @@
 
 #include "chart/v3/disconnected-points-handler.hh"
 #include "chart/v3/selected-antigens-sera.hh"
+#include "chart/v3/grid-test.hh"
 
 // ----------------------------------------------------------------------
 
@@ -104,7 +105,7 @@ void ae::chart::v3::Chart::relax(number_of_optimizations_t number_of_optimizatio
     if (const auto num_connected = antigens().size().get() + sera().size().get() - stress.number_of_disconnected(); num_connected < 3)
         throw std::runtime_error{AD_FORMAT("cannot relax: too few connected points: {}", num_connected)};
     // report_disconnected_unmovable(stress.parameters().disconnected, stress.parameters().unmovable);
-    auto rnd = randomizer_plain_from_sample_optimization(*this, stress, start_num_dim, mcb, options.randomization_diameter_multiplier);
+    auto rnd = randomizer_plain_from_sample_optimization(*this, stress, start_num_dim, mcb, options.randomization_diameter_multiplier, options.seed);
 
     const auto first = projections().size();
     for ([[maybe_unused]] const auto opt_no : number_of_optimizations) {
@@ -215,6 +216,22 @@ void ae::chart::v3::Chart::relax_incremental(projection_index source_projection_
     }
 
 } // ae::chart::v3::Chart::relax_incremental
+
+// ----------------------------------------------------------------------
+
+void ae::chart::v3::Chart::move_trapped_points_relax(projection_index projection_no, size_t n_iter)
+{
+    auto& projection = projections()[projection_no];
+    const optimization_options options{};
+    for (size_t iter = 0; iter < n_iter; ++iter) {
+        auto results = grid_test::test(*this, projection_no);
+        if (results.count_trapped_hemisphering() == 0)
+            break;
+        results.apply(projection);
+        projection.relax(*this, options);
+    }
+
+} // ae::chart::v3::Chart::move_trapped_points_relax
 
 // ----------------------------------------------------------------------
 
