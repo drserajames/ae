@@ -203,6 +203,27 @@ void ae::py::chart_v3(pybind11::module_& mdl)
             },
             "column_bases"_a, pybind11::doc("set per-serum forced column bases (log2 scale); length must equal number of sera")) //
         .def(
+            "reduce_column_bases",
+            [](Chart& chart, std::shared_ptr<SelectedSera> sera, double by) {
+                column_bases cb = chart.forced_column_bases();
+                if (cb.empty())
+                    cb = chart.column_bases(minimum_column_basis{"none"});
+                if (sera) {
+                    for (const auto sr : sera->indexes)
+                        cb.set(sr, cb[sr] - by);
+                }
+                else {
+                    for (const auto sr : cb.size())
+                        cb.set(sr, cb[sr] - by);
+                }
+                chart.forced_column_bases(cb);
+            },
+            "sera"_a = nullptr, "by"_a = 1.0,
+            pybind11::doc("Reduce the forced column basis (log2 units) of the selected sera by `by` (default 1.0); "
+                          "sera=None reduces all sera. Starts from the existing forced column bases, or, when none "
+                          "are set, the chart's computed minimum ('none') column bases. Sets the forced bases only "
+                          "-- call relax() afterwards to re-optimise the map under the reduced bases.")) //
+        .def(
             "column_bases", [](const Chart& chart, std::string_view mcb) { return chart.column_bases(minimum_column_basis{mcb}).data(); }, "minimum_column_basis"_a = "none") //
 
         .def("info", [](std::shared_ptr<Chart> chart) { return new InfoRef{chart}; }) //
