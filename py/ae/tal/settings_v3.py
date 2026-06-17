@@ -190,13 +190,22 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 if item.startswith("?"):
                     continue                                          # "?name" = disabled reference, skip silently
                 if item == "clades-whocc":
-                    schema.setdefault("clades", {})["show"] = True   # show the clade column (clades already in the tree)
                     # AD's WHOCC builtin colours the tree + time-series matrix by *continent*
-                    # (its `{"N":"tree","color-by":"continent"}` + time-series color-by). The user
-                    # .tal relies on that builtin default, so mirror it here (ae has the exact AD
-                    # continent palette). Not colour-by-clade — clades are the labelled column.
+                    # and shows the continent legend (its `{"N":"tree","color-by":"continent",
+                    # "legend":{"show":true}}`). Set those first (ae has the exact AD continent
+                    # palette) — NOT colour-by-clade: the clades are the labelled right column.
                     schema.setdefault("color_by_continent", True)
-                elif item in tal and isinstance(tal[item], list):
+                    schema.setdefault("legend", {})["show"] = True
+                    if item in tal and isinstance(tal[item], list):
+                        # The report .tal usually DEFINES its own `clades-whocc` sub-array — a
+                        # `clades` command carrying the curated `per-clade` set (which clades to
+                        # show + their display names). Run it so that curation reaches the column
+                        # (a hardcoded builtin would have dropped it).
+                        run(tal[item])
+                    else:
+                        schema.setdefault("clades", {})["show"] = True  # builtin fallback: just show the column
+                    continue
+                if item in tal and isinstance(tal[item], list):
                     run(tal[item])                                    # named sub-array
                 else:
                     warnings.append(f"unknown built-in / sub-array {item!r} ignored")
@@ -223,7 +232,11 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
             elif name == "clades":
                 clades = schema.setdefault("clades", {})
                 clades["show"] = True
-                schema["color_by_clade"] = True
+                # The clades command draws the labelled column; it only recolours the leaves
+                # when no explicit leaf colouring is in force. Under the WHOCC continent reports
+                # (color_by_continent already set) the matrix stays continent-coloured.
+                if not schema.get("color_by_continent"):
+                    schema["color_by_clade"] = True
                 for pc in cmd.get("per-clade", []):
                     if not isinstance(pc, dict) or not pc.get("name"):
                         continue
@@ -232,8 +245,10 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                         style["hide"] = True
                     if "color" in pc:
                         style["color"] = pc["color"]
-                    if isinstance(pc.get("label"), dict) and "text" in pc["label"]:
-                        style["display_name"] = pc["label"]["text"]
+                    if pc.get("display_name"):                       # explicit display-name override
+                        style["display_name"] = pc["display_name"]
+                    elif isinstance(pc.get("label"), dict) and "text" in pc["label"]:
+                        style["display_name"] = pc["label"]["text"]  # label.text doubles as the display name
                     if len(style) > 1:  # name + at least one styling key
                         schema.setdefault("clade_styles", []).append(style)
             elif name == "time-series":

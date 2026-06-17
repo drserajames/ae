@@ -2,6 +2,7 @@
     "_": "synthetic acmacs-tal settings-v3 config for test-settings-v3.py (no real data). Note the trailing commas + ?N disabled entries, which the relaxed loader must tolerate.",
     "tal": [
         {"N": "canvas", "height": 600},
+        "clades-whocc",
         {"N": "tree", "color-by": "continent", "legend": {"show": true}},
         {"N": "clades", "per-clade": [
             {"name": "C1", "show": false},
@@ -25,6 +26,13 @@
     "hz": [
         {"N": "hz-sections", "sections": [
             {"first": "A", "last": "C", "label": "S1", "show": true},
+        ]},
+    ],
+    "_clades-whocc": "report .tal defines its OWN clades-whocc sub-array (a clades command with the curated per-clade set); the translator must RUN it, not treat clades-whocc as a hardcoded builtin",
+    "clades-whocc": [
+        {"N": "clades", "all-clades": {"show": true}, "per-clade": [
+            {"name": "WC_HIDDEN", "show": false},
+            {"name": "WC_DISP", "display_name": "wc", "label": {"rotation_degrees": 90}},
         ]},
     ]
 }
