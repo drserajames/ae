@@ -239,6 +239,62 @@ per-map/regeneration effort is the committed `ae.utils.org` ragged-row fix.
 
 ---
 
+## Report reproduction from server inputs (download stage)
+
+Done 2026-06-16/17 — reproducing the *input charts* the `2026-0223-ssm` report used (a deeper
+test than re-rendering: re-fetch/rebuild the source charts on `ae.report`). The per-map `0do
+download` (`commander.download` → `ae.report.download.from_chain`) SSHes to server `o` and pulls
+from the chart chain `/syn/eu/ac/results/chains-202105/<oldname>/f-*/*.incremental.ace`.
+
+**Two reproduce knobs added to `from_chain`** (committed; backward-compatible, default = latest):
+- **`$VCM_CHAIN_INCREMENTAL`** — pin to a chain file by filename substring (e.g. the data-cutoff
+  date `20260129`).
+- **`$VCM_CHAIN_REPRODUCE`** — read the dir's recorded `downloaded.raw.sha1` and fetch the chain
+  `*.incremental.ace` whose sha1 **matches** it (searches newest chain dir first). This
+  reconstructs the *exact* chart an old report used, regardless of how far the chain has advanced.
+
+**Results by dir type:**
+- **15 chain dirs — ✅ byte-faithful.** `$VCM_CHAIN_REPRODUCE` reconstructed each dir's exact Feb
+  chart (all 15 sha1-MATCH); cutoff dates span Jan 2023 → Feb 2026 per lab (so a single date pin
+  can't work — sha1-matching is the only correct mechanism). The server pre-builds and stores these
+  charts, so they're addressable by content.
+- **3 simple-merge custom dirs (bvic-cdc, bvic-niid, h3-hint-cdc) — content-faithful.** Their
+  `download` rebuilds locally from WHO CC tables (`whocc_table_dir()/*.ace`) + `relax`. The local
+  table set has drifted (e.g. bvic-cdc: 128 in-window vs the report's 97), and the report used a
+  specific set — recovered by **extracting the exact source-table dates from the frozen chart's
+  `info().source(i).date()`** and rebuilding a Feb-only tables dir (symlinks). Re-merged + made the
+  maps: same clades / layout / vaccine labels, with **fewer antigens per clade** purely from
+  **seqdb clade-drift** (B/Vic V1A.3 → newer "C" names: bvic-cdc 1882 vs 2130 ≈ −12%, bvic-niid −4%,
+  h3-hint-cdc −1%). Coordinates differ (stochastic `relax`).
+- **2 incremental/special dirs — not reconstructable from inputs.** `bvic-vidrl` is an *incremental*
+  merge (608 layers on the previous chart, no recorded flat source list); `h3-hi-guinea-pig-big-cdc`
+  is a tiny 15-antigen special chart with no recorded source. Frozen `downloaded.ace` is the faithful
+  artifact for both.
+
+**seqdb vs clades.json (the custom-dir drift source).** Empirically, `clades.json` is **identical**
+to February (it *is* git-tracked in `acmacs-data`; commit `28ff8c4` 2026-02-23 == current) and makes
+**no** difference (1924/2130 either way). The drift is entirely **seqdb** (its baked clade labels
+changed; not git-tracked — `seqdb*.json.xz` are gitignored, the local copy is dated May 15, no
+recoverable Feb snapshot locally; server SSH for a dated snapshot was timing out). A Feb seqdb would
+close the custom-dir gap; the owner will look for a backup.
+
+**bvic-vidrl's manual column-basis step (the reason it diverges further).** Its frozen chart has
+**one serum's column basis reduced by 1** — `B/AUSTRIA/1359417/2021 A9878`, computed `6.0` → forced
+`5.0` (the previous/1-back chart has none reduced, so it was done in *this* report). This is a manual
+intervention **not** in the automated `download` path, so the pipeline can't replay it. Replaying it
+needs the **forced-column-bases Python setter** — `ad-port`'s C++ supports it (`column_bases::add` +
+`Chart::forced_column_bases(cb)`) but the **binding is disabled** (commented, stale `forced_column_bases_modify`
+ref at `cc/py/chart-v3.cc:434`). The **`fixed-column-bases`/`racmacs-fixes` branch** (other agent)
+already has the working `set_forced_column_bases` binding **and** a seeded `relax()` — so this replay
+belongs there (or needs that binding enabled on ad-port). *(Note: a seed makes future relaxes
+reproducible but can't match Feb's original unseeded relax — coordinates differ regardless.)*
+
+**Net:** the `ae.report` download stage **works and reproduces** the report inputs; what's
+*byte-faithful* (15 chain dirs) vs *content-faithful* (3 merge dirs, seqdb-reduced) vs *not
+reconstructable* (2 incremental/special) is a property of how each chart was built, not of `ae`.
+
+---
+
 ## TL;DR
 
 - The WHO CC seasonal report is **already built on `ae`** today — by a tool called
