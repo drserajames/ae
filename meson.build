@@ -32,7 +32,7 @@ endif
 # ----------------------------------------------------------------------
 
 cmake = import('cmake')
-lexy = cmake.subproject('lexy').dependency('lexy_core')
+lexy = cmake.subproject('lexy', cmake_options: ['-DLEXY_BUILD_TESTS=OFF', '-DLEXY_BUILD_EXAMPLES=OFF', '-DLEXY_BUILD_BENCHMARKS=OFF']).dependency('lexy_core')
 
 subproject('xlnt')
 xlnt = dependency('xlnt')
