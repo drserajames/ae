@@ -105,4 +105,12 @@ if command -v pdftotext >/dev/null 2>&1; then
     esac
 fi
 
+# .names output — leaf names in draw order (one per line); and ladderize reorders them
+"$bin" "$here/tree-clades.json" "$tmp/order.names" >/dev/null
+[ "$(tr '\n' ' ' < "$tmp/order.names")" = "A B C D E " ] || { echo "FAIL: .names draw order wrong: $(tr '\n' ' ' < "$tmp/order.names")"; exit 1; }
+echo "  .names: A B C D E (draw order)"
+"$bin" --ladderize=max-edge-length "$here/tree-clades.json" "$tmp/ladder.names" >/dev/null
+[ "$(cat "$tmp/order.names")" != "$(cat "$tmp/ladder.names")" ] || { echo "FAIL: --ladderize=max-edge-length did not reorder"; exit 1; }
+echo "  ladderize: max-edge-length reorders leaves ($(tr '\n' ' ' < "$tmp/ladder.names"))"
+
 echo "OK: tal-draw renders valid PDFs"

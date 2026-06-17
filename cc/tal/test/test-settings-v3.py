@@ -51,7 +51,8 @@ def main():
             for m in schema.get("mrca_labels", [])
         ),
         "mrca_label without bounds skipped (only the well-formed one)": len(schema.get("mrca_labels", [])) == 1,
-        "if/then gated dash-bars (145 in, 999 out)": [b.get("pos") for b in schema.get("dash_bars", [])] == [159, 145],
+        "if/then gated + for-each dash-bars (145 in, 999 out, 7/8 from for-each)": [b.get("pos") for b in schema.get("dash_bars", [])] == [159, 145, 7, 8],
+        "ladderize method -> schema": schema.get("ladderize") == "max-edge-length",
         "hz-sections (via sub-array)": len(schema.get("hz_sections", [])) == 1,
         "nodes: hide + positioned-text + edge>= all mapped": len(schema.get("nodes", [])) == 3,
         "apply.text -> positioned label": any(

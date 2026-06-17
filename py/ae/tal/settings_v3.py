@@ -518,7 +518,35 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                         warnings.append(f"tree color-by {cbn!r} not supported — skipped")
                 if isinstance(cmd.get("legend"), dict) and cmd["legend"].get("show"):
                     schema.setdefault("legend", {})["show"] = True
-            elif name in ("margins", "gap", "node-id-size", "ladderize", "set"):
+            elif name == "ladderize":
+                # tree leaf ordering. AD ladderizes children by subtree size
+                # (number-of-leaves, default) or longest subtree edge (max-edge-length);
+                # "none" preserves the .tjz order. tal-draw applies it before layout.
+                method = cmd.get("method")
+                if isinstance(method, str) and method in ("none", "number-of-leaves", "max-edge-length"):
+                    schema["ladderize"] = method
+                elif isinstance(method, str) and method.startswith("$"):
+                    pass  # unresolved $define (no -D given) — leave as no-op (the reports default "none")
+                elif method:
+                    warnings.append(f"ladderize method {method!r} not supported — skipped")
+            elif name == "for-each":
+                # config-expansion loop: bind $var to each of `values` and run `do`.
+                # Use the raw item so $var refs inside `do` resolve per-iteration.
+                var = item.get("var", "name")
+                values = _substitute(item.get("values"), defines)
+                do = item.get("do")
+                if isinstance(values, list) and isinstance(do, list):
+                    had, saved = var in defines, defines.get(var)
+                    for value in values:
+                        defines[var] = value
+                        run(do)
+                    if had:
+                        defines[var] = saved
+                    else:
+                        defines.pop(var, None)
+                else:
+                    warnings.append("for-each needs array 'values' and 'do' — skipped")
+            elif name in ("margins", "gap", "node-id-size", "set"):
                 pass  # no tal-draw equivalent / no-op for a one-off render
             else:
                 warnings.append(f"command {name!r} not handled — skipped")

@@ -1,10 +1,12 @@
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "ext/fmt.hh"
 #include "tal/draw-tree.hh"
+#include "tal/layout.hh"
 #include "tal/settings.hh"
 #include "tree/tree.hh"
 
@@ -52,6 +54,8 @@ int main(int argc, char* const argv[])
                 params.title = std::string{arg.substr(8)};
             else if (arg.substr(0, 24) == "--width-to-height-ratio=")
                 params.width_to_height_ratio = std::stod(std::string{arg.substr(24)});
+            else if (arg.substr(0, 12) == "--ladderize=")
+                params.ladderize = std::string{arg.substr(12)};
             else if (arg.substr(0, 11) == "--settings=")
                 settings_file = arg.substr(11);
             else
@@ -62,7 +66,8 @@ int main(int argc, char* const argv[])
                        "Usage: {} [--settings=config.json] [--labels] [--color-by-clade] [--clades]\n"
                        "          [--color-by-continent] [--color-by-pos=N]\n"
                        "          [--time-series] [--interval=year|month|week|day] [--legend] [--geo-inset] [--aa-transitions]\n"
-                       "          [--title=TEXT] <tree.newick|tree.json[.xz]> <output.pdf> [image-size-px]\n"
+                       "          [--ladderize=none|number-of-leaves|max-edge-length]\n"
+                       "          [--title=TEXT] <tree.newick|tree.json[.xz]> <output.pdf|.names> [image-size-px]\n"
                        "  --settings=FILE loads all draw options (incl. per-clade colour/name overrides) from\n"
                        "  a JSON config; other flags are ignored when it is given (image-size-px still overrides).\n",
                        argv[0]);
@@ -75,10 +80,26 @@ int main(int argc, char* const argv[])
         if (positional.size() > 2)
             image_size = std::stod(std::string{positional[2]});
         const auto tree = ae::tree::load(std::filesystem::path{positional[0]});
-        const std::size_t labels_hidden = ae::tal::export_tree_pdf(*tree, std::filesystem::path{positional[1]}, image_size, params);
-        fmt::print("Wrote {} ({:.0f}x{:.0f}, {} leaves{}{}{}{})\n", positional[1], image_size, image_size, tree->number_of_leaves(), params.labels ? ", labelled" : "",
-                   params.clades ? ", clades" : "", params.time_series ? ", time-series" : "",
-                   labels_hidden > 0 ? fmt::format(", {} labels hidden to avoid overlap", labels_hidden) : std::string{});
+        const std::filesystem::path output{positional[1]};
+        if (output.extension() == ".names") {
+            // text dump of the shown leaf names in draw (top-to-bottom) order — AD's `.names`/`/names`
+            // output. Apply ladderize first so the order matches what a PDF render would draw.
+            if (params.ladderize == "number-of-leaves")
+                tree->ladderize(ae::tree::Tree::ladderize_method::number_of_leaves);
+            else if (params.ladderize == "max-edge-length")
+                tree->ladderize(ae::tree::Tree::ladderize_method::max_edge_length);
+            const auto layout = ae::tal::compute_layout(*tree);
+            std::ofstream out{output};
+            for (const auto& leaf : layout.leaves)
+                out << leaf.name << '\n';
+            fmt::print("Wrote {} ({} leaf names, draw order)\n", positional[1], layout.leaves.size());
+        }
+        else {
+            const std::size_t labels_hidden = ae::tal::export_tree_pdf(*tree, output, image_size, params);
+            fmt::print("Wrote {} ({:.0f}x{:.0f}, {} leaves{}{}{}{})\n", positional[1], image_size, image_size, tree->number_of_leaves(), params.labels ? ", labelled" : "",
+                       params.clades ? ", clades" : "", params.time_series ? ", time-series" : "",
+                       labels_hidden > 0 ? fmt::format(", {} labels hidden to avoid overlap", labels_hidden) : std::string{});
+        }
     }
     catch (std::exception& err) {
         fmt::print(stderr, "ERROR: {}\n", err.what());

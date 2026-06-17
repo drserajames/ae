@@ -199,9 +199,16 @@ void ae::tree::Tree::ladderize(ladderize_method method)
         }
     };
 
+    const auto by_max_edge_length = [this, compare_max_edge_length]() {
+        for (auto ref : visit(tree_visiting::inodes_post)) {
+            auto& inode = *ref.inode();
+            std::sort(inode.children.begin(), inode.children.end(), compare_max_edge_length);
+        }
+    };
+
     switch (method) {
         case ladderize_method::max_edge_length:
-            AD_WARNING("Ladderizing by max-edge-length Not implemented");
+            by_max_edge_length();
             break;
         case ladderize_method::number_of_leaves:
             by_number_of_leaves();

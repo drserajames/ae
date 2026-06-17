@@ -51,6 +51,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         *image_size = get_double(config["image_size"], *image_size);
 
     params.width_to_height_ratio = get_double(config["width_to_height_ratio"], 0.0);
+    params.ladderize = get_string(config["ladderize"]);
     params.title = get_string(config["title"]);
     params.labels = get_bool(config["labels"]);
     params.labels_avoid_collisions = get_bool(config["labels_avoid_collisions"], true);

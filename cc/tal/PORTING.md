@@ -131,8 +131,8 @@ the `cc/draw/` surface API."*
    horizontal = cumulative edge (reuses `Tree::calculate_cumulative()`). Iterative
    post-order (no recursion → safe on deep ladderized trees). Exposed as `ae_backend.tal`
    ([`cc/py/tal.cc`](../py/tal.cc)). Verified by [`test/test-layout.py`](test/test-layout.py).
-3. Ladderize is in `cc/tree/` (`number-of-leaves` done; `max-edge-length` is a stub —
-   complete it when needed).
+3. Ladderize is in `cc/tree/` (`number-of-leaves` and `max-edge-length` both done — 2026-06-17;
+   wired through `tal-draw` via the `ladderize` setting / `--ladderize=`).
 4. AA-transition labelling — `cc/tree/aa-transitions.cc` already ports a consensus method;
    reconcile with acmacs-tal's versioned algorithms when richer labelling is needed.
 5. **Clade sections — DONE.** [`clades.hh`](clades.hh)/[`clades.cc`](clades.cc),
@@ -349,8 +349,15 @@ the `cc/draw/` surface API."*
     / `--columns`) whenever any grid option is given; the plain side-by-side path is unchanged.
     **Verify:** `sh cc/tal/test/test-signature-page-grid.sh` (tree + 3 captioned maps, 2-col grid,
     title → one landscape A4 page; pdftotext confirms title + all captions present).
-24. **Low-value tail:** `for-each` loops, `max-edge-length` ladderize, other `tal` outputs
-    (`.names`/`.html`).
+24. **Low-value tail — mostly DONE (2026-06-17).** `for-each` loops (`settings_v3` `run()` binds
+    `$var` over `values` and runs `do` per iteration); `ladderize` (`max-edge-length` was a stub in
+    `cc/tree/tree.cc` `Tree::ladderize` — implemented via the existing `compare_max_edge_length`
+    comparator, and wired through `settings_v3`→`settings.cc`→`draw-tree.cc` `tree.ladderize()` before
+    `compute_layout`, + `--ladderize=`); `.names` output (`tal-draw out.names` writes shown leaf names
+    in draw order via `compute_layout`). **Verify:** `cc/tal/test/test-settings-v3.py` (for-each
+    expansion + ladderize schema) + `test-draw-tree.sh` (`.names` draw order, `--ladderize=max-edge-length`
+    reorders). **Only `.html`** interactive tree output remains deferred (a separate renderer port that
+    overlaps kateri; no seasonal-report need).
 25. **Report-tree fidelity (from ssm-report #4 (b), 2026-06-15) — IN PROGRESS (code landed, build/verify
     pending).** Rendering the real report `.tal` (`{bvic.after-2021, h3.after-2021}.tal`) via
     `ae.report.trees` → `tal-draw` produced *square* PDFs with a purple aa-transition flood, monochrome

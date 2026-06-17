@@ -25,6 +25,10 @@
         {"N": "if", "condition": {"not": "$enable_extra"}, "then": [
             {"N": "dash-bar-aa-at", "pos": 999},
         ]},
+        {"N": "ladderize", "method": "max-edge-length"},
+        {"N": "for-each", "var": "q", "values": [7, 8], "do": [
+            {"N": "dash-bar-aa-at", "pos": "$q"},
+        ]},
         {"?N": "gap", "width-to-height-ratio": 0.02},
     ],
     "hz": [

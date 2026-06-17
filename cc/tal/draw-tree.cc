@@ -160,6 +160,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         }
     }
 
+    // --- ladderize (reorder children before layout). "none"/"" keep the .tjz order. ---
+    if (params.ladderize == "number-of-leaves")
+        tree.ladderize(Tree::ladderize_method::number_of_leaves);
+    else if (params.ladderize == "max-edge-length")
+        tree.ladderize(Tree::ladderize_method::max_edge_length);
+
     const TreeLayout layout = compute_layout(tree);
     if (layout.leaves.empty())
         throw std::runtime_error{"cannot draw tree: no shown leaves"};
