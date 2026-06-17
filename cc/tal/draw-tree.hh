@@ -63,6 +63,21 @@ namespace ae::tal
         double size{0.0};           // font size as fraction of image_size; 0 -> default leaf font
     };
 
+    // A curated on-tree label placed at an internal node (acmacs-tal `draw-aa-transitions`
+    // `per-node`). AD selects the node by its draw-time `node_id`, which ae's tree does not
+    // carry — instead we identify the node as the MRCA of the `first`/`last` leaf seq_ids the
+    // entry also records (MRCA(first,last) == that node), and draw the label at its position.
+    struct MrcaLabel
+    {
+        std::string first{};        // seq_id of the node's first leaf
+        std::string last{};         // seq_id of the node's last leaf
+        std::string text{};         // label string (the aa-transition / clade name)
+        double offset_x{0.0};       // x offset from the node, fraction of image_size
+        double offset_y{0.0};       // y offset, fraction of image_size (down is positive)
+        std::string color{};        // "" -> black
+        double size{0.0};           // font size as fraction of image_size; 0 -> default font
+    };
+
     struct NodeApply
     {
         std::optional<bool> hide{};       // hide the node (and its subtree) from the layout
@@ -127,6 +142,7 @@ namespace ae::tal
         std::vector<NodeMod> node_mods{};                 // select/apply mods, applied in order
         std::vector<HzSection> hz_sections{};             // horizontal section bands (left marker column)
         std::vector<DashBarAAAt> dash_bars{};             // per-leaf aa-at-position dash columns
+        std::vector<MrcaLabel> mrca_labels{};             // curated on-tree labels at MRCA(first,last) nodes (draw-aa-transitions per-node)
     };
 
     // Render `tree` to a PDF whose height is `image_size` device units. The width is

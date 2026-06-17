@@ -46,6 +46,11 @@ def main():
         "time-series.end": schema.get("time_series", {}).get("end") == "2021-01",
         "aa-transitions imported (not computed)": schema.get("aa_transitions", {}).get("compute") is False,
         "aa-transitions.min_leaves": schema.get("aa_transitions", {}).get("min_leaves") == 5,
+        "draw-aa-transitions per-node -> mrca_label (?first/?last bounds)": any(
+            m.get("first") == "A" and m.get("last") == "C" and m.get("text") == "T1K" and m.get("offset") == [0.01, 0.0]
+            for m in schema.get("mrca_labels", [])
+        ),
+        "mrca_label without bounds skipped (only the well-formed one)": len(schema.get("mrca_labels", [])) == 1,
         "if/then gated dash-bars (145 in, 999 out)": [b.get("pos") for b in schema.get("dash_bars", [])] == [159, 145],
         "hz-sections (via sub-array)": len(schema.get("hz_sections", [])) == 1,
         "nodes: hide + positioned-text + edge>= all mapped": len(schema.get("nodes", [])) == 3,

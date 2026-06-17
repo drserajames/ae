@@ -2,9 +2,11 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "tal/draw-tree.hh"
@@ -646,6 +648,47 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double tx = dev_x(found->second.first) + label.offset_x * width;
         const double ty = dev_y(found->second.second) + label.offset_y * height + label_fs * 0.3;
         pdf.text(tx, ty, label.text, label_fs, color, /*center=*/false);
+    }
+
+    // --- curated on-tree labels at MRCA(first,last) internal nodes (acmacs-tal draw-aa-transitions
+    //     per-node). AD selects by draw-time node_id; ae instead finds the node as the MRCA of the
+    //     entry's first/last leaf seq_ids (MRCA(first,last) IS that node) and labels its position. ---
+    if (!params.mrca_labels.empty()) {
+        std::unordered_map<std::string, node_index_base_t> leaf_by_name; // shown leaves only
+        leaf_by_name.reserve(layout.leaves.size());
+        for (const auto& ln : layout.leaves)
+            leaf_by_name.emplace(ln.name, ln.node);
+        const auto root = *Tree::root_index();
+        const auto mrca = [&tree, root](node_index_base_t a, node_index_base_t b) -> std::optional<node_index_base_t> {
+            std::unordered_set<node_index_base_t> ancestors;
+            for (node_index_t n{a};;) { ancestors.insert(*n); if (*n == root) break; n = tree.parent(n); }
+            for (node_index_t m{b};;) {
+                if (ancestors.find(*m) != ancestors.end()) return *m;
+                if (*m == root) return std::nullopt;
+                m = tree.parent(m);
+            }
+        };
+        const double mrca_fs = std::clamp(vstep * 0.9, 4.0, 11.0);
+        for (const auto& label : params.mrca_labels) {
+            const auto fi = leaf_by_name.find(label.first);
+            const auto li = leaf_by_name.find(label.last);
+            if (fi == leaf_by_name.end() || li == leaf_by_name.end())
+                continue; // first/last leaf not shown
+            const auto node = mrca(fi->second, li->second);
+            if (!node)
+                continue;
+            const auto found = pos.find(*node);
+            if (found == pos.end())
+                continue;
+            const double fs = label.size > 0.0 ? label.size * height : mrca_fs;
+            Color color = BLACK;
+            if (!label.color.empty()) {
+                try { color = Color{label.color}; } catch (const std::exception&) { }
+            }
+            const double tx = dev_x(found->second.first) + label.offset_x * width;
+            const double ty = dev_y(found->second.second) + label.offset_y * height + fs * 0.3;
+            pdf.text(tx, ty, label.text, fs, color, /*center=*/false);
+        }
     }
 
     return labels_hidden;

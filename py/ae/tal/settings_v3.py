@@ -443,11 +443,32 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 # stored transitions) shows transitions.
                 pernode = cmd.get("per-node")
                 if isinstance(pernode, list):
-                    n_curated = sum(1 for e in pernode if isinstance(e, dict) and e.get("show", True) and e.get("name"))
-                    if n_curated:
-                        warnings.append(
-                            f"draw-aa-transitions: {n_curated} curated per-node label(s) select by AD "
-                            "node_id, which ae's tree does not carry — labels skipped (no equivalent yet)")
+                    # AD selects each curated label's node by draw-time node_id, which ae's tree
+                    # doesn't carry — but every entry ALSO records its node's first/last leaf seq_ids
+                    # (usually as `?first`/`?last`, `?`-disabled). MRCA(first,last) IS that node, so
+                    # emit an `mrca_label`; tal-draw finds the MRCA and places the label there.
+                    skipped = 0
+                    for e in pernode:
+                        if not isinstance(e, dict) or not e.get("show", True) or not e.get("name"):
+                            continue
+                        first = e.get("first") or e.get("?first")
+                        last = e.get("last") or e.get("?last")
+                        if not (isinstance(first, str) and first and isinstance(last, str) and last):
+                            skipped += 1
+                            continue
+                        ml = {"first": first, "last": last, "text": e["name"]}
+                        lab = e.get("label")
+                        if isinstance(lab, dict):
+                            off = lab.get("offset")
+                            if isinstance(off, list) and len(off) == 2:
+                                ml["offset"] = off
+                            if "color" in lab:
+                                ml["color"] = lab["color"]
+                            if isinstance(lab.get("scale"), (int, float)):
+                                ml["size"] = lab["scale"]
+                        schema.setdefault("mrca_labels", []).append(ml)
+                    if skipped:
+                        warnings.append(f"draw-aa-transitions: {skipped} per-node label(s) lacked first/last bounds — skipped")
                 if cmd.get("method", "imported") == "imported":
                     aa = schema.setdefault("aa_transitions", {})
                     aa["show"] = True

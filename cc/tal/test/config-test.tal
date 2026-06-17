@@ -10,7 +10,11 @@
         ]},
         "hz",
         {"N": "time-series", "start": "2020-01", "end": "2021-01"},
-        {"N": "draw-aa-transitions", "method": "imported", "minimum-number-leaves-in-subtree": 5},
+        {"N": "draw-aa-transitions", "method": "imported", "minimum-number-leaves-in-subtree": 5,
+         "per-node": [
+            {"name": "T1K", "show": true, "node_id": "3.5", "?first": "A", "?last": "C", "label": {"offset": [0.01, 0.0]}},
+            {"name": "no-bounds", "show": true, "node_id": "9.9"}
+         ]},
         {"N": "dash-bar-aa-at", "pos": 159},
         {"N": "nodes", "select": {"seq_id": "A"}, "apply": {"hide": true}},
         {"N": "nodes", "select": {"seq_id": "B"}, "apply": {"text": {"text": "x", "offset": [0.02, 0.0]}}},

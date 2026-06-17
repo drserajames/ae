@@ -367,9 +367,15 @@ the `cc/draw/` surface API."*
       keeps tree edges BLACK under clade colouring while `leaf_color` colours the matrix (time-series dashes
       / clade column) by clade. Only by-continent / by-aa-pos recolour edges (acmacs-tal semantics).
     - **No aa-transition flood.** `draw-aa-transitions` was being translated to consensus `compute=True`,
-      labelling every inode (the purple). Now compute is off; the curated `per-node` labels — which select by
-      AD's draw-time `node_id` "vertical.horizontal" — are reported as a warning because ae's tree carries no
-      such id (only a single integer `"I"` in the `.tjz`). Matching them needs AD's exact node-numbering ported.
+      labelling every inode (the purple). Now compute is off; the curated `per-node` labels are placed (see below).
+    - **Curated `draw-aa-transitions` labels — DONE (MRCA).** Each `per-node` entry selects its node by AD's
+      draw-time `node_id` "vertical.horizontal", which ae's `.tjz` lacks — BUT every entry also records that
+      node's first/last leaf seq_ids (as `?first`/`?last`, `?`-disabled). Since **MRCA(first,last) IS that
+      node**, the translator emits an `MrcaLabel{first,last,text,offset,…}` and `tal-draw` finds the MRCA (leaf
+      lookup + `Tree::parent` walk in `draw-tree.cc`) and draws the label there — no AD node-numbering port
+      needed. 33/44/40 labels render on bvic/h3/h1. `MrcaLabel` in `draw-tree.{hh,cc}`, parsed in `settings.cc`,
+      emitted by `settings_v3`. **Verify:** `sh cc/tal/test/test-draw-tree.sh` (MRCA(A,B) case) +
+      `cc/tal/test/test-settings-v3.py`.
     - **Translator nits.** `?`-prefixed string refs (e.g. `"?dash-bars"`) skipped silently (were recursing
       into the disabled array); per-leaf name labels default off for these dense trees.
     **Still open:** #2 curated per-node aa-transition labels (need node_id), exact WHOCC clade hex palette,

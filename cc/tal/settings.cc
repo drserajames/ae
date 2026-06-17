@@ -163,6 +163,23 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         }
     }
 
+    if (const auto& labels = config["mrca_labels"]; labels.is_array()) {
+        const auto& array = labels.array();
+        for (std::size_t i = 0; i < array.size(); ++i) {
+            const auto& entry = array[i];
+            if (!entry.is_object())
+                continue;
+            MrcaLabel label{.first = get_string(entry["first"]), .last = get_string(entry["last"]), .text = get_string(entry["text"]),
+                            .color = get_string(entry["color"]), .size = get_double(entry["size"], 0.0)};
+            if (const auto& offset = entry["offset"]; offset.is_array() && offset.array().size() == 2) {
+                label.offset_x = get_double(offset.array()[0], 0.0);
+                label.offset_y = get_double(offset.array()[1], 0.0);
+            }
+            if (!label.first.empty() && !label.last.empty() && !label.text.empty())
+                params.mrca_labels.push_back(std::move(label));
+        }
+    }
+
     return params;
 
 } // ae::tal::load_draw_settings

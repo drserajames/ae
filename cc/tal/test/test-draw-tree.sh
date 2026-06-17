@@ -93,4 +93,16 @@ if command -v pdftotext >/dev/null 2>&1; then
     esac
 fi
 
+# mrca_labels — curated on-tree label placed at MRCA(first,last) (draw-aa-transitions per-node).
+# tree-clades.json: leaves A,B share a parent; a label at MRCA(A,B) must render its text.
+printf '{"labels": true, "mrca_labels": [{"first": "A", "last": "B", "text": "MRCALBL"}]}' > "$tmp/mrca.json"
+"$bin" --settings="$tmp/mrca.json" "$here/tree-clades.json" "$tmp/mrca.pdf" 400 >/dev/null
+check "tree-clades.json (mrca_labels at MRCA(A,B))" "$tmp/mrca.pdf"
+if command -v pdftotext >/dev/null 2>&1; then
+    case "$(pdftotext "$tmp/mrca.pdf" - 2>/dev/null)" in
+        *MRCALBL*) echo "  mrca_labels: label placed at the MRCA node" ;;
+        *) echo "FAIL: mrca_labels label not rendered"; exit 1 ;;
+    esac
+fi
+
 echo "OK: tal-draw renders valid PDFs"
