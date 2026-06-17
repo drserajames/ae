@@ -266,7 +266,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double height = image_size;
     const double width = params.width_to_height_ratio > 0.0 ? image_size * params.width_to_height_ratio : image_size;
 
-    // --- horizontal layout: hz-marker column | tree | labels | clades column | time-series column ---
+    // --- horizontal layout: hz-marker column | tree | labels | time-series column | dash bars | clades column ---
+    //     The clade column is the RIGHTMOST (acmacs-tal draws it past the time-series, flipped to
+    //     the page's right edge), so the bracket/label staircase sits in the right margin like AD. ---
     const double margin = 0.03 * width;
     const double drawable_w = width - 2.0 * margin;
     const double gap = 0.012 * width;
@@ -282,9 +284,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     double cursor = margin + tree_w;
     double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0}, x_dash0{0.0};
     if (label_w > 0.0) { cursor += gap; x_label0 = cursor; cursor += label_w; }
-    if (clade_w > 0.0) { cursor += gap; x_clade0 = cursor; cursor += clade_w; }
     if (ts_w > 0.0)    { cursor += gap; x_ts0 = cursor;    cursor += ts_w; }
     if (dash_w > 0.0)  { cursor += gap; x_dash0 = cursor;  cursor += dash_w; }
+    if (clade_w > 0.0) { cursor += gap; x_clade0 = cursor; cursor += clade_w; } // clade column rightmost
 
     // --- legend items for the active colouring mode (aa-at-pos > continent > clade) ---
     std::vector<std::pair<std::string, Color>> legend_items;
@@ -309,11 +311,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         }
     }
 
-    // --- vertical reserves: title (top), legend + time-series slot labels (bottom) ---
+    // --- vertical reserves: title (top); time-series / dash slot labels (bottom). The
+    //     colour legend sits in the top-right corner (acmacs-tal), so it needs no bottom reserve. ---
     const double vmargin = 0.03 * height;
     const bool want_legend = !legend_items.empty();
     const double top_reserve = params.title.empty() ? 0.0 : 0.05 * height;
-    const double bottom_reserve = (want_legend || ts_w > 0.0 || dash_w > 0.0) ? 0.07 * height : 0.0;
+    const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0) ? 0.07 * height : 0.0;
 
     // --- vertical (shared) + tree horizontal transforms ---
     const double height_units = layout.height > 0.0 ? layout.height : 1.0;
@@ -427,26 +430,98 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         }
     }
 
-    // --- clades column: one vertical bar per section, at a per-clade slot ---
-    if (clade_w > 0.0) {
-        const double slot_w = clade_w / static_cast<double>(visible_clades.size());
-        const double bar_w = std::clamp(slot_w * 0.30, 1.0, 8.0);
-        for (std::size_t vi = 0; vi < visible_clades.size(); ++vi) {
-            const std::size_t k = visible_clades[vi];
+    // --- clades column (acmacs-tal Clades): each shown clade is a vertical double-arrow
+    //     bracket spanning its leaf run, in a slot, with a rotated name label. Nested clades
+    //     are pushed to inner slots (set_slots): the widest, outermost clade sits at the right
+    //     edge (slot 0) and sub-clades stack leftwards, giving AD's right-hand bracket staircase.
+    if (clade_w > 0.0 && !visible_clades.empty()) {
+        // ae's compute_clade_sections has no section tolerance (unlike acmacs-tal's
+        // section-inclusion/exclusion-tolerance), so a clade that is interrupted by a few
+        // interspersed leaves fragments into dozens of tiny sections. Approximate the AD
+        // tolerances at draw time: drop sections below a leaf-count floor (speckle), then
+        // merge survivors separated by a small vertical gap into one band — so each clade
+        // renders as one (or a few) clean brackets, not a cloud of one-leaf ticks.
+        const double min_section = std::max(5.0, 0.001 * height_units); // drop sections smaller than this
+        const double merge_gap = 0.04 * height_units;                   // bridge gaps up to this many leaves
+
+        struct Band { double y0; double y1; std::size_t size; }; // one merged bracket
+        struct CladeDraw { std::size_t rank; std::vector<Band> bands; double y0; double y1; int slot; };
+        std::vector<CladeDraw> draws;
+        draws.reserve(visible_clades.size());
+        for (const std::size_t k : visible_clades) {
             const Clade& clade = clade_sections[k];
-            const double cx = x_clade0 + (static_cast<double>(vi) + 0.5) * slot_w;
-            const Color color = clade_color_for(k, clade.name);
-            const CladeSection* widest = nullptr;
-            for (const auto& section : clade.sections) {
-                const double y0 = dev_y(pos.at(section.first_node).second);
-                const double y1 = dev_y(pos.at(section.last_node).second);
-                pdf.line(cx, y0, cx, y1, color, bar_w);
-                if (widest == nullptr || section.size() > widest->size())
-                    widest = &section;
+            if (clade.sections.empty())
+                continue;
+            // keep sections above the floor; if none clear it, keep just the largest so the clade still shows
+            std::vector<const CladeSection*> kept;
+            for (const auto& section : clade.sections)
+                if (static_cast<double>(section.size()) >= min_section)
+                    kept.push_back(&section);
+            if (kept.empty()) {
+                const CladeSection* largest = &clade.sections.front();
+                for (const auto& section : clade.sections)
+                    if (section.size() > largest->size())
+                        largest = &section;
+                kept.push_back(largest);
             }
-            if (widest != nullptr) { // clade name centred on its widest section
-                const double ym = (dev_y(pos.at(widest->first_node).second) + dev_y(pos.at(widest->last_node).second)) / 2.0;
-                pdf.text(cx + bar_w * 0.5 + 2.0, ym + font_size * 0.3, clade_display_for(clade.name), font_size, color, /*center=*/false);
+            // merge kept sections (already top-to-bottom) separated by <= merge_gap into bands
+            std::vector<Band> bands;
+            double cur_first_v = kept.front()->first_vertical, cur_last_v = kept.front()->last_vertical;
+            std::size_t cur_size = kept.front()->size();
+            for (std::size_t i = 1; i < kept.size(); ++i) {
+                if (static_cast<double>(kept[i]->first_vertical) - cur_last_v <= merge_gap) {
+                    cur_last_v = kept[i]->last_vertical;
+                    cur_size += kept[i]->size();
+                }
+                else {
+                    bands.push_back({dev_y(cur_first_v), dev_y(cur_last_v), cur_size});
+                    cur_first_v = kept[i]->first_vertical;
+                    cur_last_v = kept[i]->last_vertical;
+                    cur_size = kept[i]->size();
+                }
+            }
+            bands.push_back({dev_y(cur_first_v), dev_y(cur_last_v), cur_size});
+            double y0 = bands.front().y0, y1 = bands.back().y1;
+            draws.push_back({k, std::move(bands), y0, y1, 0});
+        }
+
+        // slot assignment (acmacs-tal set_slots): widest extent first -> slot 0 (right edge);
+        // a clade overlapping an already-placed clade in a slot is bumped left, so sub-clades
+        // stack inward of their parent — AD's right-hand bracket staircase.
+        std::sort(draws.begin(), draws.end(), [](const CladeDraw& a, const CladeDraw& b) { return (a.y1 - a.y0) > (b.y1 - b.y0); });
+        std::vector<std::vector<std::pair<double, double>>> occupied; // per slot: occupied [y0,y1] extents
+        for (auto& draw : draws) {
+            int slot = 0;
+            for (;; ++slot) {
+                if (slot >= static_cast<int>(occupied.size()))
+                    occupied.emplace_back();
+                bool clash = false;
+                for (const auto& span : occupied[slot])
+                    if (draw.y0 < span.second && span.first < draw.y1) { clash = true; break; }
+                if (!clash) { occupied[slot].emplace_back(draw.y0, draw.y1); draw.slot = slot; break; }
+            }
+        }
+        const int n_slots = std::max<int>(1, static_cast<int>(occupied.size()));
+        const double slot_w = clade_w / static_cast<double>(n_slots);
+        const double cap = std::clamp(slot_w * 0.16, 1.0, 4.0); // arrowhead half-width
+        const double clade_fs = std::clamp(vstep * 1.1, 5.0, 11.0);
+        for (const auto& draw : draws) {
+            const Clade& clade = clade_sections[draw.rank];
+            const double cx = x_clade0 + clade_w - (static_cast<double>(draw.slot) + 0.5) * slot_w; // slot 0 = right edge
+            const Band* widest = nullptr;
+            for (const auto& band : draw.bands) {
+                pdf.line(cx, band.y0, cx, band.y1, BLACK, 0.7);             // spine
+                pdf.line(cx - cap, band.y0 + cap, cx, band.y0, BLACK, 0.7); // top arrowhead (two strokes)
+                pdf.line(cx + cap, band.y0 + cap, cx, band.y0, BLACK, 0.7);
+                pdf.line(cx - cap, band.y1 - cap, cx, band.y1, BLACK, 0.7); // bottom arrowhead
+                pdf.line(cx + cap, band.y1 - cap, cx, band.y1, BLACK, 0.7);
+                if (widest == nullptr || band.size > widest->size)
+                    widest = &band;
+            }
+            if (widest != nullptr) { // name label, rotated to read upward, just left of the spine
+                const std::string name = clade_display_for(clade.name);
+                const double ym = (widest->y0 + widest->y1) / 2.0;
+                pdf.text_rotated(cx - cap - clade_fs * 0.35, ym + name.size() * clade_fs * 0.28, name, clade_fs, BLACK, -90.0);
             }
         }
     }
@@ -527,20 +602,22 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         }
     }
 
-    // --- legend: colour swatches for the active mode (clade / continent / aa-at-pos), bottom-left row ---
-    // When the geographic inset is shown for continent colouring it IS the continent legend
-    // (acmacs-tal LegendContinentMap), so the swatch row is suppressed to avoid a duplicate.
-    if (want_legend && !(params.geo_inset && params.color_by_continent)) {
-        const double legend_fs = std::clamp(bottom_reserve * 0.28, 7.0, 12.0);
-        const double swatch_w = legend_fs * 1.4;
-        const double swatch_h = legend_fs * 0.9;
-        const double ly = height - vmargin - bottom_reserve * 0.35;
-        double lx = margin;
+    // --- legend: colour swatches + names for the active mode (continent / aa-at-pos / clade),
+    //     stacked top-right (acmacs-tal draws the coloured-by legend near the top-right corner). ---
+    if (want_legend) {
+        const double legend_fs = std::clamp(0.014 * height, 7.0, 12.0);
+        const double swatch = legend_fs * 1.1;
+        const double line_h = legend_fs * 1.55;
+        double max_tw = 0.0;
+        for (const auto& [name, color] : legend_items)
+            max_tw = std::max(max_tw, pdf.text_size(name, legend_fs).first);
+        const double block_w = swatch + 5.0 + max_tw;
+        const double lx = width - margin - block_w; // right-aligned block
+        double ly = vmargin + legend_fs;
         for (const auto& [name, color] : legend_items) {
-            pdf.rectangle(lx, ly - swatch_h / 2.0, swatch_w, swatch_h, color, 0.5, color);
-            const double tw = pdf.text_size(name, legend_fs).first;
-            pdf.text(lx + swatch_w + 4.0 + tw / 2.0, ly, name, legend_fs, BLACK, /*center=*/true);
-            lx += swatch_w + 4.0 + tw + 16.0;
+            pdf.rectangle(lx, ly - swatch * 0.85, swatch, swatch, color, 0.4, color);
+            pdf.text(lx + swatch + 5.0, ly, name, legend_fs, BLACK, /*center=*/false);
+            ly += line_h;
         }
     }
 

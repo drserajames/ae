@@ -66,6 +66,17 @@ def main():
         ),
         "tree color-by continent": schema.get("color_by_continent") is True,
         "tree legend.show": schema.get("legend", {}).get("show") is True,
+        # clades-whocc is a user-defined sub-array here (as in the real report .tal): the
+        # translator must RUN it (picking up its curated per-clade) and enable the continent
+        # legend, not short-circuit it as a hardcoded builtin.
+        "clades-whocc sub-array ran (per-clade hide)": any(
+            s.get("name") == "WC_HIDDEN" and s.get("hide") is True for s in schema.get("clade_styles", [])
+        ),
+        "clades-whocc display_name key": any(
+            s.get("name") == "WC_DISP" and s.get("display_name") == "wc" for s in schema.get("clade_styles", [])
+        ),
+        # under continent colouring the clades column must NOT switch leaves to colour-by-clade
+        "clades column keeps continent colouring": schema.get("color_by_clade") is None,
         "no apply.text warning": not any("apply.text" in w for w in warnings),
         "no if-related warning": not any(w.startswith("if:") for w in warnings),
     }

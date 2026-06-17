@@ -70,6 +70,12 @@ check "tree-geo.json (--color-by-continent --legend)" "$tmp/continent.pdf"
 "$bin" --labels --color-by-continent --geo-inset "$here/tree-geo.json" "$tmp/geo-inset.pdf" 500 >/dev/null
 check "tree-geo.json (--color-by-continent --geo-inset)" "$tmp/geo-inset.pdf"
 
+# continent legend (top-right) + clade bracket column together (the report tree-page shape):
+# curated clades via per-clade hide/display-name, leaves coloured by continent, legend shown.
+printf '{"color_by_continent": true, "legend": {"show": true}, "clades": {"show": true}, "time_series": {"show": true}, "clade_styles": [{"name": "C2", "hide": true}, {"name": "C1", "display_name": "c-one"}]}' > "$tmp/legend-clades.json"
+"$bin" --settings="$tmp/legend-clades.json" "$here/tree-geo.json" "$tmp/legend-clades.pdf" 600 >/dev/null
+check "tree-geo.json (continent legend top-right + clade column)" "$tmp/legend-clades.pdf"
+
 # colour-by-pos (aa-at-position) + legend on the aa-sequence tree (pos 3: T vs A)
 "$bin" --labels --color-by-pos=3 --legend "$here/tree-aa.json" "$tmp/by-pos.pdf" 500 >/dev/null
 check "tree-aa.json (--color-by-pos=3 --legend)" "$tmp/by-pos.pdf"

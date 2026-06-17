@@ -373,7 +373,7 @@ the `cc/draw/` surface API."*
     - **Translator nits.** `?`-prefixed string refs (e.g. `"?dash-bars"`) skipped silently (were recursing
       into the disabled array); per-leaf name labels default off for these dense trees.
     **Still open:** #2 curated per-node aa-transition labels (need node_id), exact WHOCC clade hex palette,
-    full vertical clade legend (#4), geographic world-map inset (#5). **Verify (pending build):** rebuild
+    geographic world-map inset (#5). **Verify (pending build):** rebuild
     `tal-draw`, run the §reproduce loop, `pdftoppm -png -r 100` + eyeball; confirm bvic/h3 come out ~0.63/0.65
     portrait, edges black, matrix clade-coloured, no purple flood.
 26. **Faithful page-width accounting (from ssm-report #4, 2026-06-16) — DONE.** The #25 per-column
@@ -401,6 +401,49 @@ the `cc/draw/` surface API."*
     program. **Result:** ae now matches the AD references to <0.1px — bvic **631.6**, h3 **648.6**, h1
     **794.3** (×1000), vs AD 631.6 / 648.6 / 794.3. **Verify:** `python3 cc/tal/test/test-settings-v3.py`
     (30/30 green); render the three report `.tal` via `ae.report.trees.make_tree` → `pdfinfo` page size.
+
+- **Milestone: continent legend (top-right) + curated clade-label column (vs AD refs).** Two gaps
+    remained on the report tree page vs `/tmp/ad-{h1,h3,bvic}.*.pdf`: no colour legend, and the clade
+    column was sparse/mispositioned (drawn left of the matrix, every fragmented section as its own bar,
+    no curation). Fixed:
+    - **`clades-whocc` is the report's OWN sub-array, not a builtin.** The translator
+      (`settings_v3.run`) was intercepting the string `"clades-whocc"` as a hardcoded builtin
+      (set `clades.show` + continent) **before** the `elif item in tal` sub-array branch — so the
+      report `.tal`'s own `clades-whocc` array (a `{"N":"clades", "per-clade":[…]}` carrying the
+      curated show/hide + display-name set) was never run and **all curation was dropped** (0 clade
+      styles). Now the `clades-whocc` handler sets continent + `legend.show` and then **runs the
+      user sub-array if defined** (builtin fallback only when undefined). h1 now yields 33 hidden +
+      curated display names (e.g. `C.1.8.other` → `C.1.8`), 20 visible clades.
+    - **`clades` no longer forces clade-colouring under continent.** The `clades` command set
+      `color_by_clade=True` unconditionally; under the WHOCC continent reports that fought the
+      continent matrix. Now it only sets `color_by_clade` when `color_by_continent` is not already on.
+      Also reads the `display_name` key directly (not only `label.text`).
+    - **Continent legend → top-right** (`draw-tree.cc`). The legend (coloured swatch + name per
+      `legend_items`, active-mode = continent/aa-pos/clade) was a bottom-left row; now a right-aligned
+      vertical stack in the top-right corner (acmacs-tal `LegendColoredByPos` offset), so it no longer
+      needs a bottom reserve. (AD draws the *continent* legend as the bottom-left world map —
+      `LegendContinentMap`, `continent-map.hh`; ae has no map asset linked into `tal-draw`, so the
+      coloured-squares legend top-right is the substitute. World-map inset stays open, #5.)
+    - **Clade column → far right, bracket staircase.** Moved the clades column to the **rightmost**
+      slot (past time-series + dash bars), matching AD. Each shown clade is now a vertical
+      **double-arrow bracket** (spine + arrowheads, BLACK) with a **rotated** name label, in a
+      **slot** (`set_slots` port): widest extent → slot 0 (right edge), overlapping sub-clades bumped
+      left → AD's nested staircase. ae's `compute_clade_sections` has **no section tolerance**
+      (acmacs-tal `section-inclusion/exclusion-tolerance`), so a clade interrupted by interspersed
+      leaves fragments into dozens–hundreds of 1-leaf sections (e.g. `C (5a.2)`: 338 sections). Drawing
+      them all was a cloud of ticks. Approximated the tolerances **at draw time**: drop sections below
+      a leaf-count floor (`max(5, 0.001·height)`), then merge survivors separated by ≤ `0.04·height`
+      into bands → one (or a few) clean bracket(s) per clade. Eyeballed h1/h3/bvic: legend top-right,
+      `C (5a.2)`/`C.1 (5a.2a)` outermost, `C.1.1`/`D`/`D.3.1`/`D.x`/`C.1.7.x`/`C.1.8`/`C.1.9.x` nested
+      (h1); `J.x`/`K` (h3); `C.5.x`/`V1A.3a2` (bvic) — structurally matching the AD refs.
+    - **Wiring.** `legend.show` already flowed end-to-end (`TreeDrawParameters.legend`,
+      `settings.cc` `config["legend"]["show"]`, `--legend` CLI flag); the only missing link was the
+      translator enabling it under `clades-whocc` (now done). Tests: `test-settings-v3.py` +3 checks
+      (clades-whocc sub-array runs, `display_name` key, continent kept); `test-draw-tree.sh` + a
+      continent-legend-top-right + clade-column render case. Both green.
+    **Approximations / deferred:** per-clade label rotation/scale/slot/offset and the exact
+    `section-*-tolerance` values from the `.tal` are not honoured (global draw-time floor/merge instead);
+    the world-map continent inset (#5) is still unported (squares legend used).
 
 **Not a remaining item — `clades-whocc` (clade-from-sequence assignment).** This was struck off
 after auditing the AD source. In acmacs-tal `clades-whocc` is a draw-time settings macro that
