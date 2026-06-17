@@ -392,6 +392,54 @@ clades.
 
 ---
 
+## Geographic inset (continent-coloured world map, lower-left) — DONE
+
+Port of AD `acmacs-tal` `LegendContinentMap` (`cc/legend.{cc,hh}`), which draws the small
+continent-coloured equirectangular world map in the lower-left of the signature page. It
+doubles as the **continent legend** for the report's continent-coloured tree/matrix.
+
+**Files**
+- `cc/tal/continent-map.{cc,hh}` — the per-continent baked outline + draw helper.
+  `continent-map.cc` is AD `acmacs-draw/continent-path.cc`'s path data **verbatim** (the
+  ten `static const double <continent>[][2]` arrays, freevectormaps.com data processed by
+  AD in 2016), wrapped in `ae::tal`. `draw_continent_inset(pdf, x, y, w, h)` reproduces AD
+  `continent-map.cc::continent_map_draw`: loop the nine drawn continents (Antarctica
+  omitted, matching AD `ContinentLabels`) and fill each in its own colour.
+- Colour palette is **reused** from `cc/geo/geographic-map.cc` (`ae::geo::continent_color`,
+  the exact AD `acmacs-base/color-continent.cc` primary palette). To link that symbol,
+  `meson.build`'s `tal-draw` target now also compiles `cc/geo/geographic-map.cc` +
+  `cc/geo/geographic-path.cc`.
+
+**Coordinate conventions — note the difference from `cc/geo/geographic-path.cc`.**
+The continent data lives in a `{660, 320}` rectangle (`continent_map_size`) — its own
+projection, *not* the surveillance world map's `{1261.3, 632.591}` / lon-lat bounds. And
+its negative-move encoding negates **both** coords on a move entry (AD
+`path_fill_negative_move` → `close_move_to_line_to` uses `std::abs` on x *and* y), whereas
+`cc/geo/geographic-path.cc` negates only x and keeps y as-is (consumed by
+`CairoPdf::path_negative_move`, which only flips x back). So `draw_continent_inset` rewrites
+each move entry to `{-dev_x(|x|), dev_y(|y|)}` before handing the subpath to
+`CairoPdf::path_negative_move` with a transparent outline (fill only, no coastline).
+
+**Wiring**
+- `TreeDrawParameters::geo_inset` flag (`cc/tal/draw-tree.hh`); drawn in
+  `export_tree_pdf` just before the leaf-tip text labels. Box = 18% of page width with the
+  map's aspect, sitting just above the bottom margin. When `geo_inset && color_by_continent`
+  the bottom-row continent **swatch legend is suppressed** — the inset is the legend.
+- Parsed from the JSON settings key `geo_inset` in `cc/tal/settings.cc`; CLI `--geo-inset`
+  in `cc/tal/tal-draw-main.cc`.
+- `py/ae/tal/settings_v3.py` sets `geo_inset: true` whenever a `.tal` references the
+  `clades-whocc` builtin (alongside the existing `color_by_continent`), mirroring AD's
+  WHOCC builtin which draws the `LegendContinentMap`.
+- `cc/tal/test/test-draw-tree.sh` has a synthetic `--color-by-continent --geo-inset` case.
+
+**Verified** by rasterising the three report trees (h1/h3/bvic `*.after-2021`) and the
+synthetic `tree-geo.json`: a nine-colour continent map renders lower-left on each, matching
+the AD reference PDFs (colours per `ae::geo::continent_color`: N-America dark blue,
+S-America turquoise, Europe green, Africa orange, Middle-East purple, Asia red, Russia
+maroon, Australia-Oceania pink, Central-America cyan).
+
+---
+
 ## Build & verify notes (gotchas hit during the layout milestone)
 
 - **Reconfigure fails on the `lexy` CMake subproject** ("Compatibility with CMake < 3.5

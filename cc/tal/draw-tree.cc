@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "tal/draw-tree.hh"
+#include "tal/continent-map.hh"
 #include "tal/layout.hh"
 #include "tal/clades.hh"
 #include "tal/time-series.hh"
@@ -527,7 +528,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     }
 
     // --- legend: colour swatches for the active mode (clade / continent / aa-at-pos), bottom-left row ---
-    if (want_legend) {
+    // When the geographic inset is shown for continent colouring it IS the continent legend
+    // (acmacs-tal LegendContinentMap), so the swatch row is suppressed to avoid a duplicate.
+    if (want_legend && !(params.geo_inset && params.color_by_continent)) {
         const double legend_fs = std::clamp(bottom_reserve * 0.28, 7.0, 12.0);
         const double swatch_w = legend_fs * 1.4;
         const double swatch_h = legend_fs * 0.9;
@@ -539,6 +542,17 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             pdf.text(lx + swatch_w + 4.0 + tw / 2.0, ly, name, legend_fs, BLACK, /*center=*/true);
             lx += swatch_w + 4.0 + tw + 16.0;
         }
+    }
+
+    // --- geographic inset: continent-coloured world map in the lower-left (acmacs-tal
+    //     LegendContinentMap). Sized to ~18% of the page width, with the continent map's
+    //     aspect, sitting just above the bottom margin. ---
+    if (params.geo_inset) {
+        const double box_w = 0.18 * width;
+        const double box_h = box_w / continent_map_aspect();
+        const double box_x = margin;
+        const double box_y = height - vmargin - box_h;
+        draw_continent_inset(pdf, box_x, box_y, box_w, box_h);
     }
 
     // --- positioned text labels at leaf tips (port of DrawOnTree / nodes apply.text) ---

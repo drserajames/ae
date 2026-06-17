@@ -118,6 +118,7 @@ namespace ae::tal
         std::string time_series_end{};              // optional "YYYY-MM-DD" range end
         std::string title{};         // page title (top, centred); empty = none
         bool legend{false};          // draw a clade colour legend (bottom row)
+        bool geo_inset{false};       // draw the continent-coloured world-map inset (lower-left); doubles as the continent legend (acmacs-tal LegendContinentMap)
         bool aa_transitions{false};  // label inodes with their aa-substitution transitions
         bool aa_transitions_compute{false}; // compute the transitions first (consensus) instead of using the tree's stored ones
         double aa_transitions_tolerance{0.6}; // consensus non-common tolerance (when computing)

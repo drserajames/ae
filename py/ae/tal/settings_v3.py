@@ -196,6 +196,10 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                     # .tal relies on that builtin default, so mirror it here (ae has the exact AD
                     # continent palette). Not colour-by-clade — clades are the labelled column.
                     schema.setdefault("color_by_continent", True)
+                    # AD's WHOCC builtin also draws the LegendContinentMap (the small
+                    # continent-coloured world map lower-left, which doubles as the continent
+                    # legend). Mirror it with the geo inset.
+                    schema.setdefault("geo_inset", True)
                 elif item in tal and isinstance(tal[item], list):
                     run(tal[item])                                    # named sub-array
                 else:

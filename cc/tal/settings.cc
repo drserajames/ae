@@ -79,6 +79,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
     }
     if (const auto& legend = config["legend"]; legend.is_object())
         params.legend = get_bool(legend["show"]);
+    params.geo_inset = get_bool(config["geo_inset"]);
     if (const auto& aa = config["aa_transitions"]; aa.is_object()) {
         params.aa_transitions = get_bool(aa["show"]);
         params.aa_transitions_compute = get_bool(aa["compute"]);

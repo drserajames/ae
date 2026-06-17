@@ -40,6 +40,8 @@ int main(int argc, char* const argv[])
                 params.time_series_interval = std::string{arg.substr(11)};
             else if (arg == "--legend")
                 params.legend = true;
+            else if (arg == "--geo-inset")
+                params.geo_inset = true;
             else if (arg == "--aa-transitions")
                 params.aa_transitions = true;
             else if (arg == "--aa-transitions-compute")
@@ -59,7 +61,7 @@ int main(int argc, char* const argv[])
             fmt::print(stderr,
                        "Usage: {} [--settings=config.json] [--labels] [--color-by-clade] [--clades]\n"
                        "          [--color-by-continent] [--color-by-pos=N]\n"
-                       "          [--time-series] [--interval=year|month|week|day] [--legend] [--aa-transitions]\n"
+                       "          [--time-series] [--interval=year|month|week|day] [--legend] [--geo-inset] [--aa-transitions]\n"
                        "          [--title=TEXT] <tree.newick|tree.json[.xz]> <output.pdf> [image-size-px]\n"
                        "  --settings=FILE loads all draw options (incl. per-clade colour/name overrides) from\n"
                        "  a JSON config; other flags are ignored when it is given (image-size-px still overrides).\n",

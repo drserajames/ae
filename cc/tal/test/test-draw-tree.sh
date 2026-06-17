@@ -66,6 +66,10 @@ check "tree-clades.json (per-clade hide + positioned labels)" "$tmp/labels-hide.
 "$bin" --labels --color-by-continent --legend "$here/tree-geo.json" "$tmp/continent.pdf" 500 >/dev/null
 check "tree-geo.json (--color-by-continent --legend)" "$tmp/continent.pdf"
 
+# colour-by-continent + geo inset (continent-coloured world map lower-left; doubles as the legend)
+"$bin" --labels --color-by-continent --geo-inset "$here/tree-geo.json" "$tmp/geo-inset.pdf" 500 >/dev/null
+check "tree-geo.json (--color-by-continent --geo-inset)" "$tmp/geo-inset.pdf"
+
 # colour-by-pos (aa-at-position) + legend on the aa-sequence tree (pos 3: T vs A)
 "$bin" --labels --color-by-pos=3 --legend "$here/tree-aa.json" "$tmp/by-pos.pdf" 500 >/dev/null
 check "tree-aa.json (--color-by-pos=3 --legend)" "$tmp/by-pos.pdf"

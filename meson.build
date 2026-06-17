@@ -293,7 +293,10 @@ chart_relax = executable(
 # --- tal (subsystem #3) — Phase B M1: tree -> PDF renderer. Cairo linked only here. ---
 tal_draw = executable(
   'tal-draw',
-  sources : ['cc/tal/tal-draw-main.cc', 'cc/tal/draw-tree.cc', 'cc/tal/settings.cc', 'cc/draw/cairo-surface.cc'],
+  # cc/tal/continent-map.cc draws the lower-left continent inset; it reuses
+  # ae::geo::continent_color from cc/geo/geographic-map.cc (which needs geographic-path.cc).
+  sources : ['cc/tal/tal-draw-main.cc', 'cc/tal/draw-tree.cc', 'cc/tal/settings.cc', 'cc/tal/continent-map.cc',
+             'cc/geo/geographic-map.cc', 'cc/geo/geographic-path.cc', 'cc/draw/cairo-surface.cc'],
   include_directories : include_cc,
   dependencies : [fmt, range_v3, simdjson, cairo],
   link_with : [libae],
