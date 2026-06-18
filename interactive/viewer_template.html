@@ -45,7 +45,9 @@
   .sel.dim { opacity:1; }                /* selected points stay visible */
   .selbox { fill:rgba(21,88,214,.08); stroke:#1558d6; stroke-width:1; stroke-dasharray:4 3; pointer-events:none; }
   input[type=search].nohit { border-color:#e15759; background:#fff3f3; }
-  #legend { padding:8px 10px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:6px 20px; font-size:11px; max-height:120px; overflow:auto; }
+  /* #9: own stacking context + opaque bg so legend clicks always register even if
+     a panel SVG overflows into the legend strip (grid containment is Agent-MAP #8). */
+  #legend { padding:8px 10px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:6px 20px; font-size:11px; max-height:120px; overflow:auto; position:relative; z-index:6; background:var(--bg); }
   .lgSec + .lgSec { border-left:1px solid var(--line); padding-left:16px; }
   .lg { display:flex; align-items:center; gap:4px; user-select:none; padding:1px 4px; border-radius:3px; }
   .lg[title] { cursor:pointer; }

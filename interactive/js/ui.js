@@ -92,6 +92,17 @@
       d.style.opacity = "0.45";
     }
   }
+  // F2: make a categorical legend row cycle the *active attribute's* value
+  // (normal → select → back → normal) through the generalised store, with the
+  // badge + styling. Works for clade / continent / aa — whichever colorBy is active
+  // (State.activeAttr resolves it); emphasis() folds the cycle into both panels.
+  function applyCycle(d, value) {
+    const mode = State.activeMode(value);
+    d.insertAdjacentHTML("beforeend", cycleBadge(mode));
+    styleCycleRow(d, mode);
+    d.onclick = () => { State.cycleActive(value); renderLegend(); };
+  }
+  const CYCLE_HINT = " — click to cycle: bring to front → send to back → normal";
 
   // C1 colour key: residue value at the active HA position(s), with tip counts.
   function aaLegend(colKey) {
@@ -106,7 +117,9 @@
     }
     vals.forEach(v => {
       const d = document.createElement("div"); d.className = "lg";
+      d.title = `${cnt[v] || 0} tip(s)` + CYCLE_HINT;
       d.innerHTML = `<span class="sw" style="background:${Colour.aaColor(v)}"></span>${v}<span class="cnt">${cnt[v] || 0}</span>`;
+      applyCycle(d, v);                       // F2: aa residue value
       colKey.appendChild(d);
     });
     const u = document.createElement("div"); u.className = "lg";
@@ -152,14 +165,12 @@
       const ag = agCladeCounts();
       Colour.cladesOrdered().forEach(c => {   // #2 report legend order (priority)
         const t = counts.clade[c] || 0, a = ag.clade[c] || 0;
-        const mode = State.cladeMode(c);      // F8: "normal" | "select" | "back"
         const d = document.createElement("div");
         d.className = "lg";
-        d.title = `${t} tip(s) / ${a} antigen(s) — click to cycle: bring to front → send to back → normal`;
+        d.title = `${t} tip(s) / ${a} antigen(s)` + CYCLE_HINT;
         d.innerHTML = `<span class="sw" style="background:${Colour.cladeColor(c)}"></span>` +
-          `${Colour.cladeLegend(c)}<span class="cnt">${t}/${a}</span>` + cycleBadge(mode);
-        styleCycleRow(d, mode);
-        d.onclick = () => { State.cycleClade(c); renderLegend(); };
+          `${Colour.cladeLegend(c)}<span class="cnt">${t}/${a}</span>`;
+        applyCycle(d, c);                     // F2 (was F8 clade-only)
         colKey.appendChild(d);
       });
       const u = document.createElement("div"); u.className = "lg";
@@ -179,9 +190,10 @@
         const t = counts.cont[c] || 0, a = agc[c] || 0;
         if (!t && !a) return;
         const d = document.createElement("div"); d.className = "lg";
-        d.title = `${t} tip(s) / ${a} antigen(s)`;
+        d.title = `${t} tip(s) / ${a} antigen(s)` + CYCLE_HINT;
         d.innerHTML = `<span class="sw" style="background:${Colour.continentColor(c)}"></span>` +
           `${c.toLowerCase()}<span class="cnt">${t}/${a}</span>`;
+        applyCycle(d, c);                     // F2: continent value is the uppercase key
         colKey.appendChild(d);
       });
     } else {
@@ -274,7 +286,7 @@
       "Hover a tip or map point to link the two panels by strain. " +
       "Click to select (Shift/Cmd-click to add); drag a box on either panel to select many; " +
       "search selects all matches; click empty space to clear. " +
-      "Click a clade swatch in the legend to cycle it: bring to front → send to back → normal.";
+      "Click a legend swatch (clade / continent / AA) to cycle it: bring to front → send to back → normal.";
   }
 
   function addOption(sel, value, label) {
