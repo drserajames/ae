@@ -42,6 +42,7 @@ MODULE_ORDER = [
     "state.js",    # IV.State — selection store + view state + DOM helpers
     "colour.js",   # IV.Colour — colour API
     "ui.js",       # IV.UI — tooltip, legend, controls (used by tree/map handlers)
+    "glyph.js",    # IV.Glyph — shared point-shape factory (used by tree + map)
     "tree.js",     # IV.Tree — phylogram render + highlight
     "map.js",      # IV.Map — antigenic map render + highlight
     "lines.js",    # IV.Lines — Stage-2 overlay scaffold

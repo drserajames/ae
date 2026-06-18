@@ -24,15 +24,25 @@ Legend for field status:
   "meta":  { ... },              // [live] document-level metadata
   "tree":  { ...node... },       // [live] pruned tree, nested; root node
   "charts": [ { ...chart... } ], // [live] one entry per --chart (centre)
-  "clade_color":   { "<clade>": "#rrggbb" },   // [live] clade -> colour
-  "clade_legend":  { "<clade>": "<label>" },   // [E1]  clade -> legend text (canonical)
-  "unmatched_color": "#d9d9d9",  // [live] colour for tips/antigens with no clade
+  "clade_color":   { "<clade>": "#rrggbb" },   // [v3] clade -> colour, from the report style R["-clades-v10"]
+  "clade_legend":  { "<clade>": "<label>" },   // [v3] clade -> legend text, from the same rule's L.t
+  "clade_priority":{ "<clade>": <int|null> },  // [v3] rule legend priority (L.p) for ordering the legend like the report
+  "continent_color": { "<CONTINENT>": "#rrggbb" }, // [v3] from R["-continent"]; key is uppercase T.C9
+  "unmatched_color": "#d9d9d9",  // [live] colour for tips/antigens with no clade rule
   "passage_color": {             // [E1]  passage-type -> colour (P1 markers)
     "egg": "#FF0000", "cell": "#0000FF", "reassortant": "#FFA500"
   },
   "aa": { "<norm>": "QKIPGND..." }             // [E2]  shared norm -> aligned full-HA AA sequence (C1)
 }
 ```
+
+> **Clade / continent colours [v3]** come straight from each chart's own report
+> plot-spec (`R["-clades-v10"]` and `R["-continent"]`, readable with
+> `decat <styled.ace>`), so the viewer matches the report PDFs exactly. A chart with
+> no `-clades-v10` style falls back to the `semantic_clades` palette (then a generated
+> one). Each antigen's `clade` is the rule applied **last** among its clade labels (the
+> report layers rules, so the most specific clade wins); clades with no rule are greyed
+> and logged.
 
 The `aa` table maps each matched `norm` to its **aligned full-HA AA sequence
 string** (reconstructed from the `.asr` tree; HA1 is the prefix, so HA1 numbering
@@ -113,6 +123,7 @@ collapsed during pruning. `x` is **cumulative branch length** from the root
   "antigens": [ { ...antigen... } ],  // [live]
   "sera":     [ { ...serum... } ],    // [live]
   "norm_to_ag": { "<norm>": [i, ...] }, // [live] norm -> antigen indices in THIS chart
+  "stress": 6190.07,         // [v3] this projection's optimiser stress (F6)
 
   // E2 additions (for stress/error overlays N1/N2/C2):
   "titers":      [[ "<encoded>", ... ]], // [E2] na x ns, raw titer strings ("*"/"<N"/">N"/num)
@@ -133,21 +144,28 @@ plots raw layout coords).
   "i": 17,                    // index within this chart's antigen list
   "name": "A(H3N2)/THAILAND/8/2022",
   "norm": "THAILAND/8/2022",  // join key
-  "passage": "MDCK1",         // raw passage string ([E1] classified type in "pt" + tree.passage)
-  "pt": "cell",               // [E1] classified passage type: "egg"|"cell"|"reassortant"|null (P1 markers)
+  "passage": "MDCK1",         // raw passage string (classified type in "pt" + tree.passage)
+  "pt": "cell",               // [v3] passage type from semantic T.p: "egg"|"cell"|"reassortant"|null (P1)
   "date": "2022-02-01",
   "x": 1.234, "y": -0.567,    // map coords (null if not positioned); transform-applied [E1]
-  "clade": "3C.2a1b.2a",      // [E1] primary clade = most-specific canonical (semantic_clades) label present, or null
-  "clades": ["3C.2a1b.2a"],   // all clade labels
-  "ref": false,               // reference antigen
-  "vac": false                // vaccine strain
+  "clade": "3C.2a1b.2a",      // [v3] primary clade = last-matching report rule among "clades", or null
+  "clades": ["3C.2a1b.2a"],   // all clade labels (semantic T.C)
+  "continent": "ASIA",        // [v3] uppercase continent, from semantic T.C9 (null if absent)
+  "country": "THAILAND",      // [v3] country, from semantic T.c9 (null if absent)
+  "ref": false,               // [v3] reference antigen (select_reference_antigens or semantic T.R)
+  "vac": false,               // [v3] vaccine strain (semantic T.V truthy)
+  "serology": false           // [v3] report serology test antigen (semantic T.serology)
 }
 ```
 
 ### Serum [live]
 
 ```jsonc
-{ "i": 3, "name": "...", "x": 0.1, "y": 0.2 }   // x/y null if not positioned
+{
+  "i": 3, "name": "...", "x": 0.1, "y": 0.2,   // x/y null if not positioned
+  "norm": "THAILAND/8/2022",   // [v3] join key, normalised like antigens (F1)
+  "homologous": 0              // [v3] index of the antigen sharing this norm, or null (F1)
+}
 ```
 
 ---
