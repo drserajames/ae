@@ -2,10 +2,12 @@
 //
 // Plots the active chart's antigens and sera. All point SHAPES come from the shared
 // IV.Glyph factory so the map and tree stay identical (never hand-roll shapes here):
-//   antigen        → circle        egg antigen → egg
-//   vaccine        → star (large)  serum       → square
-//   reassortant    → reassortant (triangle, +orange ring; matches the tree)
-//   egg serum      → uglyEgg
+//   cell antigen → circle           cell serum         → square
+//   egg antigen  → egg              egg serum          → uglyEgg
+//   reassortant  → egg rotated 0.5  reassortant serum  → uglyEgg rotated 0.5
+//   vaccine      → its passage shape, larger + black outline (not a star)
+// Passage is conveyed by shape (no outline ring); a serum's outline shows its
+// strain's colour-by colour. 1-AU gridlines track zoom/pan.
 // Subscribes to IV.State so hover / clade-filter / only-matched / selection changes
 // re-apply highlight. Resolves tree linkage via IV.Tree.normToLeaves.
 //
@@ -49,21 +51,32 @@
     if (/(MDCK|SIAT|QMC|HCK|\bMK\d|\bC\d|CELL)/.test(p)) return "cell";
     return null;
   }
-  // Ring colour for the salient passages (egg / reassortant). Cell is the common
-  // default so it keeps the neutral stroke; egg antigens are already egg-SHAPED, so
-  // the ring just reinforces them. Null when the bundle has no passage colours.
-  function passageStroke(a) {
-    if (!(Colour.hasPassageMarkers && Colour.hasPassageMarkers())) return null;
-    const t = passageType(a);
-    return (t && t !== "cell") ? Colour.passageColor(t) : null;
+  // Passage is shown by SHAPE (#10), not an outline ring. Antigen: cell→circle,
+  // egg→egg, reassortant→egg rotated 0.5 rad (#11). Vaccine keeps its passage shape
+  // (just larger + black outline, #3).
+  function antigenShape(a) {
+    const pt = passageType(a);
+    if (pt === "egg") return { shape: "egg", rot: 0 };
+    if (pt === "reassortant") return { shape: "egg", rot: 0.5 };
+    return { shape: "circle", rot: 0 };
   }
-  // A serum is "egg" if its homologous antigen was egg-grown (the bundle carries the
-  // homologous antigen index; sera have no passage field of their own).
-  function isEggSerum(chart, s) {
+  // Serum shape mirrors its homologous antigen's passage (sera carry no passage of
+  // their own): cell→square, egg→uglyEgg (#5), reassortant→uglyEgg rotated 0.5 (#12).
+  function homAg(chart, s) {
     const h = s.homologous;
-    if (h == null) return false;
-    const a = chart.antigens[h];
-    return !!(a && a.pt === "egg");
+    return (h != null && chart.antigens[h]) ? chart.antigens[h] : null;
+  }
+  function serumShape(chart, s) {
+    const ag = homAg(chart, s), pt = ag ? ag.pt : null;
+    if (pt === "egg") return { shape: "uglyEgg", rot: 0, label: "egg" };
+    if (pt === "reassortant") return { shape: "uglyEgg", rot: 0.5, label: "reassortant" };
+    return { shape: "square", rot: 0, label: "" };
+  }
+  // Feature 1: a serum's outline = its strain's current colour-by colour (clade / AA
+  // / continent / stress), taken from its homologous antigen so it tracks colorBy.
+  function serumColour(chart, s) {
+    const ag = homAg(chart, s);
+    return ag ? Colour.antigen(ag) : Colour.unmatched();
   }
 
   function agHtml(a) {
@@ -113,38 +126,36 @@
       const X = geom.SX(d.x), Y = geom.SY(d.y);
       switch (d.shape) {
         case "square": d.el.setAttribute("x", X - d.r); d.el.setAttribute("y", Y - d.r); break;
-        case "star": d.el.setAttribute("d", G.starPath(X, Y, d.r)); break;
-        case "egg": d.el.setAttribute("d", G.eggPath(X, Y, d.r)); break;
-        case "uglyEgg": d.el.setAttribute("d", G.uglyEggPath(X, Y, d.r)); break;
-        case "reassortant": d.el.setAttribute("d", G.reassortantPath(X, Y, d.r)); break;
+        case "egg": d.el.setAttribute("d", G.eggPath(X, Y, d.r, d.rot)); break;
+        case "uglyEgg": d.el.setAttribute("d", G.uglyEggPath(X, Y, d.r, d.rot)); break;
         default: d.el.setAttribute("cx", X); d.el.setAttribute("cy", Y);  // circle
       }
     }
   }
 
-  // ---- F5: 1-antigenic-unit gridlines (track zoom/pan) ----------------------
+  // ---- F5: 1-antigenic-unit gridlines --------------------------------------
+  // Build the gridlines for a projection (SX/SY) + AU scale into a pane W×H.
+  // Uniform light lines only (#6: no darker axis lines). Reused by the single map
+  // (re-projected on zoom/pan) and by the all-centres grid panels (#7).
+  function gridLineEls(SX, SY, scale, xmin, ymax, W, H) {
+    const out = [];
+    if (!(scale >= 8)) return out;          // 1 AU < 8px → too dense to be useful
+    const invX = px => xmin + (px - SX(xmin)) / scale;
+    const invY = py => ymax - (py - SY(ymax)) / scale;
+    const gx0 = Math.ceil(invX(0)), gx1 = Math.floor(invX(W));
+    const gy0 = Math.ceil(invY(H)), gy1 = Math.floor(invY(0));
+    if (gx1 - gx0 > 250 || gy1 - gy0 > 250) return out;   // safety cap
+    for (let gx = gx0; gx <= gx1; gx++)
+      out.push(el("line", { x1: SX(gx), y1: 0, x2: SX(gx), y2: H, stroke: "#ededed", "stroke-width": 1 }));
+    for (let gy = gy0; gy <= gy1; gy++)
+      out.push(el("line", { x1: 0, y1: SY(gy), x2: W, y2: SY(gy), stroke: "#ededed", "stroke-width": 1 }));
+    return out;
+  }
   function drawGrid() {
     if (!gridG || !geom || !base) return;
     gridG.textContent = "";
-    const scale = geom.scale;
-    if (scale < 8) return;                 // 1 AU < 8px → too dense to be useful
-    const W = base.W, H = base.H;
-    const sxMin = geom.SX(base.xmin), syMax = geom.SY(base.ymax);
-    const invX = px => base.xmin + (px - sxMin) / scale;
-    const invY = py => base.ymax - (py - syMax) / scale;
-    const gx0 = Math.ceil(invX(0)), gx1 = Math.floor(invX(W));
-    const gy0 = Math.ceil(invY(H)), gy1 = Math.floor(invY(0));
-    if (gx1 - gx0 > 250 || gy1 - gy0 > 250) return;   // safety cap
-    for (let gx = gx0; gx <= gx1; gx++) {
-      const X = geom.SX(gx);
-      gridG.appendChild(el("line", { x1: X, y1: 0, x2: X, y2: H,
-        stroke: gx === 0 ? "#cfcfcf" : "#ededed", "stroke-width": 1 }));
-    }
-    for (let gy = gy0; gy <= gy1; gy++) {
-      const Y = geom.SY(gy);
-      gridG.appendChild(el("line", { x1: 0, y1: Y, x2: W, y2: Y,
-        stroke: gy === 0 ? "#cfcfcf" : "#ededed", "stroke-width": 1 }));
-    }
+    for (const ln of gridLineEls(geom.SX, geom.SY, geom.scale, base.xmin, base.ymax, base.W, base.H))
+      gridG.appendChild(ln);
   }
 
   let raf = 0;
@@ -179,20 +190,24 @@
 
     sera.forEach(s => {
       const X = proj.SX(s.x), Y = proj.SY(s.y), r = r0 * 1.7;
-      const egg = isEggSerum(chart, s);
+      const ss = serumShape(chart, s);
       // F1: carry the serum norm so a click resolves it (installSelect → expandNorms
       // pulls the homologous antigen + its tree tip); without it a click cleared.
-      const o = { class: "serum pt" };
+      // Feature 1: serum outline = its strain's colour-by colour. Set fill/stroke as
+      // attributes (not the .serum CSS class) so the .lift/.sel highlight classes still
+      // override; `sr` is a non-styling marker class. Self-contained — no CSS needed.
+      const o = { class: "pt sr", fill: "none", stroke: serumColour(chart, s), strokeWidth: 1.3 };
       if (s.norm) o.dataNorm = s.norm;
-      const node = egg ? G.uglyEgg(X, Y, r, o) : G.square(X, Y, r, o);
+      if (ss.rot) o.rot = ss.rot;
+      const node = G.make(ss.shape, X, Y, r, o);
       node.addEventListener("mouseenter", e => {
         if (s.norm) State.setActive(s.norm);
-        IV.UI.showTip(e, `<b>${s.name}</b><br><i>serum${egg ? " · egg" : ""}</i>`);
+        IV.UI.showTip(e, `<b>${s.name}</b><br><i>serum${ss.label ? " · " + ss.label : ""}</i>`);
       });
       node.addEventListener("mousemove", IV.UI.moveTip);
       node.addEventListener("mouseleave", () => { if (s.norm) State.setActive(null); IV.UI.hideTip(); });
       svg.appendChild(node);
-      plc.push({ el: node, shape: egg ? "uglyEgg" : "square", x: s.x, y: s.y, r });
+      plc.push({ el: node, shape: ss.shape, rot: ss.rot || 0, x: s.x, y: s.y, r });
       if (s.norm) {
         (nodes[s.norm] = nodes[s.norm] || []).push(node);
         hi.push({ el: node, norm: s.norm, clade: null, serum: true });
@@ -201,28 +216,26 @@
 
     function drawAntigen(a) {
       const X = proj.SX(a.x), Y = proj.SY(a.y);
-      const pt = passageType(a);
-      let shape, r, node;
-      if (a.vac) { shape = "star"; r = r0 * 2.4; node = G.star(X, Y, r, { class: "pt" }); }
-      else if (pt === "egg") { shape = "egg"; r = r0; node = G.egg(X, Y, r, { class: "pt" }); }
-      else if (pt === "reassortant") { shape = "reassortant"; r = r0; node = G.reassortant(X, Y, r, { class: "pt" }); }
-      else { shape = "circle"; r = a.ref ? r0 * 1.43 : r0; node = G.circle(X, Y, r, { class: "pt" }); }
+      const sh = antigenShape(a);
+      // #3: vaccine = its passage shape but larger (kateri ~40 vs ref ~20–32).
+      const r = a.vac ? r0 * 2.2 : a.ref ? r0 * 1.4 : r0;
+      const o = { class: "pt" };
+      if (sh.rot) o.rot = sh.rot;
+      const node = G.make(sh.shape, X, Y, r, o);
       node.setAttribute("fill", Colour.antigen(a));
       node.setAttribute("fill-opacity", a.ref ? 0.55 : 0.85);
-      const pStroke = a.ref ? null : passageStroke(a);
-      let stroke, sw;
-      if (a.vac) { stroke = pStroke || "#222"; sw = 1.4; }       // dark outline → star reads clearly
-      else if (a.ref) { stroke = "#000"; sw = 1.3; }
-      else if (pStroke) { stroke = pStroke; sw = 1.4; }
-      else { stroke = "rgba(0,0,0,.3)"; sw = 0.6; }
-      node.setAttribute("stroke", stroke); node.setAttribute("stroke-width", sw);
+      // #10: passage is shown by shape — no passage ring. Vaccine/ref get a black
+      // outline; everything else a thin neutral edge.
+      if (a.vac) { node.setAttribute("stroke", "#000"); node.setAttribute("stroke-width", 1.6); }
+      else if (a.ref) { node.setAttribute("stroke", "#000"); node.setAttribute("stroke-width", 1.3); }
+      else { node.setAttribute("stroke", "rgba(0,0,0,.35)"); node.setAttribute("stroke-width", 0.6); }
       node.setAttribute("data-norm", a.norm);
       node.addEventListener("mouseenter", e => { State.setActive(a.norm); IV.UI.showTip(e, agHtml(a)); });
       node.addEventListener("mousemove", IV.UI.moveTip);
       node.addEventListener("mouseleave", () => { State.setActive(null); IV.UI.hideTip(); });
       svg.appendChild(node);
       (nodes[a.norm] = nodes[a.norm] || []).push(node);
-      plc.push({ el: node, shape, x: a.x, y: a.y, r });
+      plc.push({ el: node, shape: sh.shape, rot: sh.rot || 0, x: a.x, y: a.y, r });
       hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false });
     }
 
@@ -338,7 +351,7 @@
   }
 
   IV.Map = {
-    render, refresh, paintChart,
+    render, refresh, paintChart, gridLineEls,
     get agByIdx() { return agByIdx; },
     zoomIn() { const w = (document.getElementById("mapWrap") || {}); zoomAt((w.clientWidth || 600) / 2, (w.clientHeight || 600) / 2, 1.4); },
     zoomOut() { const w = (document.getElementById("mapWrap") || {}); zoomAt((w.clientWidth || 600) / 2, (w.clientHeight || 600) / 2, 1 / 1.4); },

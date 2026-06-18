@@ -38,7 +38,7 @@
     const spanX = xmax - xmin || 1, spanY = ymax - ymin || 1;
     const scale = Math.min((PW - 2 * PAD) / spanX, (PH - 2 * PAD) / spanY);
     const ox = (PW - spanX * scale) / 2, oy = (PH - spanY * scale) / 2;
-    return { SX: x => ox + (x - xmin) * scale, SY: y => oy + (ymax - y) * scale };
+    return { SX: x => ox + (x - xmin) * scale, SY: y => oy + (ymax - y) * scale, scale, xmin, ymax };
   }
 
   // Build the cell/title/svg DOM once, install selection once per svg. The chart set
@@ -46,6 +46,9 @@
   function buildStructure() {
     const wrap = document.getElementById("gridWrap");
     if (!wrap) return;
+    // #8: let the grid scroll inside the pane instead of overflowing into the legend.
+    // min-height:0 frees the flex item to shrink; .scroll already gives overflow:auto.
+    wrap.style.minHeight = "0";
     wrap.innerHTML = ""; panels = [];
     IV.DATA.charts.forEach(chart => {
       const cell = document.createElement("div"); cell.className = "gridPanel";
@@ -69,6 +72,11 @@
       p.svg.innerHTML = "";
       const proj = fitProj(p.chart);
       if (proj) {
+        // #7: 1-AU gridlines behind the points (static — panels don't zoom)
+        const g = el("g", { class: "gridLayer", "pointer-events": "none" });
+        for (const ln of IV.Map.gridLineEls(proj.SX, proj.SY, proj.scale, proj.xmin, proj.ymax, PW, PH))
+          g.appendChild(ln);
+        p.svg.appendChild(g);
         p.hi = IV.Map.paintChart(p.svg, p.chart, proj, { r0: 2.2 }).hi;
       } else {
         p.hi = [];

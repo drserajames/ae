@@ -10,13 +10,14 @@
 //     e.g. inline legend glyphs).
 //   - element builders      → a live SVG element with fill/stroke/etc. applied.
 //
-// Roles → glyph:
-//   circle      antigen
-//   square      serum
-//   star        vaccine
-//   egg         egg-passaged antigen  (smooth egg/oval outline)
-//   uglyEgg     egg-passaged serum    (deliberately distinct, lopsided egg)
-//   reassortant reassortant strain    (triangle)
+// Roles → glyph (kateri canonical):
+//   circle      cell antigen
+//   square      cell serum
+//   egg         egg antigen          (rounded egg, aspect 0.75; rot 0.5 = reassortant)
+//   uglyEgg     egg serum            (hexagon, aspect 0.75; rot 0.5 = reassortant egg serum)
+//   star/reassortant — RETAINED for legacy consumers (tree vaccine tips, legend key)
+//     pending their migration; vaccines are now drawn as their larger passage shape,
+//     not a star, so map.js no longer uses star.
 window.IV = window.IV || {};
 (function (IV) {
   "use strict";
@@ -37,21 +38,33 @@ window.IV = window.IV || {};
     return d + "Z";
   }
 
-  // Smooth egg outline: pointed top, bulbous bottom, total height ~2r (egg antigen).
-  function eggPath(cx, cy, r) {
-    const rx = r * 0.72, top = cy - r, bot = cy + r * 0.92;
-    return `M${cx},${top}` +
-      `C${cx + rx},${cy - r * 0.5} ${cx + rx},${bot} ${cx},${bot}` +
-      `C${cx - rx},${bot} ${cx - rx},${cy - r * 0.5} ${cx},${top}Z`;
+  // Transform a unit point (px,py as multiples of r) for the egg/uglyEgg family:
+  // aspect (x narrowed to `asp`·height), optional rotation `rot` (radians), then
+  // translate to (cx,cy). Baked into the path coords (NOT an SVG transform) so
+  // getBBox stays in screen space for S1 box-select and overlay alignment.
+  const EGG_ASPECT = 0.75;   // width = 0.75 · height (kateri)
+  function ovalPt(px, py, cx, cy, r, rot) {
+    let x = px * r * EGG_ASPECT, y = py * r;
+    if (rot) { const c = Math.cos(rot), s = Math.sin(rot); const X = x * c - y * s; y = x * s + y * c; x = X; }
+    return [cx + x, cy + y];
   }
 
-  // Deliberately distinct, lopsided egg for the egg-passaged serum (uglyEgg): a
-  // tilted, dented teardrop so it never reads as the clean antigen egg.
-  function uglyEggPath(cx, cy, r) {
-    const rx = r * 0.8, top = cy - r, bot = cy + r * 0.95;
-    return `M${cx},${top}` +
-      `C${cx + rx},${cy - r * 0.7} ${cx + rx * 1.1},${cy + r * 0.5} ${cx + r * 0.18},${bot}` +
-      `C${cx - rx * 0.6},${bot + r * 0.12} ${cx - rx * 1.05},${cy + r * 0.15} ${cx},${top}Z`;
+  // Egg outline (kateri canonical: rounded — fixes the too-pointy top), aspect 0.75,
+  // optional rotation. Egg antigen; rotated 0.5 rad marks a reassortant.
+  function eggPath(cx, cy, r, rot) {
+    const P = (px, py) => ovalPt(px, py, cx, cy, r, rot || 0);
+    const p0 = P(0, 1), c1 = P(1.4, 0.95), c2 = P(0.8, -0.98), p1 = P(0, -1),
+          c3 = P(-0.8, -0.98), c4 = P(-1.4, 0.95);
+    return `M${p0[0]},${p0[1]}C${c1[0]},${c1[1]} ${c2[0]},${c2[1]} ${p1[0]},${p1[1]}` +
+           `C${c3[0]},${c3[1]} ${c4[0]},${c4[1]} ${p0[0]},${p0[1]}Z`;
+  }
+
+  // uglyEgg (kateri canonical: a hexagon), aspect 0.75, optional rotation. Egg
+  // serum; rotated 0.5 rad marks a reassortant egg serum.
+  function uglyEggPath(cx, cy, r, rot) {
+    const P = (px, py) => ovalPt(px, py, cx, cy, r, rot || 0);
+    const pts = [P(0, 1), P(1.0, 0.6), P(0.8, -0.6), P(0, -1), P(-0.8, -0.6), P(-1.0, 0.6)];
+    return "M" + pts.map(p => p[0] + "," + p[1]).join("L") + "Z";
   }
 
   // Upward triangle for reassortants, centred on (cx,cy).
@@ -85,8 +98,8 @@ window.IV = window.IV || {};
   function star(cx, cy, r, opts) {
     return elem("path", { d: starPath(cx, cy, r, opts && opts.spikes, opts && opts.innerRatio) }, opts);
   }
-  function egg(cx, cy, r, opts) { return elem("path", { d: eggPath(cx, cy, r) }, opts); }
-  function uglyEgg(cx, cy, r, opts) { return elem("path", { d: uglyEggPath(cx, cy, r) }, opts); }
+  function egg(cx, cy, r, opts) { return elem("path", { d: eggPath(cx, cy, r, opts && opts.rot) }, opts); }
+  function uglyEgg(cx, cy, r, opts) { return elem("path", { d: uglyEggPath(cx, cy, r, opts && opts.rot) }, opts); }
   function reassortant(cx, cy, r, opts) { return elem("path", { d: reassortantPath(cx, cy, r) }, opts); }
 
   const Glyph = {
