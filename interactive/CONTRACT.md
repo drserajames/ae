@@ -179,11 +179,24 @@ contracts that feature modules build on (rather than re-deriving) are:
   `offClades`, `onlyMatched`, `chartIdx`, `colorBy`) with `subscribe(fn)` /
   `notify()`. Panels subscribe and re-apply highlight on change. Selection API
   (S1): `setSelection(norms)`, `select(norms,{additive})`, `toggleSelect(norm)`,
-  `clearSelection()`, `isSelected(norm)`, `hasSelection()`. Panels classify each
-  point through `State.emphasis(norm, clade, extraHidden?) → {dim, lift, sel}`
-  and toggle those three classes — do not re-derive the highlight rules.
+  `deselect(norms)`, `clearSelection()`, `isSelected(norm)`, `hasSelection()`.
+  Panels classify each point through
+  `State.emphasis(norm, clade, extraHidden?) → {dim, lift, sel, z}` and toggle the
+  dim/lift/sel classes (and may reorder by `z`) — do not re-derive the rules.
   `IV.installSelect(svg)` adds click + drag-box selection to any panel SVG whose
   points carry a `data-norm` attribute (idempotent; call once per render).
+  **F1 serum select:** sera carry `data-norm = serum.norm` (Agent-MAP hook);
+  `State.expandNorms(norms)` adds each serum's homologous-antigen norm so a serum
+  click lights the serum + its homologous antigen + the matching tree tip
+  (installSelect already routes clicks/box through `expandNorms`).
+  **F8 clade legend cycle (z-order tri-state):** the legend clade click calls
+  `State.cycleClade(clade)` (returns the new mode, cycling
+  `normal → select → back → normal`); read state via `State.cladeMode(clade)` and
+  `State.cladeZRank(clade)` (`1` front / `−1` back / `0` normal), reset all with
+  `State.resetCladeCycle()`. `emphasis()` already folds the modes in (a *front*
+  clade pops while others fade like a selection; a *back* clade dims), so the
+  visual comes for free; panels MAY additionally reorder points by `z` to draw
+  *back* clades behind and *front* clades on top.
 - **`IV.Colour`** — colour API: `Colour.leaf(node)`, `Colour.antigen(ag)`,
   `Colour.cladeColor(c)`, `Colour.cladeLegend(c)`, `Colour.clades()`,
   `Colour.unmatched()`, honouring the active `State.colorBy`. Continent key:
