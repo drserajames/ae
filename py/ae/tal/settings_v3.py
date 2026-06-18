@@ -289,11 +289,29 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list) -> float:
     return (width + margins["left"] + margins["right"]) / (1.0 + margins["top"] + margins["bottom"])
 
 
+def _expand_seq_id(sid: str) -> list:
+    """AD matches a `seq_id` select as a regex. The report `.tal`s use that only as a
+    top-level alternation of exact seq_ids — `(A|B|C)` to hide many long-branch strains
+    at once (tal-draw matches seq_ids exactly, so the literal `(A|B|C)` would match
+    nothing). Expand such an alternation into its exact members; pass any other string
+    through unchanged."""
+    s = sid.strip()
+    if len(s) >= 3 and s[0] == "(" and s[-1] == ")" and "|" in s:
+        inner = s[1:-1]
+        if "(" not in inner and ")" not in inner:   # flat alternation, no nested groups
+            return [part for part in inner.split("|") if part]
+    return [sid]
+
+
 def _select(select: dict, warnings: list) -> dict:
     out: dict = {}
     if "seq_id" in select:
         sid = select["seq_id"]
-        out["seq_id"] = sid if isinstance(sid, list) else [sid]
+        ids = sid if isinstance(sid, list) else [sid]
+        expanded: list = []
+        for one in ids:
+            expanded.extend(_expand_seq_id(one) if isinstance(one, str) else [one])
+        out["seq_id"] = expanded
     if "cumulative >=" in select:
         out["cumulative_min"] = select["cumulative >="]
     if "edge >=" in select:

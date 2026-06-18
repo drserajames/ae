@@ -9,7 +9,7 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
-bin="$root/build/tal-draw"
+bin="${TAL_DRAW:-$root/build/tal-draw}"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 

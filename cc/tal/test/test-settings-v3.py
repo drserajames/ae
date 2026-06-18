@@ -13,7 +13,39 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "py"))
 
-from ae.tal.settings_v3 import load_tal, _eval_condition
+from ae.tal.settings_v3 import load_tal, _eval_condition, translate, _expand_seq_id
+
+
+def check_imported_no_curation() -> dict:
+    """A draw-aa-transitions block with method 'imported' and NO per-node curation
+    must enable aa_transitions.show (draw the tree's stored transitions) — the
+    opposite of the curated case, which suppresses it."""
+    tal = {"tal": [
+        {"N": "draw-aa-transitions", "method": "imported", "minimum-number-leaves-in-subtree": 5},
+    ]}
+    schema, _ = translate(tal)
+    aa = schema.get("aa_transitions", {})
+    return {
+        "imported (no per-node): show enabled": aa.get("show") is True,
+        "imported (no per-node): compute False": aa.get("compute") is False,
+        "imported (no per-node): min_leaves": aa.get("min_leaves") == 5,
+    }
+
+
+def check_seq_id_alternation() -> dict:
+    """A `(A|B|C)` alternation seq_id (AD regex; tal-draw matches exactly) must expand
+    into its exact members so long-branch hides actually fire."""
+    expanded = _expand_seq_id("(A/X/1_aa|A/Y/2_bb|A/Z/3_cc)")
+    tal = {"tal": [
+        {"N": "nodes", "select": {"seq_id": "(P/1_h|Q/2_h|R/3_h)"}, "apply": {"hide": True}},
+    ]}
+    schema, _ = translate(tal)
+    sel = schema.get("nodes", [{}])[0].get("select", {}).get("seq_id", [])
+    return {
+        "seq_id alternation -> exact list": expanded == ["A/X/1_aa", "A/Y/2_bb", "A/Z/3_cc"],
+        "plain seq_id passes through": _expand_seq_id("A/X/1_aa") == ["A/X/1_aa"],
+        "nodes seq_id alternation expanded": sel == ["P/1_h", "Q/2_h", "R/3_h"],
+    }
 
 
 def check_eval_condition() -> dict:
@@ -44,8 +76,11 @@ def main():
         "clades.show": schema.get("clades", {}).get("show") is True,
         "time-series.start": schema.get("time_series", {}).get("start") == "2020-01",
         "time-series.end": schema.get("time_series", {}).get("end") == "2021-01",
-        "aa-transitions imported (not computed)": schema.get("aa_transitions", {}).get("compute") is False,
-        "aa-transitions.min_leaves": schema.get("aa_transitions", {}).get("min_leaves") == 5,
+        # When draw-aa-transitions carries curated per-node labels (emitted as MRCA
+        # labels), aa_transitions.show must NOT be set — otherwise every stored inode
+        # transition is also drawn (the H3/H1 purple flood). The imported-transition
+        # path is exercised separately below (check_imported_no_curation).
+        "aa-transitions: curated per-node suppresses imported show": "aa_transitions" not in schema,
         "draw-aa-transitions per-node -> mrca_label (?first/?last bounds)": any(
             m.get("first") == "A" and m.get("last") == "C" and m.get("text") == "T1K" and m.get("offset") == [0.01, 0.0]
             for m in schema.get("mrca_labels", [])
@@ -87,6 +122,8 @@ def main():
         "no if-related warning": not any(w.startswith("if:") for w in warnings),
     }
     checks.update(check_eval_condition())
+    checks.update(check_imported_no_curation())
+    checks.update(check_seq_id_alternation())
     failures = [name for name, ok in checks.items() if not ok]
     if failures:
         print("FAIL:")
