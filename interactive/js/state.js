@@ -109,55 +109,107 @@ window.IV = window.IV || {};
       return [...out];
     },
 
-    // ---- F8: per-clade legend cycle (z-order tri-state) ---------------------
-    // Agent-COLOUR's legend click cycles a clade through three states:
-    //   "normal" -> "select" (front) -> "back" -> "normal"
-    // "select": clade raised to front + emphasised (others fade, like a selection)
-    // "back":   clade sent behind everything (z-order) and de-emphasised
-    // The store owns the cycle; panels read cladeZRank() for draw order and get the
-    // emphasis (front pops / back dims) folded into emphasis() below for free.
-    cladeCycle: new Map(),   // clade -> "select" | "back"   (absent == "normal")
+    // ---- F2: per-attribute legend cycle (z-order tri-state) -----------------
+    // Generalises the v3 per-clade cycle to ANY legend attribute — clade,
+    // continent, or aa-value — whichever colorBy is active. Each (attr,value)
+    // group cycles normal -> select(front) -> back -> normal. A "select" group
+    // pops while the rest fade (like a selection); a "back" group dims and sorts
+    // behind. The legend (Agent-COLOUR) calls cycleActive(value) on the active
+    // attribute; emphasis() resolves each point's value for the active attribute
+    // and folds the mode in, so every panel reflects it via its existing refresh.
+    cycle: new Map(),        // "attr\x00value" -> "select" | "back"  (absent = normal)
     _zDirty: false,          // a cycle changed since the last z-order pass
-    cladeMode(c) { return (c && State.cladeCycle.get(c)) || "normal"; },
-    cycleClade(c) {
-      if (!c) return "normal";
-      const next = State.cladeMode(c) === "normal" ? "select"
-                 : State.cladeMode(c) === "select" ? "back" : "normal";
-      if (next === "normal") State.cladeCycle.delete(c); else State.cladeCycle.set(c, next);
-      State._zDirty = true;
-      State.notify();
+    _ck(attr, val) { return attr + "\x00" + val; },
+    // active cyclable attribute, from colorBy (null for non-categorical: stress/none)
+    activeAttr() {
+      const m = State.colorBy;
+      return (m === "clade" || m === "continent" || m === "aa") ? m : null;
+    },
+    // generic (attr, value) accessors
+    attrMode(attr, val) { return (val != null && State.cycle.get(State._ck(attr, val))) || "normal"; },
+    attrZRank(attr, val) { const m = State.attrMode(attr, val); return m === "select" ? 1 : m === "back" ? -1 : 0; },
+    cycleAttr(attr, val) {
+      if (!attr || val == null) return "normal";
+      const k = State._ck(attr, val), cur = State.cycle.get(k) || "normal";
+      const next = cur === "normal" ? "select" : cur === "select" ? "back" : "normal";
+      if (next === "normal") State.cycle.delete(k); else State.cycle.set(k, next);
+      State._zDirty = true; State.notify();
       return next;
     },
-    resetCladeCycle() {
-      if (!State.cladeCycle.size) return;
-      State.cladeCycle.clear(); State._zDirty = true; State.notify();
+    // convenience for the legend, which always operates on the active attribute
+    activeMode(val) { const a = State.activeAttr(); return a ? State.attrMode(a, val) : "normal"; },
+    activeZRank(val) { const a = State.activeAttr(); return a ? State.attrZRank(a, val) : 0; },
+    cycleActive(val) { const a = State.activeAttr(); return a ? State.cycleAttr(a, val) : "normal"; },
+    resetCycle() { if (State.cycle.size) { State.cycle.clear(); State._zDirty = true; State.notify(); } },
+    // any "select" group within attribute `a`?
+    _anyFront(a) {
+      const pre = a + "\x00";
+      for (const [k, v] of State.cycle) if (v === "select" && k.lastIndexOf(pre, 0) === 0) return true;
+      return false;
     },
-    // draw-order rank for a clade: 1 = front (on top), -1 = back (behind), 0 = normal.
-    cladeZRank(c) { const m = State.cladeMode(c); return m === "select" ? 1 : m === "back" ? -1 : 0; },
-    _anyFront() { for (const v of State.cladeCycle.values()) if (v === "select") return true; return false; },
+    // a point's value for attribute `a` (clade is passed through since panels have it)
+    _attrValue(a, norm, clade) {
+      if (a === "clade") return clade;
+      if (a === "continent") return State._contOf(norm);
+      if (a === "aa") return (IV.Colour && IV.Colour.aaValue) ? IV.Colour.aaValue(norm) : null;
+      return null;
+    },
+    // lazy norm -> uppercase continent map (antigens + tree leaves), for the
+    // continent cycle (panels pass clade, not continent, to emphasis()).
+    _contCache: null,
+    _contOf(norm) {
+      if (!State._contCache) {
+        const m = Object.create(null), d = IV.DATA;
+        if (d) {
+          (d.charts || []).forEach(ch => (ch.antigens || []).forEach(a => {
+            if (a.norm && a.continent && !m[a.norm]) m[a.norm] = String(a.continent).toUpperCase();
+          }));
+          (function walk(n) {
+            if (!n) return;
+            if (!n.children || !n.children.length) {
+              if (n.norm && n.continent && !m[n.norm]) m[n.norm] = String(n.continent).toUpperCase();
+            } else n.children.forEach(walk);
+          })(d.tree);
+        }
+        State._contCache = m;
+      }
+      return State._contCache[norm] || null;
+    },
+
+    // back-compat clade aliases (v3 F8 names; ui.js clade legend still calls these)
+    cladeMode(c) { return State.attrMode("clade", c); },
+    cladeZRank(c) { return State.attrZRank("clade", c); },
+    cycleClade(c) { return State.cycleAttr("clade", c); },
+    resetCladeCycle() { return State.resetCycle(); },
 
     // Shared emphasis classifier so tree.js and map.js apply identical highlight
     // logic. `extraHidden` lets the map fold in its only-matched dimming. Returns
     // the classes panels toggle (dim / lift / sel) plus a draw-order rank `z`.
     //   sel   — persistently selected (ring)
     //   lift  — transient hover focus (active)
-    //   dim   — faded: clade-hidden, sent-to-back (F8), a hover focusing someone
-    //           else, OR an emphasis (manual selection or front-clade F8) exists
+    //   dim   — faded: clade-hidden, sent-to-back (F2), a hover focusing someone
+    //           else, OR an emphasis (manual selection or a front F2 group) exists
     //           and this point is none of it.
-    //   z     — F8 draw-order rank (-1 back, 0 normal, 1 front); panels may reorder.
+    //   z     — F2 draw-order rank (-1 back, 0 normal, 1 front); panels may reorder.
     emphasis(norm, clade, extraHidden = false) {
       const hidden = extraHidden || State.isCladeHidden(clade);
       const isActive = !!State.active && norm === State.active;
       const isSel = State.selected.has(norm);
-      const mode = State.cladeMode(clade);
+
+      // F2: fold the active attribute's (clade/continent/aa) cycle in
+      const attr = State.activeAttr();
+      const val = attr ? State._attrValue(attr, norm, clade) : null;
+      const mode = attr ? State.attrMode(attr, val) : "normal";
       const isFront = mode === "select", isBack = mode === "back";
-      // a "front" clade behaves as an emphasis layer alongside the manual selection
-      const hasEmph = State.selected.size > 0 || State._anyFront();
+      const hasFront = attr ? State._anyFront(attr) : false;
+
+      // a "front" group behaves as an emphasis layer alongside the manual selection
+      const hasEmph = State.selected.size > 0 || hasFront;
       const isEmph = isSel || isFront;
       const dim = hidden || isBack ||
         (!!State.active && !isActive) ||
         (hasEmph && !isEmph && !isActive);
-      return { dim, lift: isActive, sel: isSel, z: State.cladeZRank(clade) };
+      return { dim, lift: isActive, sel: isSel, z: attr ? State.attrZRank(attr, val) : 0 };
     },
   };
 
