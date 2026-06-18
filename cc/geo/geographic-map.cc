@@ -87,7 +87,7 @@ namespace ae::geo
             dev.push_back(dev_y(p[1]));
         }
 
-        const Color land{0xE8E8E8};  // light grey land fill
+        const Color land{WHITE};     // white land fill (AD look: white map, grey coastlines)
         const Color coast{0x808080}; // grey coastline
         const double coast_w = std::max(0.4, image_width / 2000.0);
         const double point_outline_w = std::max(0.5, image_width / 1500.0);
@@ -124,7 +124,7 @@ namespace ae::geo
 
         if (!title.empty()) {
             const double title_font = image_width / 40.0;
-            pdf.text(image_width / 2.0, margin + title_font, title, title_font, Color{0}, /*center=*/true);
+            pdf.text(margin, margin, title, title_font, Color{0}, /*center=*/false); // top-left, as in AD
         }
 
         // Legend: a small stack of colour swatches + labels in the lower-left corner.

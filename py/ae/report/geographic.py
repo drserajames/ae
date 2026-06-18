@@ -45,6 +45,23 @@ SUBTYPE_SEQDB = {"h1": "A(H1N1)", "h3": "A(H3N2)", "b": "B"}
 
 # ----------------------------------------------------------------------
 
+def _months_in_window(start: str, end: str) -> list[str]:
+    """Every month in the half-open [start, end) window as 'YYYY-MM' strings (start/end
+    are YYYYMM). Used to pre-seed the periods dict so a map is emitted for *every* month
+    in the time-series window, including ones with no hidb data (geo-draw renders an empty
+    location list as a blank world map)."""
+    months: list[str] = []
+    y, m = int(start[:4]), int(start[4:6])
+    ey, em = int(end[:4]), int(end[4:6])
+    while (y, m) < (ey, em):
+        months.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return months
+
+# ----------------------------------------------------------------------
+
 def make_geo(geo_dir: Path, time_series: TimeSeriesRange, hidb_dir=None,
              subtypes: list[str] = ["h1", "h3", "b"], ae_backend=None,
              geo_draw: str | None = None, make_index: bool = True, force: bool = False,
@@ -116,8 +133,9 @@ def make_geo(geo_dir: Path, time_series: TimeSeriesRange, hidb_dir=None,
 def _extract_geo_records(db, title_prefix: str, start: str, end: str) -> dict:
     """Build geo-draw's `--data` structure: {title_prefix, periods:[{period,
     locations:[{name,count}]}]} from hidb antigens, bucketed by month + location.
-    *start*/*end* are YYYYMM (half-open). Undated/location-less antigens are skipped."""
-    periods: dict[str, dict[str, int]] = {}
+    *start*/*end* are YYYYMM (half-open). Undated/location-less antigens are skipped.
+    Every month in the window gets a period (empty -> blank map)."""
+    periods: dict[str, dict[str, int]] = {p: {} for p in _months_in_window(start, end)}
     for i in range(db.number_of_antigens()):
         ag = db.antigen(i)
         date = ag.date(compact=True)[:6]
@@ -191,8 +209,8 @@ def _extract_geo_records_by_clade(db, title_prefix: str, start: str, end: str, *
     clade resolved from seqdb. *start*/*end* are YYYYMM (half-open). Undated/location-less
     antigens skipped; unresolved clades bucketed as "unknown"."""
     resolver = _CladeResolver(ae_backend, seqdb_subtype)
-    # period -> location -> clade -> count
-    periods: dict[str, dict[str, dict[str, int]]] = {}
+    # period -> location -> clade -> count (every window month seeded -> blank map if no data)
+    periods: dict[str, dict[str, dict[str, int]]] = {p: {} for p in _months_in_window(start, end)}
     for i in range(db.number_of_antigens()):
         ag = db.antigen(i)
         date = ag.date(compact=True)[:6]
@@ -318,7 +336,8 @@ def _extract_geo_records_by_coloring(db, start: str, end: str, *, ae_backend, se
     `geographic_settings` and drive geo-draw's ring packing."""
     colorer = _Coloring(ae_backend, seqdb_subtype, coloring)
     # period -> location -> (color, outline, outline_width) -> count
-    periods: dict[str, dict[str, dict[tuple, int]]] = {}
+    # every window month seeded -> a map is emitted even for months with no data
+    periods: dict[str, dict[str, dict[tuple, int]]] = {p: {} for p in _months_in_window(start, end)}
     for i in range(db.number_of_antigens()):
         ag = db.antigen(i)
         date = ag.date(compact=True)[:6]
