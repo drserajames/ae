@@ -30,15 +30,15 @@ Legend for field status:
   "passage_color": {             // [E1]  passage-type -> colour (P1 markers)
     "egg": "#FF0000", "cell": "#0000FF", "reassortant": "#FFA500"
   },
-  "aa": { "<norm>": "QKIPGND..." }             // [E2]  shared norm -> aligned AA sequence (C1)
+  "aa": { "<norm>": "QKIPGND..." }             // [E2]  shared norm -> aligned full-HA AA sequence (C1)
 }
 ```
 
-The `aa` table maps each matched `norm` to its **aligned HA1 AA sequence string**
-(reconstructed from the `.asr` tree). Residue at 1-based position `p` is
-`aa[norm][p-1]` — same numbering as clade names and tree-node `A` transitions. A
-string (not a `{pos: aa}` dict) keeps the table ~4× smaller and lets C1 read any
-position the user asks for.
+The `aa` table maps each matched `norm` to its **aligned full-HA AA sequence
+string** (reconstructed from the `.asr` tree; HA1 is the prefix, so HA1 numbering
+still applies). Residue at 1-based position `p` is `aa[norm][p-1]` — same numbering
+as clade names and tree-node `A` transitions. A string (not a `{pos: aa}` dict)
+keeps the table ~4× smaller and lets C1 read any position the user asks for.
 
 `norm` is the normalised strain key `LOCATION/ID/YEAR` (uppercase) used to link
 tree tips to chart antigens. It is the join key throughout the bundle.
@@ -159,7 +159,13 @@ contracts that feature modules build on (rather than re-deriving) are:
 
 - **`IV.State`** — selection store + view state (`active`, `selected`,
   `offClades`, `onlyMatched`, `chartIdx`, `colorBy`) with `subscribe(fn)` /
-  `notify()`. Panels subscribe and re-apply highlight on change.
+  `notify()`. Panels subscribe and re-apply highlight on change. Selection API
+  (S1): `setSelection(norms)`, `select(norms,{additive})`, `toggleSelect(norm)`,
+  `clearSelection()`, `isSelected(norm)`, `hasSelection()`. Panels classify each
+  point through `State.emphasis(norm, clade, extraHidden?) → {dim, lift, sel}`
+  and toggle those three classes — do not re-derive the highlight rules.
+  `IV.installSelect(svg)` adds click + drag-box selection to any panel SVG whose
+  points carry a `data-norm` attribute (idempotent; call once per render).
 - **`IV.Colour`** — colour API: `Colour.leaf(node)`, `Colour.antigen(ag)`,
   `Colour.cladeColor(c)`, `Colour.cladeLegend(c)`, `Colour.clades()`,
   `Colour.unmatched()`, honouring the active `State.colorBy`. Continent key:
@@ -168,5 +174,21 @@ contracts that feature modules build on (rather than re-deriving) are:
   `Colour.passages()` (egg/cell/reassortant), and `Colour.hasPassageMarkers()`
   — true only once the bundle carries `passage_color` (E1). P1 should colour
   tip/point passage markers via these rather than re-deriving the palette.
+
+Two more APIs feature modules build on rather than re-deriving:
+
+- **`IV.Map` projection (overlay contract, consumed by N1/N2 lines)** —
+  `Map.project(x, y) → [px, py]` (null before first render / nothing plotted) and
+  `Map.scale` (antigenic-units → px). `Map.onView(fn)` registers a reflow callback
+  that fires after every zoom/pan (M1 reprojects points without a `State.notify`),
+  returning an unsubscribe fn. Overlays draw into a `pointer-events:none` group so
+  they never intercept hover / drag-select. `Map.paintChart(svg, chart, proj, opts)`
+  draws one chart's points and is reused by the all-centres grid (G1).
+- **`IV.Lines`** — error/connection overlays (N1/N2). `Lines.render()` /
+  `Lines.refresh()` (re)draw, scoped to the current selection (or hovered strain).
+  The per-titer error math is exposed as `Lines._errorFromDist(tableDist, mapDist,
+  rawTiter) → signed error` (>0 too close/red, <0 too far/blue; `<`/`>` use the
+  acmacs sigmoid) so **C2 per-point stress can reuse it** (`Σ error²` over a point's
+  titers) instead of re-deriving the formula.
 
 See `PLAN.md` for task ownership and `README.md` for module roles.

@@ -19,9 +19,20 @@
   #treePane, #mapPane { flex:1; min-width:0; display:flex; flex-direction:column; }
   #treePane { border-right:1px solid var(--line); }
   .paneTitle { font-size:12px; font-weight:600; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); color:var(--muted); }
+  .paneTitle.row { display:flex; align-items:center; gap:10px; }
+  .paneTitle .paneCtl { margin-left:auto; font-weight:400; display:flex; align-items:center; gap:5px; }
   .scroll { overflow:auto; flex:1; }
   #mapWrap { flex:1; position:relative; }
   svg { display:block; }
+  /* M1: on-map zoom controls (wheel/pinch + drag also work) */
+  .mapCtl { position:absolute; top:8px; right:8px; display:flex; flex-direction:column; gap:4px; z-index:5; }
+  .mapCtl button { width:26px; height:26px; font-size:15px; line-height:1; border:1px solid var(--line); background:rgba(255,255,255,.92); border-radius:5px; cursor:pointer; color:var(--fg); padding:0; }
+  .mapCtl button:hover { background:#fff; border-color:#999; }
+  /* G1: all-centres grid of small multiples */
+  #gridWrap { flex:1; padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:12px; align-content:start; }
+  .gridPanel { border:1px solid var(--line); border-radius:5px; overflow:hidden; background:var(--bg); }
+  .gridPanelTitle { font-size:11px; font-weight:600; color:var(--muted); padding:4px 8px; background:var(--panel); border-bottom:1px solid var(--line); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .gridPanelMap { display:flex; justify-content:center; }
   .edge { stroke:#999; stroke-width:1; fill:none; }
   .tip { cursor:pointer; }
   .tip:hover { stroke:#000; stroke-width:1.2px; }
@@ -29,6 +40,11 @@
   .serum { fill:none; stroke:#555; stroke-width:1.3px; }
   .dim { opacity:0.12; }
   .lift { stroke:#000; stroke-width:1.6px; }
+  /* S1 selection: persistent blue ring (drawn outside the fill); rubber-band box */
+  .sel { stroke:#1558d6; stroke-width:2.4px; paint-order:stroke fill; }
+  .sel.dim { opacity:1; }                /* selected points stay visible */
+  .selbox { fill:rgba(21,88,214,.08); stroke:#1558d6; stroke-width:1; stroke-dasharray:4 3; pointer-events:none; }
+  input[type=search].nohit { border-color:#e15759; background:#fff3f3; }
   #legend { padding:8px 10px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:6px 20px; font-size:11px; max-height:120px; overflow:auto; }
   .lgSec + .lgSec { border-left:1px solid var(--line); padding-left:16px; }
   .lg { display:flex; align-items:center; gap:4px; user-select:none; padding:1px 4px; border-radius:3px; }
@@ -64,8 +80,26 @@
       <div class="scroll" id="treeScroll"><svg id="treeSvg"></svg></div>
     </div>
     <div id="mapPane">
-      <div class="paneTitle" id="mapTitle">Antigenic map</div>
-      <div id="mapWrap"><svg id="mapSvg"></svg></div>
+      <div class="paneTitle row">
+        <span id="mapTitle">Antigenic map</span>
+        <span class="paneCtl">
+          <label>View
+            <select id="viewMode">
+              <option value="single">single map</option>
+              <option value="grid">all centres</option>
+            </select>
+          </label>
+        </span>
+      </div>
+      <div id="mapWrap">
+        <svg id="mapSvg"></svg>
+        <div class="mapCtl">
+          <button id="mapZoomIn" title="Zoom in">+</button>
+          <button id="mapZoomOut" title="Zoom out">&minus;</button>
+          <button id="mapZoomReset" title="Reset view">&#10239;</button>
+        </div>
+      </div>
+      <div id="gridWrap" class="scroll" style="display:none"></div>
     </div>
   </div>
   <div id="legend"></div>

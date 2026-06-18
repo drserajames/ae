@@ -1,21 +1,133 @@
-// grid.js — all-centres grid of small multiples (Stage 2: G1)
+// grid.js — all-centres grid of small multiples (G1)
 //
-// SCAFFOLD. Empty in F1. Owns the "all centres at once" view: a grid of small
-// map panels (one per chart) that all link to the shared tree and to each other.
-// Contract (see PLAN.md task G1):
-//   - render(): lay out one small-multiple map per chart in DATA.charts; reuse
-//     IV.Map's point drawing where practical; share IV.State selection across panels.
-//   - refresh(): re-apply highlight across every panel (subscribed to IV.State).
-// Toggled from a view control (added with G1). Hidden in F1.
+// Owns the "all centres at once" view: a grid of small map panels (one per chart
+// in DATA.charts), all linked to the shared tree and to each other through
+// IV.State. Each panel projects its OWN chart independently (centres have their
+// own orientations); linkage is by strain `norm`, not by coordinate alignment —
+// hovering/selecting a strain in any panel (or the tree) highlights it everywhere.
+//
+// Point drawing is reused from IV.Map.paintChart so the grid stays in sync with the
+// single map's styling (clade fill, passage rings, ref/vaccine/serum glyphs). The
+// View control (single / all centres) is wired here, self-contained.
+//
+// Structure vs repaint: the cell/title/svg DOM and IV.installSelect (which adds
+// window listeners and is keyed on the svg node) are built ONCE per panel. Recolour
+// / refresh only clears+repaints each existing svg's contents — it never recreates
+// nodes, so window listeners don't accumulate and installSelect runs once per panel.
 (function (IV) {
   "use strict";
-  const State = IV.State;
+  const State = IV.State, el = IV.el;
 
-  const Grid = {
-    render() { /* G1 — Stage 2 */ },
-    refresh() { /* respond to selection across panels — Stage 2 */ },
-  };
+  // fixed small-multiple size — deterministic (no layout measurement needed, so it
+  // renders identically headless); the grid container scrolls / wraps.
+  const PW = 340, PH = 300, PAD = 18;
 
-  IV.Grid = Grid;
-  State.subscribe(Grid.refresh);
+  let panels = [];          // [{ chart, svg, nodes }]  (svg nodes are stable)
+  let structureBuilt = false;
+  let activeView = "single";
+  let lastColorBy = null;
+
+  // Fit one chart's points into a PW×PH panel (its own orientation, y flipped).
+  function fitProj(chart) {
+    const all = chart.antigens.filter(a => a.x != null && a.y != null)
+      .concat(chart.sera.filter(s => s.x != null && s.y != null));
+    if (!all.length) return null;
+    const xs = all.map(p => p.x), ys = all.map(p => p.y);
+    const xmin = Math.min(...xs), xmax = Math.max(...xs);
+    const ymin = Math.min(...ys), ymax = Math.max(...ys);
+    const spanX = xmax - xmin || 1, spanY = ymax - ymin || 1;
+    const scale = Math.min((PW - 2 * PAD) / spanX, (PH - 2 * PAD) / spanY);
+    const ox = (PW - spanX * scale) / 2, oy = (PH - spanY * scale) / 2;
+    return { SX: x => ox + (x - xmin) * scale, SY: y => oy + (ymax - y) * scale };
+  }
+
+  // Build the cell/title/svg DOM once, install selection once per svg. The chart set
+  // is fixed for the life of the document, so this runs a single time.
+  function buildStructure() {
+    const wrap = document.getElementById("gridWrap");
+    if (!wrap) return;
+    wrap.innerHTML = ""; panels = [];
+    IV.DATA.charts.forEach(chart => {
+      const cell = document.createElement("div"); cell.className = "gridPanel";
+      const ttl = document.createElement("div"); ttl.className = "gridPanelTitle";
+      ttl.textContent = `${chart.label} — ${chart.n_antigens} ag, ${chart.n_sera} sr`;
+      const holder = document.createElement("div"); holder.className = "gridPanelMap";
+      const svg = el("svg", { width: PW, height: PH });
+      holder.appendChild(svg); cell.appendChild(ttl); cell.appendChild(holder);
+      wrap.appendChild(cell);
+      IV.installSelect(svg);   // ONCE per svg: box / click select → shared selection
+      panels.push({ chart, svg, nodes: {} });
+    });
+    structureBuilt = true;
+    lastColorBy = null;        // force the next paint
+  }
+
+  // Clear + repaint every existing panel svg (reusing the same svg nodes).
+  function paintPanels() {
+    lastColorBy = State.colorBy;
+    panels.forEach(p => {
+      p.svg.innerHTML = "";
+      const proj = fitProj(p.chart);
+      if (proj) {
+        p.nodes = IV.Map.paintChart(p.svg, p.chart, proj, { r0: 2.2 }).nodes;
+      } else {
+        p.nodes = {};
+        const t = el("text", { x: PW / 2, y: PH / 2, "text-anchor": "middle", fill: "#999", "font-size": 12 });
+        t.textContent = "no positioned points"; p.svg.appendChild(t);
+      }
+    });
+    applyHighlight();
+  }
+
+  function applyHighlight() {
+    panels.forEach(p => {
+      p.chart.antigens.forEach(a => {
+        const list = p.nodes[a.norm]; if (!list) return;
+        const extraHidden = State.onlyMatched && !IV.Tree.normToLeaves[a.norm];
+        const e = State.emphasis(a.norm, a.clade, extraHidden);
+        list.forEach(s => {
+          s.classList.toggle("dim", e.dim);
+          s.classList.toggle("lift", e.lift);
+          s.classList.toggle("sel", e.sel);
+        });
+      });
+    });
+  }
+
+  // Bring the grid up to date for the current colorBy (repaint only if it changed).
+  function sync() {
+    if (!structureBuilt) buildStructure();
+    if (lastColorBy !== State.colorBy) paintPanels(); else applyHighlight();
+  }
+
+  function refresh() {
+    if (activeView !== "grid" || !structureBuilt) return;
+    if (lastColorBy !== State.colorBy) { paintPanels(); return; }  // recolour → repaint
+    applyHighlight();
+  }
+
+  function setView(mode) {
+    activeView = mode;
+    const single = mode === "single";
+    const mapWrap = document.getElementById("mapWrap");
+    const gridWrap = document.getElementById("gridWrap");
+    if (mapWrap) mapWrap.style.display = single ? "" : "none";
+    if (gridWrap) gridWrap.style.display = single ? "none" : "";
+    const cs = document.getElementById("chartSel"); if (cs) cs.disabled = !single;
+    const mt = document.getElementById("mapTitle");
+    if (!single) {
+      sync();
+      if (mt) mt.textContent = `Antigenic maps — all ${IV.DATA.charts.length} centres`;
+    } else if (mt) {
+      const ch = IV.DATA.charts[State.chartIdx];
+      mt.textContent = `Antigenic map — ${ch.label}: ${ch.name}`;
+    }
+  }
+
+  // Wire the View toggle (markup lives in the template's map pane title row).
+  const sel = document.getElementById("viewMode");
+  if (sel) sel.onchange = () => setView(sel.value);
+
+  IV.Grid = { render: sync, refresh, setView };
+  State.subscribe(refresh);
 })(window.IV);

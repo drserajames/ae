@@ -85,12 +85,25 @@ Each `--chart` is `LABEL=PATH`; the label names the centre in the viewer's
 - **Right:** the antigenic map — filled circles = antigens, open squares = sera,
   black-edged circles = reference antigens, stars = vaccines.
 - **Linking:** hover a tip → its antigen(s) light up on the map (and vice versa),
-  matched by strain. Click clade swatches in the legend to filter; use the search
-  box to find a strain; *map: linked only* dims map points that have no tree tip.
+  matched by strain. Click clade swatches in the legend to filter; *map: linked
+  only* dims map points that have no tree tip.
 - **Legend (persistent):** a colour key for the active *Colour* mode — clade
   swatches with tree-tip counts (click to show/hide a clade), continent key, or a
   uniform-colour note — alongside a fixed marker key (reference / vaccine / serum
   shapes, plus egg/cell/reassortant passage colours once passage data is exported).
+- **Selection:** click a tip or map point to select it (Shift/Cmd-click adds to
+  the selection); drag a box on either panel to select every strain inside it.
+  Selected strains keep a blue ring in **both** panels and the rest fade. The
+  search box selects **all** name matches at once; click empty space to clear.
+- **Map zoom/pan (M1):** pinch or ⌃-scroll (or the on-map ＋ / − / ⤢ buttons) to
+  zoom toward the cursor; two-finger scroll or a right/middle-button drag to pan;
+  double-click resets. The map starts fitted to the pane. Zoom/pan re-projects the
+  points (it does not transform the SVG) so box-selection and overlay lines stay
+  aligned. Left-button drag stays reserved for box-selection.
+- **All-centres view (G1):** the *View → all centres* toggle replaces the single
+  map with a grid of small-multiple maps, one per centre, each in its own
+  orientation. Hover/select/search links the highlight across **every** panel and
+  the tree at once, so a strain can be compared across labs.
 
 ## How the link is made
 
@@ -110,9 +123,10 @@ un-sequenced isolates or reassortants.
 
 The exporter prepares the report-faithful data the viewer renders:
 
-- **Oriented coordinates.** Each chart's projection `transformation` (read from the
-  `.ace` projection via `decat`) is baked into the exported antigen/serum `x`/`y`, so
-  the map matches the report's orientation. (The 2×2 matrix has no `ae_backend` getter.)
+- **Oriented coordinates.** Each chart's projection `transformation` (parsed in-process
+  from `str(projection.transformation())`, which emits the 2×2 matrix as a JSON list) is
+  baked into the exported antigen/serum `x`/`y`, so the map matches the report's
+  orientation.
 - **Canonical clade colours + legend.** Clades are re-derived the way `chart_modifier`
   does — `populate_from_seqdb()` then `ae.semantic.clade.attributes()` with
   `semantic_clades.semantic_attribute_data_for_subtype()` — and each antigen's primary
