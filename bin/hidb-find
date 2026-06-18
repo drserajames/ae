@@ -1,0 +1,70 @@
+#! /usr/bin/env python3
+"""Find antigens and sera in the historical influenza database (hidb).
+
+Port of AD's hidb5-find. Looks up names in the forms
+"<subtype>/<location>/<isolation>/<year>", "<location>/<isolation>/<year>", or
+"<location>/<isolation>", and reports the matching hidb records together with
+the tables they appear in.
+
+Requires $HIDB_V5 and $LOCDB_V2 (see bin/_hidb_boot.py).
+
+  hidb-find A(H3N2) "<location>/<isolation>/<year>"
+  hidb-find --sera B "<location>/<isolation>/<year>"
+  hidb-find --labid A(H3N2) <lab-id>
+"""
+
+import sys
+import os
+import argparse
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _hidb_boot
+
+
+def report_antigen(db, index, tables_limit):
+    ag = db.antigen(index)
+    print(f"AG {ag.full_name()}")
+    print(f"   date: {ag.date()}   lab ids: {', '.join(ag.lab_ids) or '-'}   tables: {ag.number_of_tables()}")
+    for ti in list(ag.tables)[:tables_limit]:
+        print(f"      {db.table(ti).name()}")
+
+
+def report_serum(db, index, tables_limit):
+    sr = db.serum(index)
+    print(f"SR {sr.full_name()}")
+    print(f"   serum id: {sr.serum_id or '-'}   species: {sr.serum_species or '-'}   tables: {sr.number_of_tables()}")
+    for ti in list(sr.tables)[:tables_limit]:
+        print(f"      {db.table(ti).name()}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="find antigens/sera in hidb")
+    parser.add_argument("virus_type", help='virus type, e.g. "A(H3N2)", "H3", "B"')
+    parser.add_argument("names", nargs="+", help="names (or lab ids with --labid) to look up")
+    parser.add_argument("--sera", action="store_true", help="search sera instead of antigens")
+    parser.add_argument("--labid", action="store_true", help="treat the arguments as lab ids (antigens only)")
+    parser.add_argument("--tables", type=int, default=5, help="max tables to list per record (default 5; 0 = all)")
+    args = parser.parse_args()
+
+    ae_backend = _hidb_boot.load_ae_backend()
+    db = _hidb_boot.open_hidb(ae_backend, args.virus_type)
+    tables_limit = args.tables if args.tables > 0 else None
+
+    for name in args.names:
+        if args.labid:
+            found = db.find_antigens_by_labid(name)
+        elif args.sera:
+            found = db.find_sera(name)
+        else:
+            found = db.find_antigens(name)
+        print(f"=== {name}: {len(found)} found ===")
+        for index in found:
+            if args.sera:
+                report_serum(db, index, tables_limit)
+            else:
+                report_antigen(db, index, tables_limit)
+        print()
+
+
+if __name__ == "__main__":
+    main()

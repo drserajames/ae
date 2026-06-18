@@ -1,0 +1,54 @@
+#! /usr/bin/env python3
+"""Summary statistics for a hidb file: table counts by lab, assay, RBC species,
+and year.
+
+Loosely ports AD's hidb5-stat (which emits detailed per-hour JSON); this prints
+human-readable tallies. Takes a hidb file directly (no $HIDB_V5 needed).
+
+  hidb-stat hidb5.h3.json.xz
+"""
+
+import sys
+import os
+import argparse
+from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _hidb_boot
+
+
+def print_counter(title, counter):
+    print(f"{title}:")
+    for key, count in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"   {count:6d}  {key or '(none)'}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="hidb table statistics")
+    parser.add_argument("source", help="hidb file (e.g. hidb5.h3.json.xz)")
+    args = parser.parse_args()
+
+    ae_backend = _hidb_boot.load_ae_backend()
+    db = ae_backend.hidb.HiDb(args.source)
+
+    by_lab, by_assay, by_rbc, by_year = Counter(), Counter(), Counter(), Counter()
+    for ti in range(db.number_of_tables()):
+        t = db.table(ti)
+        by_lab[t.lab] += 1
+        by_assay[t.assay] += 1
+        by_rbc[t.rbc] += 1
+        by_year[t.date[:4]] += 1
+
+    print(f"virus type: {db.virus_type()}")
+    print(f"antigens:   {db.number_of_antigens()}")
+    print(f"sera:       {db.number_of_sera()}")
+    print(f"tables:     {db.number_of_tables()}")
+    print()
+    print_counter("tables by lab", by_lab)
+    print_counter("tables by assay", by_assay)
+    print_counter("tables by rbc species", by_rbc)
+    print_counter("tables by year", by_year)
+
+
+if __name__ == "__main__":
+    main()

@@ -41,6 +41,48 @@ ae/
 
 ---
 
+## Porting from AD (Acmacs-D) — status & coordination
+
+`ae` is the rewrite/successor of the older `AD` tree at `~/AC/eu/AD` (the `acmacs-*` C++
+family). The core was ported first; the remaining subsystems have since been ported (or
+shelved by architecture decision) — **the bulk of the AD→ae port is now complete.**
+**Multiple agents work different subsystems in parallel** — the master plan, ownership
+table, per-subsystem milestones, and coordination rules live in [`TODO.md`](TODO.md).
+**Read `TODO.md` and claim a subsystem there before starting any porting work.**
+
+**Core, already ported:** chart engine (relax/optimize, merge, grid-test, procrustes,
+serum circles, stress), sequences/seqdb, virus name/passage parsing, locationdb, tree
+manipulation, WHO CC XLSX/TSV ingestion. Exposed via `ae_backend` submodules: `chart_v3`,
+`chart_v2`, `seqdb`, `tree`, `virus`, `whocc`, `locdb_v3`, `hidb`, `utils`. The chart engine
+also now writes layout coordinates (`Projection.set_coordinates` / `Layout.__setitem__` /
+`set_unmovable`) for programmatic map adjustment.
+
+**Subsystem status (priority order — see `TODO.md` for detail):**
+
+| # | Subsystem | AD source | ae target | State |
+|---|-----------|-----------|-----------|-------|
+| 1 | Map drawing | `acmacs-draw`, `acmacs-map-draw` | — / `cc/geo/` | ⚪ **shelved** — antigenic maps are done in **kateri** (Dart app, separate repo, driven over a socket via `py/ae/utils/kateri.py`); `cc/map-draw/` removed (preserved on `map-draw-shelved`). `cc/draw/cairo-surface.*` kept (shared); **geographic** maps = `cc/geo/` + `geo-draw` (done) |
+| 2 | hidb (historical influenza DB) | `hidb-5` | `cc/hidb/` | 🟢 done — reader + authoring (make/convert/stat), `ae_backend.hidb` |
+| 3 | TAL (phylo tree drawing / sig pages) | `acmacs-tal` | `cc/tal/` + `tal-draw` + `py/ae/tal/` | 🟢 feature-complete (core) — tree render, clades/time-series, colouring, aa-transitions, settings-v3 `.tal` reader, signature pages |
+| 4 | ssm-report (seasonal report) | `ssm-report` | `py/ae/report/` | 🟡 vcm engine consolidated; all figures generate on ae (kateri maps / `stat` / `geo-draw` / `tal-draw`); adjust ported (`ae.adjust` + kateri drag). Remaining: a full assembled-report run + geo clade colouring (#1). See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) |
+| 5 | webserver | `acmacs-webserver` | `py/ae/webserver/` | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data verified |
+| 6 | CLI wrappers over `chart_v3` | various `bin/chart-*` | `bin/` | 🟢 done |
+
+> Note: **antigenic-map drawing lives in `kateri`** (a Dart/Flutter viewer + PDF generator,
+> `github.com/drserajames/kateri`), not in `ae` C++ — ae drives it over a Unix socket
+> (`ae.utils.kateri`: send `CHRT`, `set_style`, `pdf`/`get_chart`). Don't look for a C++ map
+> renderer in `ae`; the only ae-side "map drawing" is the geographic world map (`cc/geo`).
+
+**Coordination essentials (full rules in `TODO.md`):**
+- `meson.build` is the main conflict risk — keep edits in a commented `# --- <subsystem> ---`
+  block and append rather than reflow.
+- Python bindings: add a `cc/py/<name>.cc` file and register it in
+  [`cc/py/module.cc`](cc/py/module.cc) + [`cc/py/module.hh`](cc/py/module.hh) without
+  reordering existing entries.
+- AD source to reference for each subsystem is under `~/AC/eu/AD/sources/<package>`.
+- Build with the native-arm64 Apple-Clang-16 procedure below (not `./mk`, not Homebrew
+  LLVM). New drawing deps (Cairo, Pango) come from arm64 Homebrew at `/opt/homebrew`.
+
 ## Current build state (Apple Silicon)
 
 **`build/` → `build-arm64/`** — The active build is **native arm64**, compiled with Apple Clang 16 and arm64 Homebrew dependencies at `/opt/homebrew`. No Rosetta 2 needed.
@@ -127,6 +169,15 @@ ln -s build-arm64 build
 Apple Clang **inherits the architecture of its parent process**. Running clang from an x86_64 process (even on an arm64 Mac) produces x86_64 binaries silently — `file` on the output will confirm the architecture. The pip-installed `~/Library/Python/3.10/bin/ninja` is a universal binary that runs as arm64 natively, ensuring the entire toolchain spawns arm64 clang.
 
 `/usr/local/bin/ninja` (from x86_64 Homebrew) must NOT be used — it spawns x86_64 clang.
+
+### CMake 4.x / lexy reconfigure failure (after any `meson.build` edit)
+
+Editing `meson.build` forces a full meson regenerate, which re-runs the vendored `lexy`
+CMake subproject. arm64 Homebrew CMake is now **4.x**, which removed compatibility with the
+`cmake_minimum_required(VERSION < 3.5)` that lexy's bundled doctest declares — the
+regenerate fails with *"Compatibility with CMake < 3.5 has been removed."* Work around it by
+exporting **`CMAKE_POLICY_VERSION_MINIMUM=3.5`** in the environment before running `ninja`
+(or `meson setup`). This does not affect builds that don't reconfigure.
 
 ### Verifying the build architecture
 
@@ -265,7 +316,9 @@ layout.number_of_dimensions()       # int (2 or 3)
 len(layout)                         # n_antigens + n_sera
 for coords in layout:               # iterate — each coords is list[float]
     x, y = coords
-# NOTE: do NOT use layout[i] — raises TypeError: Unregistered type
+x, y = layout[i]                    # read one point's coords by index (negative index counts from end)
+layout[i] = [x, y]                  # move a point (also proj.set_coordinates(point_no, [x, y]))
+proj.set_unmovable([i, j])          # pin points so a subsequent relax() keeps them fixed
 
 # Column bases
 chart.column_bases(proj.minimum_column_basis())   # list[float], one per serum
@@ -380,7 +433,7 @@ bin/chart-grid-test input.ace
 - `.ace` files are usually XZ-compressed; opening with a text editor or `cat` will show binary garbage. Use `xz -d -c file.ace` to inspect raw JSON.
 - Titer `"*"` = missing; `"<N"` = below detection; `">N"` = above threshold. Do not treat these as numbers.
 - Column bases (`colbases`) are `log2(max_titer_per_serum)` and are fundamental to stress calculations — they are not stored in projections by default, only in forced-column-bases overrides.
-- The `Layout` object supports iteration (`for coords in layout`) but **not** direct indexing via `layout[i]` — raises `TypeError: Unregistered type`.
+- The `Layout` object supports iteration (`for coords in layout`) and indexed read/write: `layout[i]` reads a point's coords, `layout[i] = [x, y]` sets them (negative index counts from the end). Coordinates can also be set via `proj.set_coordinates(point_no, [x, y])`, and `proj.set_unmovable([i, j])` pins points so a subsequent `relax()` keeps them fixed.
 - **New C++ code**: Always use `fmt::format_to(` (not bare `format_to(`). Both `std::format_to` and `fmt::format_to` are visible in C++20 mode under Apple Clang 16 and the unqualified form is ambiguous.
 - **Homebrew LLVM 22** (at `/opt/homebrew/opt/llvm/`) is installed but **not used** — incompatible with the vendored `lexy` subproject. Apple Clang 16 (`/usr/bin/clang++`) is the correct compiler.
 - **Rebuilding**: Run meson via `arch -arm64 python3.10` and ninja via `arch -arm64 ~/Library/Python/3.10/bin/ninja`. The x86_64 `/usr/local/bin/ninja` will silently produce x86_64 binaries even on an arm64 Mac.

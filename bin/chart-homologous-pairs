@@ -1,0 +1,65 @@
+#! /usr/bin/env python3
+"""Find homologous antigen-serum pairs in a chart.
+
+A pair is homologous when the serum was raised against the corresponding
+antigen — i.e. the serum name is a prefix of the antigen name (standard
+convention: serum names are the virus strain without passage suffix).
+
+Prints each pair as:  AG no  SR no  antigen-designation  /  serum-designation
+If the chart has projections, also prints the map distance for each pair.
+"""
+import sys, math, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    n_ag = chart.number_of_antigens()
+    has_map = chart.number_of_projections() > 0
+
+    if has_map:
+        proj = chart.projection(0)
+        layout = proj.layout()
+
+    pairs_found = 0
+    for sr_no, sr in chart.select_all_sera():
+        sr_name = sr.name()
+        for ag_no, ag in chart.select_all_antigens():
+            ag_name = ag.name()
+            if ag_name.startswith(sr_name):
+                ag_desig = ag.designation()
+                sr_desig = sr.designation()
+                if has_map:
+                    ag_idx = ag_no
+                    sr_idx = sr_no + n_ag
+                    if layout.connected(ag_idx) and layout.connected(sr_idx):
+                        ag_coords = list(layout[ag_idx])
+                        sr_coords = list(layout[sr_idx])
+                        d = math.sqrt(sum((a - b) ** 2 for a, b in zip(ag_coords, sr_coords)))
+                        print(f"AG {ag_no:3d}  SR {sr_no:3d}  dist={d:.4f}  {ag_desig}  /  {sr_desig}")
+                    else:
+                        print(f"AG {ag_no:3d}  SR {sr_no:3d}  dist=nan      {ag_desig}  /  {sr_desig}")
+                else:
+                    print(f"AG {ag_no:3d}  SR {sr_no:3d}  {ag_desig}  /  {sr_desig}")
+                pairs_found += 1
+                if not args.all:
+                    break
+
+    if pairs_found == 0:
+        print("no homologous pairs found")
+    else:
+        print(f"\n{pairs_found} homologous pair(s)")
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart", type=Path)
+    parser.add_argument("--all", action="store_true", default=False,
+                        help="report all antigens matching each serum (default: stop at first match per serum)")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

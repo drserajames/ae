@@ -1,0 +1,13 @@
+{
+  "_": "tal-draw settings DSL — node select/apply test (works with tree-clades.json; synthetic leaves A-E)",
+  "image_size": 700,
+  "title": "node select/apply",
+  "labels": true,
+  "color_by_clade": true,
+  "clades": { "show": true },
+  "nodes": [
+    { "select": { "seq_id": "C" },              "apply": { "hide": true } },
+    { "select": { "seq_id": ["A", "B"] },        "apply": { "edge_color": "#000000" } },
+    { "select": { "seq_id": "E" },              "apply": { "label_color": "#ff0000", "label_scale": 1.5 } }
+  ]
+}

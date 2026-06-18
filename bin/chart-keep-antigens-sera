@@ -1,0 +1,76 @@
+#! /usr/bin/env python3
+"""Keep only the specified antigens and/or sera in a chart; remove all others.
+
+Selection by comma-separated 0-based indexes (--ag 0,3,5) or by Python regex
+matched against the full designation (--ag-re 'EGG').  A point is KEPT if it
+matches either selector for its type.  If no selector is given for a type, all
+points of that type are kept unchanged.
+
+Examples:
+  chart-keep-antigens-sera input.ace output.ace --ag 0,1,2,5
+  chart-keep-antigens-sera input.ace output.ace --ag-re 'A/HONG KONG'
+  chart-keep-antigens-sera input.ace output.ace --sr 0,1,2,3,4
+"""
+import sys, re, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def parse_indexes(s: str) -> set:
+    result = set()
+    for part in s.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            a, b = part.split("-", 1)
+            result.update(range(int(a), int(b) + 1))
+        else:
+            result.add(int(part))
+    return result
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+
+    ag_indexes = parse_indexes(args.antigen_indexes) if args.antigen_indexes else None
+    sr_indexes = parse_indexes(args.serum_indexes) if args.serum_indexes else None
+    ag_re = re.compile(args.antigen_pattern) if args.antigen_pattern else None
+    sr_re = re.compile(args.serum_pattern) if args.serum_pattern else None
+
+    def ag_pred(sd):
+        by_index = ag_indexes is None or sd.no in ag_indexes
+        by_re = ag_re is None or bool(ag_re.search(sd.name))
+        return by_index and by_re
+
+    def sr_pred(sd):
+        by_index = sr_indexes is None or sd.no in sr_indexes
+        by_re = sr_re is None or bool(sr_re.search(sd.name))
+        return by_index and by_re
+
+    antigens = chart.select_antigens(ag_pred) if (ag_indexes is not None or ag_re) else None
+    sera = chart.select_sera(sr_pred) if (sr_indexes is not None or sr_re) else None
+
+    n_ag = len(antigens) if antigens else chart.number_of_antigens()
+    n_sr = len(sera) if sera else chart.number_of_sera()
+    print(f"keeping {n_ag} antigen(s), {n_sr} serum/sera")
+    chart.keep_antigens_sera(antigens=antigens, sera=sera, remove_projections=args.remove_projections)
+
+    chart.write(args.output)
+    print(f"written: {args.output}  AG:{chart.number_of_antigens()} SR:{chart.number_of_sera()}")
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart", type=Path)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--ag", dest="antigen_indexes", metavar="INDEXES", help="comma-separated 0-based antigen indexes to keep (ranges like 2-5 allowed)")
+    parser.add_argument("--ag-re", dest="antigen_pattern", metavar="REGEX", help="regex matched against antigen designation; only matching antigens are kept")
+    parser.add_argument("--sr", dest="serum_indexes", metavar="INDEXES", help="comma-separated 0-based serum indexes to keep")
+    parser.add_argument("--sr-re", dest="serum_pattern", metavar="REGEX", help="regex matched against serum designation; only matching sera are kept")
+    parser.add_argument("--remove-projections", action="store_true", default=False, help="strip all projections from output (default: keep projections)")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

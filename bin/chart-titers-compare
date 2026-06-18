@@ -1,0 +1,59 @@
+#! /usr/bin/env python3
+"""Compare titer tables between two charts that share a common antigen/serum set.
+
+Finds common antigens and sera between chart1 and chart2, then for each
+common antigen-serum pair reports whether the titers differ.  A summary of
+the number of changed titers is printed at the end.
+
+Useful for checking how a table changed between processing steps or merges.
+"""
+import sys, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    chart1 = ae_backend.chart_v3.Chart(args.chart1)
+    chart2 = ae_backend.chart_v3.Chart(args.chart2)
+
+    print(f"chart1: {chart1.name()}  AG:{chart1.number_of_antigens()} SR:{chart1.number_of_sera()}")
+    print(f"chart2: {chart2.name()}  AG:{chart2.number_of_antigens()} SR:{chart2.number_of_sera()}")
+
+    common = ae_backend.chart_v3.CommonAntigensSeraFromChart(chart1, chart2, args.match)
+    ag_pairs = common.antigens()
+    sr_pairs = common.sera()
+
+    if not ag_pairs or not sr_pairs:
+        print("no common antigens/sera found")
+        return 1
+
+    titers1 = chart1.titers()
+    titers2 = chart2.titers()
+    changed = 0
+    total = 0
+
+    for ag1, ag2 in ag_pairs:
+        ag_name = chart1.antigen(ag1).designation()
+        for sr1, sr2 in sr_pairs:
+            t1 = str(titers1.titer(ag1, sr1))
+            t2 = str(titers2.titer(ag2, sr2))
+            total += 1
+            if t1 != t2:
+                changed += 1
+                sr_name = chart1.serum(sr1).designation()
+                print(f"  AG {ag1:3d} SR {sr1:3d}  {t1:>6} → {t2:>6}  {ag_name}  /  {sr_name}")
+
+    print(f"\n{changed} / {total} titers differ across {len(ag_pairs)} common antigens × {len(sr_pairs)} common sera")
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart1", type=Path)
+    parser.add_argument("chart2", type=Path)
+    parser.add_argument("--match", default="auto", choices=["strict", "relaxed", "ignored", "auto"])
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

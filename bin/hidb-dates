@@ -1,0 +1,52 @@
+#! /usr/bin/env python3
+"""Report the isolation-date range and per-year antigen counts in a hidb.
+
+Port of AD's hidb5-dates.
+
+Requires $HIDB_V5 and $LOCDB_V2 (see bin/_hidb_boot.py).
+
+  hidb-dates A(H3N2)
+"""
+
+import sys
+import os
+import argparse
+from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _hidb_boot
+
+
+def main():
+    parser = argparse.ArgumentParser(description="hidb isolation-date statistics")
+    parser.add_argument("virus_type", help='virus type, e.g. "A(H3N2)", "H3", "B"')
+    args = parser.parse_args()
+
+    ae_backend = _hidb_boot.load_ae_backend()
+    db = _hidb_boot.open_hidb(ae_backend, args.virus_type)
+
+    per_year = Counter()
+    earliest = None
+    latest = None
+    no_date = 0
+    for i in range(db.number_of_antigens()):
+        date = db.antigen(i).date()  # YYYY-MM-DD
+        if not date:
+            no_date += 1
+            continue
+        if earliest is None or date < earliest:
+            earliest = date
+        if latest is None or date > latest:
+            latest = date
+        per_year[date[:4]] += 1
+
+    print(f"virus type: {db.virus_type()}")
+    print(f"antigens:   {db.number_of_antigens()}  (without a date: {no_date})")
+    print(f"date range: {earliest or '-'} .. {latest or '-'}")
+    print("per year:")
+    for year in sorted(per_year):
+        print(f"   {year}: {per_year[year]}")
+
+
+if __name__ == "__main__":
+    main()

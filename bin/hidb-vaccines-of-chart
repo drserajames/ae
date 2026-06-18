@@ -1,0 +1,107 @@
+#! /usr/bin/env python3
+"""Identify vaccine strains present in a chart, using the whocc vaccine list and
+the historical influenza database (hidb).
+
+Port of AD's hidb5-vaccines-of-chart. For each known vaccine strain of the
+chart's (sub)type+lineage, finds the matching chart antigens, groups them by
+passage type (egg / cell / reassortant), and annotates each with how many hidb
+tables it has appeared in (more tables => a better-characterised candidate).
+
+Data files (located via the environment, never bundled in this repo):
+  $HIDB_V5       directory with hidb5.{h1,h3,b}.json.xz
+  $LOCDB_V2      locationdb.json.xz
+  $VACCINES_JSON whocc vaccines.json (the AD share/conf/vaccines.json)
+
+  hidb-vaccines-of-chart chart.ace
+"""
+
+import sys
+import os
+import json
+import argparse
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _hidb_boot
+
+# chart (sub)type + lineage -> key in vaccines.json (mirrors AD whocc VaccineData)
+_TAG = {
+    "A(H1N1)PDM09": "vaccines-A(H1N1)PDM09",
+    "A(H1N1)": "vaccines-A(H1N1)PDM09",
+    "A(H3N2)": "vaccines-A(H3N2)",
+    "BVICTORIA": "vaccines-B/Vic",
+    "BYAMAGATA": "vaccines-B/Yam",
+}
+
+
+def load_vaccine_names(vaccines_json, tag, _seen=None):
+    """Return [(name, vaccine_type, passage)] for a vaccines.json key,
+    expanding string aliases (a list entry that names another key)."""
+    if _seen is None:
+        _seen = set()
+    if tag in _seen or tag not in vaccines_json:
+        return []
+    _seen.add(tag)
+    result = []
+    for entry in vaccines_json[tag]:
+        if isinstance(entry, str):  # alias to another key
+            result.extend(load_vaccine_names(vaccines_json, entry, _seen))
+        elif isinstance(entry, dict) and entry.get("N") == "vaccine" and entry.get("name"):
+            result.append((entry["name"], entry.get("vaccine_type", ""), entry.get("passage", "")))
+    return result
+
+
+def passage_type(antigen):
+    if antigen.reassortant():
+        return "reassortant"
+    if antigen.passage().is_egg():
+        return "egg"
+    return "cell"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="vaccine strains of a chart, via hidb")
+    parser.add_argument("chart", help="chart file (.ace)")
+    parser.add_argument("--virus-type", default="", help="override the chart's virus type")
+    parser.add_argument("--lineage", default=None, help="override the chart's lineage (B only)")
+    args = parser.parse_args()
+
+    vaccines_json_path = _hidb_boot.require_env("VACCINES_JSON", "the whocc vaccine list")
+    with open(vaccines_json_path) as f:
+        vaccines_json = json.load(f)
+
+    ae_backend = _hidb_boot.load_ae_backend()
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    subtype = args.virus_type or chart.info().type_subtype()
+    lineage = args.lineage if args.lineage is not None else chart.lineage()
+
+    tag = _TAG.get(subtype + lineage) or _TAG.get(subtype)
+    if not tag:
+        sys.exit(f"error: no vaccine list for virus type \"{subtype}{lineage}\" (known: {sorted(_TAG)})")
+
+    db = _hidb_boot.open_hidb(ae_backend, subtype)
+    vaccine_names = load_vaccine_names(vaccines_json, tag)
+
+    # index the chart's antigens by exact name for quick matching
+    by_name = {}
+    for no, ag in chart.select_all_antigens():
+        by_name.setdefault(ag.name(), []).append((no, ag))
+
+    print(f"# {os.path.basename(args.chart)}  virus type: {subtype}{lineage}  (vaccine list: {tag})")
+    for name, vaccine_type, _passage in vaccine_names:
+        matches = by_name.get(f"{subtype}/{name}")
+        if not matches:
+            continue
+        print(f"\nVaccine [{vaccine_type or '?'}] {name}")
+        grouped = {"egg": [], "cell": [], "reassortant": []}
+        for no, ag in matches:
+            grouped[passage_type(ag)].append((no, ag))
+        for ptype in ("cell", "egg", "reassortant"):
+            for no, ag in grouped[ptype]:
+                hidb_found = db.find_antigens(ag.name())
+                n_tables = max((db.antigen(i).number_of_tables() for i in hidb_found), default=0)
+                in_hidb = f"{len(hidb_found)} hidb record(s), up to {n_tables} tables" if hidb_found else "not in hidb"
+                print(f"   {ptype:11s} AG {no:4d}  {ag.name()}  {ag.passage()}  [{in_hidb}]")
+
+
+if __name__ == "__main__":
+    main()

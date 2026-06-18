@@ -199,9 +199,16 @@ void ae::tree::Tree::ladderize(ladderize_method method)
         }
     };
 
+    const auto by_max_edge_length = [this, compare_max_edge_length]() {
+        for (auto ref : visit(tree_visiting::inodes_post)) {
+            auto& inode = *ref.inode();
+            std::sort(inode.children.begin(), inode.children.end(), compare_max_edge_length);
+        }
+    };
+
     switch (method) {
         case ladderize_method::max_edge_length:
-            AD_WARNING("Ladderizing by max-edge-length Not implemented");
+            by_max_edge_length();
             break;
         case ladderize_method::number_of_leaves:
             by_number_of_leaves();
@@ -557,6 +564,8 @@ std::shared_ptr<ae::tree::Tree> ae::tree::load(const std::filesystem::path& file
         tree = load_json(data, filename);
     else
         throw std::runtime_error{AD_FORMAT("cannot load tree from \"{}\": unknown file format", filename)};
+    if (!tree)
+        throw std::runtime_error{AD_FORMAT("cannot load tree from \"{}\": parsing failed", filename)};
     tree->calculate_cumulative();
     tree->set_node_id(Tree::reset_node_id::no);
     return tree;

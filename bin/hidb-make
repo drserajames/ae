@@ -1,0 +1,54 @@
+#! /usr/bin/env python3
+"""Build a hidb (historical influenza database) from a set of charts.
+
+Port of AD's hidb5-make. Reads each chart, de-duplicates antigens/sera/tables,
+accumulates dates / lab ids / lineage, records homologous antigens, and writes
+the hidb-v5 JSON (compression chosen by the output extension, e.g. .json.xz).
+
+Requires $LOCDB_V2 (the virus-name parser needs locationdb).
+
+  hidb-make hidb5.h3.json.xz chart1.ace chart2.ace ...
+  hidb-make --stop-on-error out.json.xz *.ace
+"""
+
+import sys
+import os
+import argparse
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _hidb_boot
+
+
+def main():
+    parser = argparse.ArgumentParser(description="build a hidb from charts")
+    parser.add_argument("output", help="output hidb file (e.g. hidb5.h3.json.xz)")
+    parser.add_argument("charts", nargs="+", help="input chart files (.ace)")
+    parser.add_argument("--stop-on-error", action="store_true", help="abort if any chart fails (default: skip and report)")
+    args = parser.parse_args()
+
+    _hidb_boot.require_env("LOCDB_V2", "the virus-name parser / locationdb")
+    ae_backend = _hidb_boot.load_ae_backend()
+
+    maker = ae_backend.hidb.HidbMaker()
+    failed = []
+    for chart_file in args.charts:
+        try:
+            maker.add(chart_file)
+        except Exception as err:  # noqa: BLE001 - report and continue unless asked to stop
+            if args.stop_on_error:
+                sys.exit(f"error: {chart_file}: {err}")
+            failed.append((chart_file, str(err)))
+
+    maker.save(args.output)
+    print(f"wrote {args.output}")
+    print(f"  antigens: {maker.number_of_antigens()}")
+    print(f"  sera:     {maker.number_of_sera()}")
+    print(f"  tables:   {maker.number_of_tables()}")
+    if failed:
+        print(f"  skipped {len(failed)} chart(s):", file=sys.stderr)
+        for chart_file, err in failed:
+            print(f"    {chart_file}: {err}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

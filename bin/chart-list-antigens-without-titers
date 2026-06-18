@@ -1,0 +1,36 @@
+#! /usr/bin/env python3
+"""List antigens that have no numeric titers against any serum.
+
+An antigen is listed if all its titers are missing ("*") — i.e. it contributes
+no information to the map.  Such antigens are candidates for removal.
+"""
+import sys, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    titers = chart.titers()
+    n_sr = chart.number_of_sera()
+    found = 0
+    for no, ag in chart.select_all_antigens():
+        n = titers.titrations_for_antigen(no)
+        if n == 0:
+            print(f"AG {no:3d}  {ag.designation()}")
+            found += 1
+    if not found:
+        print("all antigens have at least one titer")
+    else:
+        print(f"\n{found} antigen(s) with no titers (out of {chart.number_of_antigens()})")
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart", type=Path)
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

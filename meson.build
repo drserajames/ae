@@ -85,6 +85,18 @@ endif
 
 catch2 = dependency('catch2')
 
+# --- shared draw surface: Cairo (used by tal-draw via cc/draw/cairo-surface; KEEP if map-draw #1 is deleted) ---
+cairo = dependency('cairo', required: false)
+if not cairo.found() and host_machine.system() == 'darwin'
+  # pkg_config_libdir is pinned to brotli in the arm64 native file, so cairo
+  # may be invisible to pkg-config; fall back to the Homebrew formula prefix.
+  cairo_prefix = run_command('brew', '--prefix', 'cairo', check: true).stdout().strip()
+  cairo = declare_dependency(
+    compile_args : ['-I' + cairo_prefix + '/include/cairo'],
+    link_args    : ['-L' + cairo_prefix + '/lib', '-lcairo'],
+  )
+endif
+
 # mylib = meson.get_compiler('cpp').find_library('omp', dirs: '/opt/homebrew/lib')
 message(host_machine.system())
 
@@ -111,6 +123,21 @@ sources_py = [
   'cc/py/chart-v3-tests.cc',
   'cc/py/chart-v2.cc',
   'cc/py/utils.cc',
+  'cc/py/tal.cc', # --- tal (subsystem #3) ---
+  'cc/py/hidb.cc', # --- hidb (subsystem #2) ---
+]
+
+# --- tal (subsystem #3) — headless tree layout; see cc/tal/PORTING.md ---
+sources_tal = [
+  'cc/tal/layout.cc',
+  'cc/tal/clades.cc',
+  'cc/tal/time-series.cc',
+]
+
+# --- hidb (subsystem #2) — historical influenza DB; port of AD hidb-5 ---
+sources_hidb = [
+  'cc/hidb/hidb.cc',
+  'cc/hidb/hidb-maker.cc',
 ]
 
 sources_tree = [
@@ -238,7 +265,9 @@ libae = library(
   sources : sources_tree + sources_locdb_v3 +
             sources_sequences + sources_virus + sources_whocc + sources_chart_v3 +
             sources_utils +
-            sources_chart_v2 + sources_ad,
+            sources_chart_v2 + sources_ad +
+            sources_tal + # --- tal (subsystem #3) ---
+            sources_hidb, # --- hidb (subsystem #2) ---
   include_directories : include_cc,
   dependencies : [alglib, omp, xxhash, fmt, simdjson, range_v3, lexy, xlnt, brotli_enc, brotli_dec, bzip2, xz, zlib],
   link_args : libomp_dir,
@@ -253,6 +282,33 @@ chart_relax = executable(
   sources : ['cc/chart/v2/chart-relax.cc'],
   include_directories : include_cc,
   dependencies : [fmt, range_v3, simdjson],
+  link_with : [libae],
+  install : true)
+
+# map-draw (subsystem #1) was removed — antigenic-map drawing lives in kateri (see TODO.md
+# §1). The Cairo surface it introduced (cc/draw/cairo-surface.*) is retained as shared
+# infrastructure and is consumed by tal-draw below. Map-draw code is preserved on the
+# `map-draw-shelved` branch.
+
+# --- tal (subsystem #3) — Phase B M1: tree -> PDF renderer. Cairo linked only here. ---
+tal_draw = executable(
+  'tal-draw',
+  # cc/tal/continent-map.cc draws the lower-left continent inset; it reuses
+  # ae::geo::continent_color from cc/geo/geographic-map.cc (which needs geographic-path.cc).
+  sources : ['cc/tal/tal-draw-main.cc', 'cc/tal/draw-tree.cc', 'cc/tal/settings.cc', 'cc/tal/continent-map.cc',
+             'cc/geo/geographic-map.cc', 'cc/geo/geographic-path.cc', 'cc/draw/cairo-surface.cc'],
+  include_directories : include_cc,
+  dependencies : [fmt, range_v3, simdjson, cairo],
+  link_with : [libae],
+  install : true)
+
+# --- geo (geographic maps, needed by ssm-report #4) — equirectangular world map -> PDF.
+#     Uses the shared cc/draw/cairo-surface; Cairo linked only here. See TODO.md §1. ---
+geo_draw = executable(
+  'geo-draw',
+  sources : ['cc/geo/geo-draw-main.cc', 'cc/geo/geographic-map.cc', 'cc/geo/geographic-path.cc', 'cc/draw/cairo-surface.cc'],
+  include_directories : include_cc,
+  dependencies : [fmt, range_v3, simdjson, cairo],
   link_with : [libae],
   install : true)
 

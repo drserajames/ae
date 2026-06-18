@@ -1,0 +1,202 @@
+#include <numbers>
+#include <string>
+
+#include <cairo.h>
+#include <cairo-pdf.h>
+
+#include "draw/cairo-surface.hh"
+
+// ----------------------------------------------------------------------
+
+namespace ae::draw
+{
+    static inline void set_source(_cairo* cr, Color color)
+    {
+        cairo_set_source_rgba(cr, color.red(), color.green(), color.blue(), color.alpha());
+    }
+
+    CairoPdf::CairoPdf(const std::filesystem::path& filename, double width, double height)
+        : surface_{cairo_pdf_surface_create(filename.c_str(), width, height)}, context_{cairo_create(surface_)}
+    {
+    }
+
+    CairoPdf::~CairoPdf()
+    {
+        cairo_destroy(context_);
+        cairo_surface_destroy(surface_); // finalizes and writes the PDF to disk
+    }
+
+    void CairoPdf::background(Color color)
+    {
+        cairo_save(context_);
+        set_source(context_, color);
+        cairo_paint(context_);
+        cairo_restore(context_);
+    }
+
+    void CairoPdf::circle(double cx, double cy, double radius, Color outline, double outline_width, Color fill)
+    {
+        cairo_new_path(context_);
+        cairo_arc(context_, cx, cy, radius, 0.0, 2.0 * std::numbers::pi);
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        if (outline_width > 0.0 && !outline.is_transparent()) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+        else
+            cairo_new_path(context_); // discard the preserved path if we didn't stroke
+    }
+
+    void CairoPdf::sector(double cx, double cy, double radius, double start_angle, double end_angle, Color outline, double outline_width, Color fill)
+    {
+        // The caller's angles are measured clockwise from 12 o'clock. In Cairo, angle 0 is
+        // the +x axis (3 o'clock) and cairo_arc sweeps in the direction of increasing angle,
+        // which is clockwise in the PDF device space (y grows downward). So 12 o'clock is at
+        // Cairo angle -pi/2 and a clockwise sweep maps directly onto cairo_arc.
+        constexpr double twelve_oclock = -std::numbers::pi / 2.0;
+        const double a0 = twelve_oclock + start_angle;
+        const double a1 = twelve_oclock + end_angle;
+        cairo_new_path(context_);
+        cairo_move_to(context_, cx, cy);
+        cairo_arc(context_, cx, cy, radius, a0, a1);
+        cairo_close_path(context_);
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        if (outline_width > 0.0 && !outline.is_transparent()) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+        else
+            cairo_new_path(context_); // discard the preserved path if we didn't stroke
+    }
+
+    void CairoPdf::square(double cx, double cy, double side, Color outline, double outline_width, Color fill)
+    {
+        const double half = side / 2.0;
+        cairo_new_path(context_);
+        cairo_rectangle(context_, cx - half, cy - half, side, side);
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        set_source(context_, outline);
+        cairo_set_line_width(context_, outline_width);
+        cairo_stroke(context_);
+    }
+
+    void CairoPdf::triangle(double cx, double cy, double radius, Color outline, double outline_width, Color fill)
+    {
+        constexpr double sin60 = 0.86602540378443864676; // sqrt(3)/2
+        cairo_new_path(context_);
+        cairo_move_to(context_, cx, cy - radius);                       // apex (up; PDF y grows downward)
+        cairo_line_to(context_, cx + sin60 * radius, cy + radius / 2.0); // bottom-right
+        cairo_line_to(context_, cx - sin60 * radius, cy + radius / 2.0); // bottom-left
+        cairo_close_path(context_);
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        set_source(context_, outline);
+        cairo_set_line_width(context_, outline_width);
+        cairo_stroke(context_);
+    }
+
+    void CairoPdf::line(double x1, double y1, double x2, double y2, Color color, double width)
+    {
+        cairo_new_path(context_);
+        cairo_move_to(context_, x1, y1);
+        cairo_line_to(context_, x2, y2);
+        set_source(context_, color);
+        cairo_set_line_width(context_, width);
+        cairo_stroke(context_);
+    }
+
+    void CairoPdf::path_negative_move(const double* first, const double* last, Color outline, double outline_width, Color fill)
+    {
+        cairo_new_path(context_);
+        for (const double* p = first; p + 1 < last; p += 2) {
+            if (p[0] < 0.0)
+                cairo_move_to(context_, -p[0], p[1]);
+            else
+                cairo_line_to(context_, p[0], p[1]);
+        }
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        if (outline_width > 0.0 && !outline.is_transparent()) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+    }
+
+    void CairoPdf::rectangle(double x, double y, double width, double height, Color outline, double outline_width, Color fill)
+    {
+        cairo_new_path(context_);
+        cairo_rectangle(context_, x, y, width, height);
+        const bool stroke = outline_width > 0.0 && !outline.is_transparent();
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            if (stroke)
+                cairo_fill_preserve(context_);
+            else
+                cairo_fill(context_);
+        }
+        if (stroke) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+    }
+
+    void CairoPdf::text_rotated(double x, double y, std::string_view utf8, double font_size, Color color, double angle_degrees)
+    {
+        const std::string str{utf8};
+        cairo_save(context_);
+        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        set_source(context_, color);
+        cairo_translate(context_, x, y);
+        cairo_rotate(context_, angle_degrees * std::numbers::pi / 180.0);
+        cairo_move_to(context_, 0.0, 0.0);
+        cairo_show_text(context_, str.c_str());
+        cairo_restore(context_);
+    }
+
+    void CairoPdf::text(double x, double y, std::string_view utf8, double font_size, Color color, bool center)
+    {
+        const std::string str{utf8};
+        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        cairo_text_extents_t ext;
+        cairo_text_extents(context_, str.c_str(), &ext);
+        // cairo_show_text places the text origin at the baseline-left; shift so the glyph
+        // box lands where we want (centred on, or top-left at, (x, y)).
+        const double tx = center ? (x - ext.width / 2.0 - ext.x_bearing) : (x - ext.x_bearing);
+        const double ty = center ? (y - ext.height / 2.0 - ext.y_bearing) : (y - ext.y_bearing);
+        set_source(context_, color);
+        cairo_move_to(context_, tx, ty);
+        cairo_show_text(context_, str.c_str());
+    }
+
+    std::pair<double, double> CairoPdf::text_size(std::string_view utf8, double font_size)
+    {
+        const std::string str{utf8};
+        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        cairo_text_extents_t ext;
+        cairo_text_extents(context_, str.c_str(), &ext);
+        return {ext.width, ext.height};
+    }
+
+} // namespace ae::draw
+
+// ----------------------------------------------------------------------

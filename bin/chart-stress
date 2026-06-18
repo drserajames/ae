@@ -1,0 +1,36 @@
+#! /usr/bin/env python3
+"""Show stress values for projections of a chart.
+
+With no options, prints one line per projection: index, stress, minimum_column_basis.
+Use --best to print only the best (lowest) stress value.
+"""
+import sys, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    n = chart.number_of_projections()
+    if n == 0:
+        print("no projections", file=sys.stderr)
+        return 1
+    if args.best:
+        print(chart.projection(0).stress())
+    else:
+        for i in range(n):
+            proj = chart.projection(i)
+            comment = f"  <{proj.comment()}>" if proj.comment() else ""
+            print(f"{i:3d}  {proj.stress():.6f}  >={proj.minimum_column_basis()}{comment}")
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart", type=Path)
+    parser.add_argument("--best", action="store_true", default=False, help="print only the best (lowest) stress value")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

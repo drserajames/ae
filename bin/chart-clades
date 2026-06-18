@@ -1,0 +1,53 @@
+#! /usr/bin/env python3
+"""List clades assigned to antigens (and optionally sera) in a chart.
+
+Clade information is stored in the chart's semantic attributes.  Use
+--populate-seqdb to populate from seqdb first if clade data is missing.
+
+Output: AG no  clade(s)  designation
+"""
+import sys, argparse, traceback
+from pathlib import Path
+import ae_backend
+
+def main(args: argparse.Namespace):
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    if args.populate_seqdb:
+        matched = chart.populate_from_seqdb(report_matched=True)
+        print(f"seqdb: matched {matched[0]} antigens, {matched[1]} sera", file=sys.stderr)
+
+    found_any = False
+    for no, ag in chart.select_all_antigens():
+        clades = ag.semantic().clades()
+        if clades or not args.with_clades_only:
+            clade_str = " ".join(clades) if clades else "-"
+            print(f"AG {no:3d}  {clade_str:30s}  {ag.designation()}")
+            if clades:
+                found_any = True
+
+    if args.sera:
+        for no, sr in chart.select_all_sera():
+            clades = sr.semantic().clades()
+            if clades or not args.with_clades_only:
+                clade_str = " ".join(clades) if clades else "-"
+                print(f"SR {no:3d}  {clade_str:30s}  {sr.designation()}")
+                if clades:
+                    found_any = True
+
+    if args.with_clades_only and not found_any:
+        print("no clade information found (try --populate-seqdb)")
+
+try:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("chart", type=Path)
+    parser.add_argument("--sera", action="store_true", default=False, help="also show clade info for sera")
+    parser.add_argument("--with-clades-only", action="store_true", default=False, help="only print antigens/sera that have clade data")
+    parser.add_argument("--populate-seqdb", action="store_true", default=False, help="populate sequence/clade data from seqdb before listing")
+    args = parser.parse_args()
+    exit_code = main(args) or 0
+except Exception as err:
+    print(f"> {err}\n{traceback.format_exc()}", file=sys.stderr)
+    exit_code = 1
+exit(exit_code)
+
+# ======================================================================

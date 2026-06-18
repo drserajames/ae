@@ -1,0 +1,39 @@
+#! /usr/bin/env python3 -B
+"""
+Per-map driver — COPY into each map dir (e.g. h1-cdc/0do), edit the overrides.
+Run `./0do <command>` (download / populate / prestyle / style / export); commands
+come from ae.report.commander.
+
+Requires on PYTHONPATH: the ae `py/` (for ae.report) and the report dir's own
+modules (conference_data, the subtype modifier, serology) + acmacs-data
+(semantic_clades / semantic_vaccines). ae_backend is loaded from build/.
+"""
+
+from pathlib import Path
+import ae_backend.chart_v3
+from ae.report.main_loop import main_loop
+from ae.report import commander as commander_m
+from h1_chart_modifier import H1_ChartModifier      # the report's subtype modifier
+
+
+class Downloaded_ChartModifier(H1_ChartModifier):
+    # per-map overrides — these are the bits an analyst tunes
+    def viewport(self, zoom_variant: str) -> list[float]:
+        return [0.0, 0.0, 10.0]                      # [x, y, size]
+
+    def vaccine_user_data(self):
+        return []                                    # org table of vaccine label positions
+
+    def serology_user_data(self):
+        return []
+
+
+class Commander(commander_m.CommanderBasic):
+    def chart_modifier(self, chart=None):
+        return Downloaded_ChartModifier(chart=chart)
+
+def commander():
+    return Commander()
+
+if __name__ == "__main__":
+    main_loop()

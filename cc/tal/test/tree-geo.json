@@ -1,0 +1,11 @@
+{"_": "synthetic geo tree for tal-draw color-by-continent test — leaves carry a continent (key \"C\"). No real data.",
+ "  version": "phylogenetic-tree-v3",
+ "tree": {"t": [
+   {"l": 1, "n": "G1", "C": "EUROPE"},
+   {"l": 1, "n": "G2", "C": "ASIA"},
+   {"l": 1, "t": [
+     {"l": 1, "n": "G3", "C": "NORTH-AMERICA"},
+     {"l": 1, "n": "G4", "C": "AFRICA"},
+     {"l": 1, "n": "G5", "C": "EUROPE"}
+   ]}
+ ]}}

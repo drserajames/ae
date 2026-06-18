@@ -5,6 +5,7 @@
 #include "chart/v3/procrustes.hh"
 #include "chart/v3/grid-test.hh"
 #include "chart/v3/chart-seqdb.hh"
+#include "chart/v3/optimize.hh"
 #include "pybind11/detail/common.h"
 #include "pybind11/numpy.h"
 #include <limits>
@@ -588,12 +589,46 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         .def("forced_column_bases", &ProjectionRef::forced_column_bases)                                                                                      //
         .def("disconnected", &ProjectionRef::disconnected)                                                                                                    //
         .def("unmovable", &ProjectionRef::unmovable)                                                                                                          //
+        .def("set_unmovable", &ProjectionRef::set_unmovable, "points"_a, pybind11::doc("pin the listed points (replaces the current unmovable set) so a subsequent relax keeps them fixed")) //
+        .def("set_coordinates", &ProjectionRef::set_coordinates, "point_no"_a, "coordinates"_a,
+             pybind11::doc("move a point to the given coordinates (antigens are indexed 0..n_ag-1, sera continue at n_ag..)")) //
         .def("unmovable_in_the_last_dimension", &ProjectionRef::unmovable_in_the_last_dimension)                                                              //
         .def("connect_all_disconnected", &ProjectionRef::connect_all_disconnected, pybind11::doc("reconnected points still have NaN coordinates after call")) //
         .def("layout", &ProjectionRef::layout, pybind11::return_value_policy::reference_internal)                                                             //
         .def("transformation", &ProjectionRef::transformation, pybind11::return_value_policy::reference_internal)                                             //
         .def(
             "relax", [](ProjectionRef& projection, bool rough) { return projection.relax(rough ? optimization_precision::rough : optimization_precision::fine); }, "rough"_a = false) //
+        .def(
+            "relax_capturing_intermediates",
+            [](ProjectionRef& projection, bool rough) {
+                IntermediateLayouts intermediate;
+                optimization_options opt;
+                opt.precision = rough ? optimization_precision::rough : optimization_precision::fine;
+                optimize(*projection.chart, projection.projection, intermediate, opt);
+                projection.projection.reset_stress();
+                pybind11::list frames;
+                for (const auto& il : intermediate) {
+                    const auto& lt = il.layout;
+                    pybind11::list coords;
+                    for (const auto point_no : lt.number_of_points()) {
+                        if (lt.point_has_coordinates(point_no)) {
+                            pybind11::list xy;
+                            for (const auto dim : lt.number_of_dimensions())
+                                xy.append(lt(point_no, dim));
+                            coords.append(std::move(xy));
+                        }
+                        else {
+                            coords.append(pybind11::none());
+                        }
+                    }
+                    frames.append(pybind11::make_tuple(std::move(coords), il.stress));
+                }
+                return frames;
+            },
+            "rough"_a = false,
+            pybind11::doc("relax this projection in place (all points free, no pinning), returning the optimiser's per-iteration intermediate "
+                          "layouts as a list of (coords, stress) — coords is one [x,y] per point (None for disconnected), in layout order. "
+                          "Sample these to animate a relax; the projection is left holding the final relaxed layout.")) //
         .def("avidity_test", &ProjectionRef::avidity_test, "adjust_step"_a, "min_adjust"_a, "max_adjust"_a, "rough"_a)                                                                //
         .def("serum_circles", &ProjectionRef::serum_circles, "fold"_a = 2.0)                                                                                                          //
         .def(
@@ -609,7 +644,7 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         .def("number_of_dimensions", [](const Layout& layout) -> size_t { return *layout.number_of_dimensions(); }) //
         .def(
             "__getitem__",
-            [](Layout& layout, ssize_t index) {
+            [](const Layout& layout, ssize_t index) {
                 if (index >= 0 && point_index{index} < layout.number_of_points())
                     return layout[point_index{index}];
                 else if (index < 0 && point_index{-index} <= layout.number_of_points())
@@ -618,6 +653,22 @@ void ae::py::chart_v3(pybind11::module_& mdl)
                     throw std::invalid_argument{fmt::format("wrong index: {}, number of points in layout: {}", index, layout.number_of_points())};
             },
             "index"_a, pybind11::doc("negative index counts from the layout end")) //
+        .def(
+            "__setitem__",
+            [](Layout& layout, ssize_t index, const std::vector<double>& coordinates) {
+                point_index point_no;
+                if (index >= 0 && point_index{index} < layout.number_of_points())
+                    point_no = point_index{index};
+                else if (index < 0 && point_index{-index} <= layout.number_of_points())
+                    point_no = layout.number_of_points() + index;
+                else
+                    throw std::invalid_argument{fmt::format("wrong index: {}, number of points in layout: {}", index, layout.number_of_points())};
+                if (coordinates.size() != *layout.number_of_dimensions())
+                    throw std::invalid_argument{fmt::format("wrong number of coordinates: {}, layout dimensions: {}", coordinates.size(), layout.number_of_dimensions())};
+                for (const auto dim : layout.number_of_dimensions())
+                    layout(point_no, dim) = coordinates[*dim];
+            },
+            "index"_a, "coordinates"_a, pybind11::doc("set coordinates of a point; negative index counts from the layout end")) //
         .def(
             "__iter__", [](const Layout& layout) { return pybind11::make_iterator(layout.begin(), layout.end()); }, pybind11::keep_alive<0, 1>()) //
         .def("minmax", &Layout::minmax)                                                                                                           //

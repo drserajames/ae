@@ -25,6 +25,8 @@ PYBIND11_MODULE(ae_backend, mdl)
     ae::py::chart_v3(mdl);
     ae::py::chart_v2(mdl);
     ae::py::utils(mdl);
+    ae::py::tal(mdl); // --- tal (subsystem #3) ---
+    ae::py::hidb(mdl); // --- hidb (subsystem #2) ---
 
     // ----------------------------------------------------------------------
 

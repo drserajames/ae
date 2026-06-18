@@ -1,0 +1,61 @@
+#! /usr/bin/env python3
+"""For each antigen and serum of a chart, find it in the hidb and report the
+tables it has historically appeared in.
+
+Port of AD's hidb5-antigens-sera-of-chart.
+
+Requires $HIDB_V5 and $LOCDB_V2 (see bin/_hidb_boot.py).
+
+  hidb-antigens-sera-of-chart chart.ace
+  hidb-antigens-sera-of-chart --tables 10 chart.ace
+"""
+
+import sys
+import os
+import argparse
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _hidb_boot
+
+
+def main():
+    parser = argparse.ArgumentParser(description="antigens/sera of a chart as found in hidb")
+    parser.add_argument("chart", help="chart file (.ace)")
+    parser.add_argument("--tables", type=int, default=3, help="max tables to list per record (default 3; 0 = all)")
+    parser.add_argument("--virus-type", default="", help="override the chart's virus type")
+    args = parser.parse_args()
+
+    ae_backend = _hidb_boot.load_ae_backend()
+    chart = ae_backend.chart_v3.Chart(args.chart)
+    virus_type = args.virus_type or chart.info().type_subtype()
+    db = _hidb_boot.open_hidb(ae_backend, virus_type)
+    limit = args.tables if args.tables > 0 else None
+
+    print(f"# {os.path.basename(args.chart)}  virus type: {virus_type}")
+    print(f"# antigens: {chart.number_of_antigens()}  sera: {chart.number_of_sera()}")
+
+    print("\n--- antigens ---")
+    for no, ag in chart.select_all_antigens():
+        found = db.find_antigens(ag.name())
+        print(f"AG {no:4d} {ag.name()}  {ag.passage()}  -> {len(found)} in hidb")
+        for index in found:
+            hag = db.antigen(index)
+            tables = list(hag.tables)
+            shown = ", ".join(db.table(ti).name() for ti in tables[:limit])
+            more = "" if limit is None or len(tables) <= limit else f", ... (+{len(tables) - limit})"
+            print(f"        {hag.full_name()}  [{hag.number_of_tables()} tables] {shown}{more}")
+
+    print("\n--- sera ---")
+    for no, sr in chart.select_all_sera():
+        found = db.find_sera(sr.name())
+        print(f"SR {no:4d} {sr.name()}  -> {len(found)} in hidb")
+        for index in found:
+            hsr = db.serum(index)
+            tables = list(hsr.tables)
+            shown = ", ".join(db.table(ti).name() for ti in tables[:limit])
+            more = "" if limit is None or len(tables) <= limit else f", ... (+{len(tables) - limit})"
+            print(f"        {hsr.full_name()}  [{hsr.number_of_tables()} tables] {shown}{more}")
+
+
+if __name__ == "__main__":
+    main()
