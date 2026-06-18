@@ -197,6 +197,7 @@
     }
   }
   const TIP_R = { base: 3, passage: 3.6, serology: 4.4, vaccine: 6 };
+  const REASSORTANT_ROT = 0.5;   // reassortant = egg rotated 0.5 rad (matches the map / kateri)
   // shape follows passage; size escalates vaccine > serology > default. Vaccine is NOT
   // a star (#3) — it's the strain's normal passage shape, just larger + black outline.
   function tipGlyph(lf) {
@@ -214,7 +215,9 @@
   function glyphPathD(kind, cx, cy, r) {
     switch (kind) {
       case "egg": return IV.Glyph.eggPath(cx, cy, r);
-      case "reassortant": return IV.Glyph.reassortantPath(cx, cy, r);
+      // #11: reassortant = egg rotated 0.5 rad (tilted egg), matching the map — not
+      // the legacy triangle, so tree and map are consistent.
+      case "reassortant": return IV.Glyph.eggPath(cx, cy, r, REASSORTANT_ROT);
       default: return null;
     }
   }
@@ -333,7 +336,8 @@
       };
       // build at origin; apply() positions by geometry (cx/cy for circle, d for paths)
       const node = g.kind === "circle" ? IV.Glyph.circle(0, 0, g.r, opts)
-                                       : IV.Glyph.make(g.kind, 0, 0, g.r, opts);
+        : g.kind === "reassortant" ? IV.Glyph.egg(0, 0, g.r, Object.assign({}, opts, { rot: REASSORTANT_ROT }))
+        : IV.Glyph.make(g.kind, 0, 0, g.r, opts);
       node.addEventListener("mouseenter", e => { State.setActive(lf.norm); IV.UI.showTip(e, tipHtml(lf)); });
       node.addEventListener("mousemove", IV.UI.moveTip);
       node.addEventListener("mouseleave", () => { State.setActive(null); IV.UI.hideTip(); });
