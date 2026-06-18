@@ -3,3 +3,5 @@ build
 .ccls-cache
 __pycache__
 /.vscode
+*~
+*.save
