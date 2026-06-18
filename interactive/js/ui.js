@@ -40,23 +40,19 @@
     return { clade, noClade };
   }
 
-  // small inline-SVG glyphs for the marker key (14×14 box)
-  function starPath(cx, cy, spikes, inner, outer) {
-    let rot = Math.PI / 2 * 3, step = Math.PI / spikes, p = `M${cx},${cy - outer}`;
-    for (let i = 0; i < spikes; i++) {
-      p += `L${cx + Math.cos(rot) * outer},${cy + Math.sin(rot) * outer}`; rot += step;
-      p += `L${cx + Math.cos(rot) * inner},${cy + Math.sin(rot) * inner}`; rot += step;
-    }
-    return p + "Z";
-  }
+  // small inline-SVG glyphs for the marker key (14×14 box), shapes from IV.Glyph
+  // so the legend matches the map/tree points exactly.
   function glyph(kind, color) {
+    const G = IV.Glyph;
     const body = {
       ref: '<circle cx="7" cy="7" r="5" fill="#fff" stroke="#000" stroke-width="1.3"/>',
-      vac: `<path d="${starPath(7, 7, 5, 2.8, 6)}" fill="${color || "#888"}" stroke="rgba(0,0,0,.4)" stroke-width="0.6"/>`,
+      vac: `<path d="${G.starPath(7, 7, 6, 5, 0.46)}" fill="${color || "#888"}" stroke="rgba(0,0,0,.4)" stroke-width="0.6"/>`,
       serum: '<rect x="2.5" y="2.5" width="9" height="9" fill="none" stroke="#555" stroke-width="1.3"/>',
       dot: `<circle cx="7" cy="7" r="5" fill="${color}" stroke="rgba(0,0,0,.3)" stroke-width="0.6"/>`,
-      // un-ringed passage: a clade-grey point with the neutral stroke the map uses
-      neutral: '<circle cx="7" cy="7" r="5" fill="#d9d9d9" stroke="rgba(0,0,0,.3)" stroke-width="0.6"/>',
+      // passage glyphs match the map/tree (F7): egg shape + reassortant triangle,
+      // filled with the passage colour (#4).
+      egg: `<path d="${G.eggPath(7, 7, 5.5)}" fill="${color}" stroke="rgba(0,0,0,.45)" stroke-width="0.7"/>`,
+      reassortant: `<path d="${G.reassortantPath(7, 7.5, 4.8)}" fill="${color}" stroke="rgba(0,0,0,.45)" stroke-width="0.7"/>`,
     }[kind];
     return `<svg width="14" height="14" viewBox="0 0 14 14" style="vertical-align:-3px">${body}</svg>`;
   }
@@ -138,7 +134,7 @@
       // count = tips/antigens (tree tips / active-chart map points). The two are
       // told apart by magnitude (antigens smaller, except the unsequenced row).
       const ag = agCladeCounts();
-      Colour.clades().sort().forEach(c => {
+      Colour.cladesOrdered().forEach(c => {   // #2 report legend order (priority)
         const t = counts.clade[c] || 0, a = ag.clade[c] || 0;
         const d = document.createElement("div");
         d.className = "lg" + (State.offClades.has(c) ? " off" : "");
@@ -154,18 +150,22 @@
         `no clade<span class="cnt">${counts.noClade}/${ag.noClade}</span>`;
       colKey.appendChild(u);
     } else if (State.colorBy === "continent") {
+      // #6: antigens now colour by continent too (bundle continent_color), so the
+      // key pairs tips/antigens like the clade key.
+      const agc = {};
+      (IV.DATA.charts[State.chartIdx].antigens || []).forEach(a => {
+        const k = (a.continent || "").toUpperCase();
+        if (k) agc[k] = (agc[k] || 0) + 1;
+      });
       Colour.continents().forEach(c => {
-        const n = counts.cont[c] || 0;
-        if (!n) return;
+        const t = counts.cont[c] || 0, a = agc[c] || 0;
+        if (!t && !a) return;
         const d = document.createElement("div"); d.className = "lg";
+        d.title = `${t} tip(s) / ${a} antigen(s)`;
         d.innerHTML = `<span class="sw" style="background:${Colour.continentColor(c)}"></span>` +
-          `${c.toLowerCase()}<span class="cnt">${n}</span>`;
+          `${c.toLowerCase()}<span class="cnt">${t}/${a}</span>`;
         colKey.appendChild(d);
       });
-      const note = document.createElement("span");
-      note.className = "footnote"; note.style.padding = "0";
-      note.textContent = "(tree tips; map points use a single colour)";
-      colKey.appendChild(note);
     } else {
       const d = document.createElement("div"); d.className = "lg";
       d.innerHTML = `<span class="sw" style="background:#4e79a7"></span>uniform colour`;
@@ -180,14 +180,11 @@
     item(`${glyph("vac", "#888")}vaccine`);
     item(`${glyph("serum")}serum`);
     if (Colour.hasPassageMarkers()) {
-      // Only the salient passages are ringed on the map/tree (map.js/tree.js ring
-      // `type !== "cell"`); cell keeps the neutral stroke so its rings don't bury
-      // the clade fills. Mirror that here: coloured dot = ringed; neutral = not.
-      Colour.passages().forEach(p => {
-        const ringed = p !== "cell";
-        item(ringed
-          ? `${glyph("dot", Colour.passageColor(p))}${Colour.passageLabel(p)}`
-          : `${glyph("neutral")}${Colour.passageLabel(p)} <span class="footnote" style="padding:0">(no ring)</span>`);
+      // Only egg + reassortant get a distinct glyph on the map/tree (F7); cell is
+      // the default circle, so it's omitted from the key (#3). Glyphs are filled
+      // with passage_color (#4) and shaped via IV.Glyph to match the points.
+      Colour.passages().filter(p => p !== "cell").forEach(p => {
+        item(`${glyph(p, Colour.passageColor(p))}${Colour.passageLabel(p)}`);
       });
     }
     lg.appendChild(mk);

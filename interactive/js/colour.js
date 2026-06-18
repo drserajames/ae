@@ -7,12 +7,17 @@
   "use strict";
   const State = IV.State;
 
-  // continent palette (for colorBy === "continent")
-  const contColor = {
+  // Continent palette. v3 sources this from the chart's own report style
+  // (bundle.continent_color, keyed by uppercase T.C9) so it matches the report
+  // PDFs; the map below is only a last-resort fallback for pre-v3 bundles. The old
+  // default had EUROPE blue — the report's EUROPE is green — which was the
+  // everything-looks-blue bug (#6).
+  const CONTINENT_FALLBACK = {
     AFRICA: "#e15759", EUROPE: "#4e79a7", "NORTH-AMERICA": "#59a14f",
     "SOUTH-AMERICA": "#edc948", ASIA: "#f28e2b", OCEANIA: "#b07aa1",
     ANTARCTICA: "#999",
   };
+  let contColor = CONTINENT_FALLBACK;   // replaced from bundle.continent_color in init()
   const BASE = "#4e79a7"; // colorBy === "none"
 
   // passage-type markers (P1). Default palette matches chart_modifier.py / the
@@ -32,8 +37,9 @@
   // sequential scale for colour-by-stress (C2): ColorBrewer YlOrRd, low→high.
   const SEQ = ["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"];
 
-  let cladeColor = {};      // clade label -> hex (from bundle.clade_color)
-  let cladeLegend = {};     // clade label -> legend text (from bundle.clade_legend [E1])
+  let cladeColor = {};      // clade label -> hex (from bundle.clade_color, report style)
+  let cladeLegend = {};     // clade label -> legend text (from bundle.clade_legend)
+  let cladePriority = {};   // clade label -> report legend priority (higher = earlier)
   let passageColor = {};    // passage type -> hex
   let hasPassage = false;   // did the bundle provide passage_color? (E1/P1 live)
   let UNMATCHED = "#d9d9d9";
@@ -55,6 +61,9 @@
     init(bundle) {
       cladeColor = bundle.clade_color || {};
       cladeLegend = bundle.clade_legend || {};
+      cladePriority = bundle.clade_priority || {};
+      contColor = (bundle.continent_color && Object.keys(bundle.continent_color).length)
+        ? bundle.continent_color : CONTINENT_FALLBACK;
       hasPassage = !!bundle.passage_color;
       passageColor = Object.assign({}, PASSAGE_DEFAULT, bundle.passage_color || {});
       UNMATCHED = bundle.unmatched_color || "#d9d9d9";
@@ -66,8 +75,19 @@
     cladeColor(c) { return cladeColor[c] || UNMATCHED; },
     cladeLegend(c) { return cladeLegend[c] || c; },
     clades() { return Object.keys(cladeColor); },
+    // clades in the report's legend order: by legend priority (higher first — the
+    // report assigns 99, 98, … top-down), then legend text, then label.
+    cladesOrdered() {
+      return Object.keys(cladeColor).sort((a, b) => {
+        const pa = cladePriority[a], pb = cladePriority[b];
+        const na = (pa == null), nb = (pb == null);
+        if (na !== nb) return na ? 1 : -1;             // nulls last
+        if (!na && pa !== pb) return pb - pa;          // higher priority first
+        return (cladeLegend[a] || a).localeCompare(cladeLegend[b] || b);
+      });
+    },
 
-    // ---- continent key (colorBy === "continent") ----
+    // ---- continent key (colorBy === "continent"); palette from report style ----
     continentColor(c) { return contColor[(c || "").toUpperCase()] || UNMATCHED; },
     continents() { return Object.keys(contColor); },
 
@@ -121,7 +141,7 @@
     antigen(a) {
       switch (State.colorBy) {
         case "none": return BASE;
-        case "continent": return BASE; // continent not on antigens
+        case "continent": return contColor[(a.continent || "").toUpperCase()] || UNMATCHED; // #6
         case "aa": { const v = aaValueOf(a.norm); return v ? (aaValueColor[v] || UNMATCHED) : UNMATCHED; }
         case "stress": { ensureStress(); const s = stressByAg[a.i]; return s == null ? UNMATCHED : Colour.stressColor(s); }
         default: return a.clade ? (cladeColor[a.clade] || UNMATCHED) : UNMATCHED;
