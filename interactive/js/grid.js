@@ -56,7 +56,7 @@
       holder.appendChild(svg); cell.appendChild(ttl); cell.appendChild(holder);
       wrap.appendChild(cell);
       IV.installSelect(svg);   // ONCE per svg: box / click select → shared selection
-      panels.push({ chart, svg, nodes: {} });
+      panels.push({ chart, svg, hi: [] });
     });
     structureBuilt = true;
     lastColorBy = null;        // force the next paint
@@ -69,9 +69,9 @@
       p.svg.innerHTML = "";
       const proj = fitProj(p.chart);
       if (proj) {
-        p.nodes = IV.Map.paintChart(p.svg, p.chart, proj, { r0: 2.2 }).nodes;
+        p.hi = IV.Map.paintChart(p.svg, p.chart, proj, { r0: 2.2 }).hi;
       } else {
-        p.nodes = {};
+        p.hi = [];
         const t = el("text", { x: PW / 2, y: PH / 2, "text-anchor": "middle", fill: "#999", "font-size": 12 });
         t.textContent = "no positioned points"; p.svg.appendChild(t);
       }
@@ -81,15 +81,12 @@
 
   function applyHighlight() {
     panels.forEach(p => {
-      p.chart.antigens.forEach(a => {
-        const list = p.nodes[a.norm]; if (!list) return;
-        const extraHidden = State.onlyMatched && !IV.Tree.normToLeaves[a.norm];
-        const e = State.emphasis(a.norm, a.clade, extraHidden);
-        list.forEach(s => {
-          s.classList.toggle("dim", e.dim);
-          s.classList.toggle("lift", e.lift);
-          s.classList.toggle("sel", e.sel);
-        });
+      (p.hi || []).forEach(n => {
+        const extraHidden = !n.serum && State.onlyMatched && !IV.Tree.normToLeaves[n.norm];
+        const e = State.emphasis(n.norm, n.clade, extraHidden);
+        n.el.classList.toggle("dim", e.dim);
+        n.el.classList.toggle("lift", e.lift);
+        n.el.classList.toggle("sel", e.sel);
       });
     });
   }

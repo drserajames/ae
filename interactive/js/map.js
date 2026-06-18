@@ -4,7 +4,8 @@
 // IV.Glyph factory so the map and tree stay identical (never hand-roll shapes here):
 //   antigen        → circle        egg antigen → egg
 //   vaccine        → star (large)  serum       → square
-//   reassortant    → circle (+orange ring)     egg serum → uglyEgg
+//   reassortant    → reassortant (triangle, +orange ring; matches the tree)
+//   egg serum      → uglyEgg
 // Subscribes to IV.State so hover / clade-filter / only-matched / selection changes
 // re-apply highlight. Resolves tree linkage via IV.Tree.normToLeaves.
 //
@@ -23,7 +24,7 @@
   "use strict";
   const State = IV.State, Colour = IV.Colour, el = IV.el, G = IV.Glyph;
 
-  let ptNodes = {};   // norm -> [elements]   (active single map)
+  let hiList = [];    // flat highlight list {el, norm, clade, serum} (active single map)
   let agByIdx = {};   // antigen index -> antigen (active chart)
   // Current map geometry, refreshed on every render() and view change. Exposed via
   // IV.Map.project(x,y) / IV.Map.scale so overlay modules (IV.Lines N1/N2) align to
@@ -115,6 +116,7 @@
         case "star": d.el.setAttribute("d", G.starPath(X, Y, d.r)); break;
         case "egg": d.el.setAttribute("d", G.eggPath(X, Y, d.r)); break;
         case "uglyEgg": d.el.setAttribute("d", G.uglyEggPath(X, Y, d.r)); break;
+        case "reassortant": d.el.setAttribute("d", G.reassortantPath(X, Y, d.r)); break;
         default: d.el.setAttribute("cx", X); d.el.setAttribute("cy", Y);  // circle
       }
     }
@@ -171,21 +173,30 @@
   function paintChart(svg, chart, proj, opts) {
     opts = opts || {};
     const r0 = opts.r0 || 3.5;
-    const nodes = {}, plc = [];
+    const nodes = {}, plc = [], hi = [];   // hi = flat highlight list {el,norm,clade,serum}
     const pts = chart.antigens.filter(a => a.x != null && a.y != null);
     const sera = chart.sera.filter(s => s.x != null && s.y != null);
 
     sera.forEach(s => {
       const X = proj.SX(s.x), Y = proj.SY(s.y), r = r0 * 1.7;
       const egg = isEggSerum(chart, s);
-      const node = egg ? G.uglyEgg(X, Y, r, { class: "serum pt" })
-                       : G.square(X, Y, r, { class: "serum pt" });
-      node.addEventListener("mouseenter", e => IV.UI.showTip(e,
-        `<b>${s.name}</b><br><i>serum${egg ? " · egg" : ""}</i>`));
+      // F1: carry the serum norm so a click resolves it (installSelect → expandNorms
+      // pulls the homologous antigen + its tree tip); without it a click cleared.
+      const o = { class: "serum pt" };
+      if (s.norm) o.dataNorm = s.norm;
+      const node = egg ? G.uglyEgg(X, Y, r, o) : G.square(X, Y, r, o);
+      node.addEventListener("mouseenter", e => {
+        if (s.norm) State.setActive(s.norm);
+        IV.UI.showTip(e, `<b>${s.name}</b><br><i>serum${egg ? " · egg" : ""}</i>`);
+      });
       node.addEventListener("mousemove", IV.UI.moveTip);
-      node.addEventListener("mouseleave", IV.UI.hideTip);
+      node.addEventListener("mouseleave", () => { if (s.norm) State.setActive(null); IV.UI.hideTip(); });
       svg.appendChild(node);
       plc.push({ el: node, shape: egg ? "uglyEgg" : "square", x: s.x, y: s.y, r });
+      if (s.norm) {
+        (nodes[s.norm] = nodes[s.norm] || []).push(node);
+        hi.push({ el: node, norm: s.norm, clade: null, serum: true });
+      }
     });
 
     function drawAntigen(a) {
@@ -194,6 +205,7 @@
       let shape, r, node;
       if (a.vac) { shape = "star"; r = r0 * 2.4; node = G.star(X, Y, r, { class: "pt" }); }
       else if (pt === "egg") { shape = "egg"; r = r0; node = G.egg(X, Y, r, { class: "pt" }); }
+      else if (pt === "reassortant") { shape = "reassortant"; r = r0; node = G.reassortant(X, Y, r, { class: "pt" }); }
       else { shape = "circle"; r = a.ref ? r0 * 1.43 : r0; node = G.circle(X, Y, r, { class: "pt" }); }
       node.setAttribute("fill", Colour.antigen(a));
       node.setAttribute("fill-opacity", a.ref ? 0.55 : 0.85);
@@ -211,13 +223,14 @@
       svg.appendChild(node);
       (nodes[a.norm] = nodes[a.norm] || []).push(node);
       plc.push({ el: node, shape, x: a.x, y: a.y, r });
+      hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false });
     }
 
     const vacs = [];
     pts.forEach(a => { if (a.vac) vacs.push(a); else drawAntigen(a); });
     vacs.forEach(drawAntigen);   // vaccines on top
 
-    return { nodes, placed: plc };
+    return { nodes, placed: plc, hi };
   }
 
   // ---- single active map -----------------------------------------------------
@@ -225,7 +238,7 @@
     const svg = document.getElementById("mapSvg");
     const wrap = document.getElementById("mapWrap");
     const chart = IV.DATA.charts[State.chartIdx];
-    svg.innerHTML = ""; ptNodes = {}; agByIdx = {}; placed = [];
+    svg.innerHTML = ""; hiList = []; agByIdx = {}; placed = [];
     chart.antigens.forEach(a => { agByIdx[a.i] = a; });
     showStress(chart);
     const all = chart.antigens.filter(a => a.x != null && a.y != null)
@@ -243,7 +256,7 @@
     drawGrid();
 
     const out = paintChart(svg, chart, geom, { r0: 3.5 });
-    ptNodes = out.nodes; placed = out.placed;
+    hiList = out.hi; placed = out.placed;
 
     bindViewHandlers(svg);
     IV.installSelect(svg);   // S1: click / drag-box selection (shared, idempotent)
@@ -314,16 +327,14 @@
   }
 
   function refresh() {
-    const chart = IV.DATA.charts[State.chartIdx];
-    chart.antigens.forEach(a => {
-      (ptNodes[a.norm] || []).forEach(s => {
-        const extraHidden = State.onlyMatched && !IV.Tree.normToLeaves[a.norm];
-        const e = State.emphasis(a.norm, a.clade, extraHidden);
-        s.classList.toggle("dim", e.dim);
-        s.classList.toggle("lift", e.lift);
-        s.classList.toggle("sel", e.sel);
-      });
-    });
+    for (const n of hiList) {
+      // sera are never in the tree, so only-matched dimming applies to antigens
+      const extraHidden = !n.serum && State.onlyMatched && !IV.Tree.normToLeaves[n.norm];
+      const e = State.emphasis(n.norm, n.clade, extraHidden);
+      n.el.classList.toggle("dim", e.dim);
+      n.el.classList.toggle("lift", e.lift);
+      n.el.classList.toggle("sel", e.sel);
+    }
   }
 
   IV.Map = {
