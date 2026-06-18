@@ -126,6 +126,20 @@ The exporter prepares the report-faithful data the viewer renders:
   reconstructed ancestral sequences on the `.asr` tree (the C++ consensus path is broken
   in this build); positions are HA1-numbered and line up with the clade names.
 
+Stage-2 data (E2), for the colour-by-AA and stress/error overlays:
+
+- **Shared `aa` table.** `norm → aligned HA1 AA sequence string` (from the `.asr`
+  tree); C1 reads residue `p` as `aa[norm][p-1]`. Same numbering as the clade names
+  and `A` transitions.
+- **Per-chart titers.** `titers` (raw strings, so `<`/`>`/`*` are distinguishable),
+  `logged` (`log2(titer/10)`, null for missing), `column_bases`, and `min_col_basis`
+  — used by N1/N2/C2. `column_bases` are the projection's **forced** bases when present
+  (those match the coordinates); the exported data reproduces the optimiser's stress
+  (≈6.15 k vs 6.19 k on vidrl), whereas the recomputed bases would roughly double it.
+
+> A two-centre H3 file is ≈6 MB (the tree ≈3 MB and `aa` table are shared; each chart
+> adds its titer/logged matrices). All-centres files scale with the number of charts.
+
 ## Known limitations / next steps
 - **Pruned context.** Only linked tips are kept. An option to retain surrounding
   tree context (or a full-tree mode with on-demand sequence loading) is a natural
