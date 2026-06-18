@@ -78,10 +78,16 @@ collapsed during pruning. `x` is **cumulative branch length** from the root
   // E1 additions (leaf or internal):
   "passage": "egg",       // [E1]  passage type of the matched antigen (P1)
   "A": [                  // [E1]  AA substitutions on the edge into this node (T4)
-    { "pos": 145, "from": "N", "to": "S" }
+    { "pos": 145, "from": "N", "to": "S" }   // pos = 1-based HA1 position (matches clade names); omitted if none
   ]
 }
 ```
+
+> `A` is derived by diffing the reconstructed ancestral AA sequences the `.asr` tree
+> carries on every node (collapsed degree-2 chains roll their substitutions up onto the
+> surviving descendant). Positions line up with clade nomenclature (e.g. a `135 T→K`
+> edge feeds the `135K` clade). The C++ consensus path is not used (broken in the
+> current build).
 
 > Note: today the tree carries chart-0 antigen indices in `ag`. Linkage is by
 > `norm`, so the viewer resolves antigens per active chart via that chart's
@@ -121,10 +127,11 @@ plots raw layout coords).
   "i": 17,                    // index within this chart's antigen list
   "name": "A(H3N2)/THAILAND/8/2022",
   "norm": "THAILAND/8/2022",  // join key
-  "passage": "MDCK1",         // raw passage string ([E1] also classified into tree.passage)
+  "passage": "MDCK1",         // raw passage string ([E1] classified type in "pt" + tree.passage)
+  "pt": "cell",               // [E1] classified passage type: "egg"|"cell"|"reassortant"|null (P1 markers)
   "date": "2022-02-01",
   "x": 1.234, "y": -0.567,    // map coords (null if not positioned); transform-applied [E1]
-  "clade": "3C.2a1b.2a",      // primary clade label or null
+  "clade": "3C.2a1b.2a",      // [E1] primary clade = most-specific canonical (semantic_clades) label present, or null
   "clades": ["3C.2a1b.2a"],   // all clade labels
   "ref": false,               // reference antigen
   "vac": false                // vaccine strain

@@ -95,20 +95,34 @@ Tree tip names (`TOGO/764/2022_OR_4D211EF9`) and chart antigen names
 (passage tag + sequence hash stripped from tips; subtype prefix stripped from
 antigens). The full ~70 k-leaf seqdb tree is **pruned to the induced subtree of
 linked tips** (degree-2 nodes collapsed) so the file stays light and every visible
-tip corresponds to an assayed strain. Clade labels are taken from the chart
-antigens' semantic attributes and propagated to the matched tips.
+tip corresponds to an assayed strain. Clades are re-derived canonically (E1, see
+below) and each tip inherits its matched antigen's clade.
 
 For the H3N2 2026-0223 report, ~1.5 k of 2.9 k antigens (one centre) and ~2.1 k
 across all centres link to a tree tip; unmatched antigens are typically
 un-sequenced isolates or reassortants.
 
-## Known limitations / next steps
+## Exporter data (E1)
 
-- **Clade source.** Clades come from each chart's styling (`semantic.clades`),
-  which here mixes canonical names (`3C.2a1b.2a`) and substitution motifs
-  (`223V 145S`). Colouring the *whole* tree by canonical clade would use
-  `Tree.set_clades()` with the clade definitions in
-  `~/AC/eu/influenza-clade-nomenclature` / `acmacs-data/clades.json`.
+The exporter prepares the report-faithful data the viewer renders:
+
+- **Oriented coordinates.** Each chart's projection `transformation` (read from the
+  `.ace` projection via `decat`) is baked into the exported antigen/serum `x`/`y`, so
+  the map matches the report's orientation. (The 2×2 matrix has no `ae_backend` getter.)
+- **Canonical clade colours + legend.** Clades are re-derived the way `chart_modifier`
+  does — `populate_from_seqdb()` then `ae.semantic.clade.attributes()` with
+  `semantic_clades.semantic_attribute_data_for_subtype()` — and each antigen's primary
+  clade is the most-specific label present in the report palette
+  (`semantic_clades.semantic_plot_spec_data_for_subtype()`). `clade_color`/`clade_legend`
+  use those canonical hexes; labels with no palette entry (e.g. `122D`) get a generated
+  colour and are logged.
+- **Passage markers.** Each antigen is classified egg/cell/reassortant (`pt`), tips
+  inherit their matched antigen's type, and `passage_color` carries the marker palette.
+- **AA transitions.** Each tree edge's `A` substitutions are derived by diffing the
+  reconstructed ancestral sequences on the `.asr` tree (the C++ consensus path is broken
+  in this build); positions are HA1-numbered and line up with the clade names.
+
+## Known limitations / next steps
 - **Pruned context.** Only linked tips are kept. An option to retain surrounding
   tree context (or a full-tree mode with on-demand sequence loading) is a natural
   follow-up.
@@ -124,7 +138,7 @@ un-sequenced isolates or reassortants.
 ## Environment
 
 `ae_backend` is a CPython **3.10 arm64** extension. `run.sh` sets
-`PYTHONPATH=$AE/build-arm64:$AE/py` and runs
+`PYTHONPATH=$AE/build-arm64:$AE/py:$EU/acmacs-data` (the last for `semantic_clades`) and runs
 `arch -arm64 /Library/Frameworks/Python.framework/Versions/3.10/bin/python3`.
 Use `run.sh` rather than a bare `python3` (the system Homebrew Python is 3.14 and
 cannot load the extension).
