@@ -442,6 +442,7 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 # of the AD reference. Only the explicit "imported" method (use the tree's
                 # stored transitions) shows transitions.
                 pernode = cmd.get("per-node")
+                emitted_mrca = False
                 if isinstance(pernode, list):
                     # AD selects each curated label's node by draw-time node_id, which ae's tree
                     # doesn't carry — but every entry ALSO records its node's first/last leaf seq_ids
@@ -467,9 +468,15 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                             if isinstance(lab.get("scale"), (int, float)):
                                 ml["size"] = lab["scale"]
                         schema.setdefault("mrca_labels", []).append(ml)
+                        emitted_mrca = True
                     if skipped:
                         warnings.append(f"draw-aa-transitions: {skipped} per-node label(s) lacked first/last bounds — skipped")
-                if cmd.get("method", "imported") == "imported":
+                # AD draws the curated per-node labels OR (when no curation is given) every
+                # stored inode transition — never both. When we emitted curated MRCA labels,
+                # leaving aa_transitions.show on would flood the tree with every stored inode
+                # transition (the H3/H1 purple flood). Only enable show for an "imported"
+                # block that carries NO per-node curation.
+                if not emitted_mrca and cmd.get("method", "imported") == "imported":
                     aa = schema.setdefault("aa_transitions", {})
                     aa["show"] = True
                     aa["compute"] = False  # use the tree's stored ("imported") transitions
