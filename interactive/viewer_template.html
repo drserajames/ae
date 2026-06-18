@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Antigenic map + phylogenetic tree</title>
+<style>
+  :root { --fg:#222; --muted:#777; --line:#ccc; --bg:#fff; --panel:#fafafa; --hi:#111; }
+  * { box-sizing: border-box; }
+  html,body { margin:0; height:100%; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--fg); }
+  #app { display:flex; flex-direction:column; height:100vh; }
+  header { padding:8px 14px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  header .meta { color:var(--muted); font-size:12px; }
+  header .controls { margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  header label { font-size:12px; color:var(--muted); }
+  select, input[type=search] { font-size:12px; padding:3px 6px; border:1px solid var(--line); border-radius:4px; }
+  #main { display:flex; flex:1; min-height:0; }
+  #treePane, #mapPane { flex:1; min-width:0; display:flex; flex-direction:column; }
+  #treePane { border-right:1px solid var(--line); }
+  .paneTitle { font-size:12px; font-weight:600; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); color:var(--muted); }
+  .scroll { overflow:auto; flex:1; }
+  #mapWrap { flex:1; position:relative; }
+  svg { display:block; }
+  .edge { stroke:#999; stroke-width:1; fill:none; }
+  .tip { cursor:pointer; }
+  .tip:hover { stroke:#000; stroke-width:1.2px; }
+  .pt { cursor:pointer; }
+  .serum { fill:none; stroke:#555; stroke-width:1.3px; }
+  .dim { opacity:0.12; }
+  .lift { stroke:#000; stroke-width:1.6px; }
+  #legend { padding:8px 10px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:4px 12px; font-size:11px; max-height:120px; overflow:auto; }
+  .lg { display:flex; align-items:center; gap:5px; cursor:pointer; user-select:none; padding:1px 4px; border-radius:3px; }
+  .lg.off { opacity:0.35; }
+  .lg .sw { width:11px; height:11px; border-radius:50%; display:inline-block; border:1px solid rgba(0,0,0,.25); }
+  #tooltip { position:fixed; pointer-events:none; background:rgba(20,20,20,.92); color:#fff; font-size:11px; padding:5px 8px; border-radius:4px; max-width:280px; opacity:0; transition:opacity .05s; z-index:10; line-height:1.35; }
+  .footnote { font-size:11px; color:var(--muted); padding:4px 10px; }
+  mark { background:#ffe08a; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1 id="title">Antigenic map + phylogenetic tree</h1>
+    <span class="meta" id="metaline"></span>
+    <div class="controls">
+      <label>Centre <select id="chartSel"></select></label>
+      <label>Colour <select id="colorBy">
+        <option value="clade">clade</option>
+        <option value="continent">continent (tree)</option>
+        <option value="none">none</option>
+      </select></label>
+      <input id="search" type="search" placeholder="search strain…" size="18">
+      <label><input type="checkbox" id="onlyMatched"> map: linked only</label>
+    </div>
+  </header>
+  <div id="main">
+    <div id="treePane">
+      <div class="paneTitle" id="treeTitle">Phylogenetic tree</div>
+      <div class="scroll" id="treeScroll"><svg id="treeSvg"></svg></div>
+    </div>
+    <div id="mapPane">
+      <div class="paneTitle" id="mapTitle">Antigenic map</div>
+      <div id="mapWrap"><svg id="mapSvg"></svg></div>
+    </div>
+  </div>
+  <div id="legend"></div>
+  <div class="footnote" id="foot"></div>
+</div>
+<div id="tooltip"></div>
+<script>
+const DATA = /*__DATA__*/;
+(function(){
+  "use strict";
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const el = (t,a={}) => { const e=document.createElementNS(SVGNS,t); for(const k in a) e.setAttribute(k,a[k]); return e; };
+  const tip = document.getElementById("tooltip");
+
+  // ---- state ----
+  let chartIdx = 0;
+  let colorBy = "clade";
+  const cladeColor = DATA.clade_color || {};
+  const UNMATCHED = DATA.unmatched_color || "#d9d9d9";
+  const offClades = new Set();           // toggled-off clades
+  let activeNorm = null;                  // hovered/selected strain norm
+
+  // continent palette (for colorBy=continent)
+  const contColor = {AFRICA:"#e15759",EUROPE:"#4e79a7","NORTH-AMERICA":"#59a14f","SOUTH-AMERICA":"#edc948",ASIA:"#f28e2b",OCEANIA:"#b07aa1",ANTARCTICA:"#999"};
+
+  // ---- collect tree leaves & layout ----
+  const leaves = [];
+  (function walk(n){ if(!n.children||!n.children.length){leaves.push(n);} else n.children.forEach(walk); })(DATA.tree);
+  // assign y by leaf order, x already = cumulative edge length
+  let maxX = 0;
+  leaves.forEach((lf,i)=>{ lf._y=i; if(lf.x>maxX)maxX=lf.x; });
+  (function setY(n){ if(!n.children||!n.children.length) return n._y;
+    const ys=n.children.map(setY); n._y=(Math.min(...ys)+Math.max(...ys))/2; return n._y; })(DATA.tree);
+
+  // norm -> leaf nodes (a strain may appear as several tips)
+  const normToLeaves = {};
+  leaves.forEach(lf=>{ (normToLeaves[lf.norm]=normToLeaves[lf.norm]||[]).push(lf); });
+
+  // ---- color helpers ----
+  function leafColor(lf){
+    if(colorBy==="none") return "#4e79a7";
+    if(colorBy==="continent") return contColor[(lf.continent||"").toUpperCase()] || UNMATCHED;
+    return lf.clade ? (cladeColor[lf.clade]||UNMATCHED) : UNMATCHED;
+  }
+  function agColor(a){
+    if(colorBy==="none") return "#4e79a7";
+    if(colorBy==="continent") return "#4e79a7"; // continent not on chart antigens
+    return a.clade ? (cladeColor[a.clade]||UNMATCHED) : UNMATCHED;
+  }
+  const cladeHidden = c => c && offClades.has(c);
+
+  // ============ TREE RENDER ============
+  const treeSvg = document.getElementById("treeSvg");
+  const tipNodes = {};   // norm -> [circle elements]
+  function renderTree(){
+    treeSvg.innerHTML="";
+    const rowH = 11, padL=8, padR=160, padT=10;
+    const H = padT*2 + leaves.length*rowH;
+    const innerW = 360;
+    const W = padL + innerW + padR;
+    treeSvg.setAttribute("width", W); treeSvg.setAttribute("height", H);
+    const sx = x => padL + (maxX? (x/maxX)*innerW : 0);
+    const sy = y => padT + y*rowH;
+    for(const k in tipNodes) delete tipNodes[k];
+
+    // edges
+    (function edges(n){
+      const px=sx(n.x), py=sy(n._y);
+      (n.children||[]).forEach(c=>{
+        const cx=sx(c.x), cy=sy(c._y);
+        // vertical connector at parent x, then horizontal to child
+        treeSvg.appendChild(el("path",{class:"edge", d:`M${px},${py} V${cy} H${cx}`}));
+        edges(c);
+      });
+    })(DATA.tree);
+
+    // tips
+    leaves.forEach(lf=>{
+      const cx=sx(lf.x), cy=sy(lf._y);
+      const c=el("circle",{class:"tip", cx:cx, cy:cy, r:3, fill:leafColor(lf), "data-norm":lf.norm});
+      c.addEventListener("mouseenter",e=>{ setActive(lf.norm); showTip(e,tipHtml(lf)); });
+      c.addEventListener("mousemove",moveTip);
+      c.addEventListener("mouseleave",()=>{ setActive(null); hideTip(); });
+      treeSvg.appendChild(c);
+      (tipNodes[lf.norm]=tipNodes[lf.norm]||[]).push(c);
+      const t=el("text",{x:cx+5, y:cy+3, "font-size":9, fill:"#333"});
+      t.textContent = lf.name.replace(/_[A-Za-z0-9]+_[0-9A-Fa-f]+$/,"");
+      treeSvg.appendChild(t);
+    });
+  }
+  function tipHtml(lf){
+    return `<b>${lf.name}</b><br>${lf.date||"?"} · ${lf.country||lf.continent||""}`+
+           (lf.clade?`<br>clade: <b>${lf.clade}</b>`:"")+
+           (lf.ag&&lf.ag.length?`<br>${lf.ag.length} antigen(s) on map`:"<br><i>no antigen on this map</i>");
+  }
+
+  // ============ MAP RENDER ============
+  const mapSvg = document.getElementById("mapSvg");
+  const mapWrap = document.getElementById("mapWrap");
+  const ptNodes = {};   // norm -> [elements]
+  let agByIdx = {};
+  function renderMap(){
+    const chart = DATA.charts[chartIdx];
+    mapSvg.innerHTML=""; for(const k in ptNodes) delete ptNodes[k]; agByIdx={};
+    const pts = chart.antigens.filter(a=>a.x!=null && a.y!=null);
+    const sera = chart.sera.filter(s=>s.x!=null && s.y!=null);
+    const all = pts.concat(sera);
+    if(!all.length) return;
+    const xs=all.map(p=>p.x), ys=all.map(p=>p.y);
+    let xmin=Math.min(...xs), xmax=Math.max(...xs), ymin=Math.min(...ys), ymax=Math.max(...ys);
+    const W = mapWrap.clientWidth||600, H = mapWrap.clientHeight||600;
+    const pad=30;
+    // equal aspect
+    const spanX=xmax-xmin||1, spanY=ymax-ymin||1;
+    const scale=Math.min((W-2*pad)/spanX,(H-2*pad)/spanY);
+    const ox=(W-spanX*scale)/2, oy=(H-spanY*scale)/2;
+    const SX=x=>ox+(x-xmin)*scale, SY=y=>oy+(ymax-y)*scale; // flip y
+    mapSvg.setAttribute("width",W); mapSvg.setAttribute("height",H);
+
+    // sera first (behind)
+    sera.forEach(s=>{
+      const r=6, x=SX(s.x)-r, y=SY(s.y)-r;
+      const sq=el("rect",{class:"serum pt", x:x,y:y,width:2*r,height:2*r});
+      sq.addEventListener("mouseenter",e=>showTip(e,`<b>${s.name}</b><br><i>serum</i>`));
+      sq.addEventListener("mousemove",moveTip); sq.addEventListener("mouseleave",hideTip);
+      mapSvg.appendChild(sq);
+    });
+    // antigens
+    pts.forEach(a=>{
+      agByIdx[a.i]=a;
+      const r = a.ref?5: a.vac?6:3.5;
+      let shape;
+      if(a.vac){ shape=el("path",{class:"pt", d:star(SX(a.x),SY(a.y),6,2.6,5)}); }
+      else { shape=el("circle",{class:"pt", cx:SX(a.x), cy:SY(a.y), r:r}); }
+      shape.setAttribute("fill", agColor(a));
+      shape.setAttribute("fill-opacity", a.ref?0.55:0.85);
+      shape.setAttribute("stroke", a.ref?"#000":"rgba(0,0,0,.3)");
+      shape.setAttribute("stroke-width", a.ref?1.3:0.6);
+      shape.setAttribute("data-norm", a.norm);
+      shape.addEventListener("mouseenter",e=>{ setActive(a.norm); showTip(e,agHtml(a)); });
+      shape.addEventListener("mousemove",moveTip);
+      shape.addEventListener("mouseleave",()=>{ setActive(null); hideTip(); });
+      mapSvg.appendChild(shape);
+      (ptNodes[a.norm]=ptNodes[a.norm]||[]).push(shape);
+    });
+  }
+  function agHtml(a){
+    const inTree = normToLeaves[a.norm] ? `<br>${normToLeaves[a.norm].length} tip(s) in tree` : "<br><i>not in tree</i>";
+    return `<b>${a.name}</b>`+(a.passage?` <span style="opacity:.7">${a.passage}</span>`:"")+
+      `<br>${a.date||"?"}`+(a.clade?`<br>clade: <b>${a.clade}</b>`:"")+
+      (a.ref?"<br><i>reference antigen</i>":"")+(a.vac?"<br><b>vaccine</b>":"")+inTree;
+  }
+  function star(cx,cy,spikes,inner,outer){
+    let rot=Math.PI/2*3, step=Math.PI/spikes, p=`M${cx},${cy-outer}`;
+    for(let i=0;i<spikes;i++){
+      p+=`L${cx+Math.cos(rot)*outer},${cy+Math.sin(rot)*outer}`; rot+=step;
+      p+=`L${cx+Math.cos(rot)*inner},${cy+Math.sin(rot)*inner}`; rot+=step;
+    }
+    return p+"Z";
+  }
+
+  // ============ LINKING / HIGHLIGHT ============
+  function setActive(norm){
+    activeNorm = norm;
+    applyHighlight();
+  }
+  function applyHighlight(){
+    // clade visibility + active-norm lift across both panels
+    leaves.forEach(lf=>{
+      (tipNodes[lf.norm]||[]).forEach(c=>{
+        const hidden = cladeHidden(lf.clade);
+        c.classList.toggle("dim", hidden || (activeNorm && lf.norm!==activeNorm));
+        c.classList.toggle("lift", activeNorm && lf.norm===activeNorm);
+      });
+    });
+    const chart=DATA.charts[chartIdx];
+    chart.antigens.forEach(a=>{
+      (ptNodes[a.norm]||[]).forEach(s=>{
+        const hidden = cladeHidden(a.clade) || (onlyMatched.checked && !normToLeaves[a.norm]);
+        s.classList.toggle("dim", hidden || (activeNorm && a.norm!==activeNorm));
+        s.classList.toggle("lift", activeNorm && a.norm===activeNorm);
+      });
+    });
+  }
+
+  // ============ LEGEND ============
+  function renderLegend(){
+    const lg=document.getElementById("legend"); lg.innerHTML="";
+    if(colorBy!=="clade"){ lg.innerHTML='<span class="footnote">Legend shown when colouring by clade.</span>'; return; }
+    const clades=Object.keys(cladeColor).sort();
+    clades.forEach(c=>{
+      const d=document.createElement("div"); d.className="lg"+(offClades.has(c)?" off":"");
+      d.innerHTML=`<span class="sw" style="background:${cladeColor[c]}"></span>${c}`;
+      d.onclick=()=>{ offClades.has(c)?offClades.delete(c):offClades.add(c); d.classList.toggle("off"); applyHighlight(); };
+      lg.appendChild(d);
+    });
+    const u=document.createElement("div"); u.className="lg";
+    u.innerHTML=`<span class="sw" style="background:${UNMATCHED}"></span>no clade`;
+    lg.appendChild(u);
+  }
+
+  // ============ tooltip ============
+  function showTip(e,html){ tip.innerHTML=html; tip.style.opacity=1; moveTip(e); }
+  function moveTip(e){ tip.style.left=(e.clientX+12)+"px"; tip.style.top=(e.clientY+12)+"px"; }
+  function hideTip(){ tip.style.opacity=0; }
+
+  // ============ controls ============
+  const chartSel=document.getElementById("chartSel");
+  DATA.charts.forEach((c,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=`${c.label} (${c.n_antigens} ag, ${c.n_sera} sr)`; chartSel.appendChild(o); });
+  chartSel.onchange=()=>{ chartIdx=+chartSel.value; renderMap(); applyHighlight(); updateTitles(); };
+  document.getElementById("colorBy").onchange=e=>{ colorBy=e.target.value; renderTree(); renderMap(); renderLegend(); applyHighlight(); };
+  const onlyMatched=document.getElementById("onlyMatched");
+  onlyMatched.onchange=applyHighlight;
+  const search=document.getElementById("search");
+  search.oninput=()=>{
+    const q=search.value.trim().toUpperCase();
+    if(!q){ setActive(null); return; }
+    // first matching norm among leaves or antigens
+    const lf=leaves.find(l=>l.name.toUpperCase().includes(q));
+    const ag=DATA.charts[chartIdx].antigens.find(a=>a.name.toUpperCase().includes(q));
+    setActive(lf?lf.norm:(ag?ag.norm:"__none__"));
+  };
+
+  function updateTitles(){
+    const m=DATA.meta, ch=DATA.charts[chartIdx];
+    document.getElementById("title").textContent=`${m.subtype||""} ${m.assay||""} — tree + antigenic map`.trim();
+    document.getElementById("metaline").textContent=
+      `${m.n_kept_leaves} linked tips / ${m.n_tree_leaves} in tree · ${m.n_matched_norms} strains matched`;
+    document.getElementById("treeTitle").textContent=`Phylogenetic tree (${m.tree_file}) — ${leaves.length} linked tips`;
+    document.getElementById("mapTitle").textContent=`Antigenic map — ${ch.label}: ${ch.name}`;
+    document.getElementById("foot").textContent=
+      "Hover a tip or map point to link the two panels by strain. Click legend swatches to filter clades. "+
+      "Open circle/black-edge = reference antigen; star = vaccine; squares = sera.";
+  }
+
+  // ============ init ============
+  renderTree(); renderMap(); renderLegend(); applyHighlight(); updateTitles();
+  let rt; window.addEventListener("resize",()=>{ clearTimeout(rt); rt=setTimeout(()=>{ renderMap(); applyHighlight(); },150); });
+})();
+</script>
+</body>
+</html>
