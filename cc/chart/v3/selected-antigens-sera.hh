@@ -165,28 +165,34 @@ namespace ae::chart::v3
     template <typename AgSr> struct SelectedIterator
     {
       public:
-        SelectedIterator(const Selected<AgSr>& parent, typename AgSr::indexes_t::const_iterator current) : parent_{parent}, current_{current} {}
+        // pos is the position within parent.indexes (0 .. parent.size()), NOT an antigen/serum number.
+        SelectedIterator(const Selected<AgSr>& parent, size_t pos) : parent_{parent}, pos_{pos} {}
 
         SelectedIterator& operator++()
         {
-            ++current_;
+            ++pos_;
             return *this;
         }
 
-        auto operator*() { return parent_[current_ - parent_.indexes.begin()]; }
+        // Index into parent_'s OWN indexes by position. parent_ is a by-value copy of the Selected
+        // (named_vector_t owns its std::vector by value), so an iterator captured from the original
+        // Selected's buffer must never be subtracted against parent_'s copy — that is cross-buffer
+        // pointer arithmetic (UB), which libc++ hardening (_LIBCPP_HARDENING_MODE) turns into a
+        // SIGTRAP on out-of-bounds operator[]. Tracking the position keeps the access in-bounds.
+        auto operator*() { return parent_[pos_]; }
 
-        bool operator==(const SelectedIterator& rhs) const { return current_ == rhs.current_; }
+        bool operator==(const SelectedIterator& rhs) const { return pos_ == rhs.pos_; }
 
       private:
         Selected<AgSr> parent_;
-        typename AgSr::indexes_t::const_iterator current_;
+        size_t pos_;
     };
 
-    template <typename AgSr> SelectedIterator<AgSr> Selected<AgSr>::begin() { return SelectedIterator<AgSr>{*this, indexes.begin()}; }
-    template <typename AgSr> SelectedIterator<AgSr> Selected<AgSr>::end() { return SelectedIterator<AgSr>{*this, indexes.end()}; }
+    template <typename AgSr> SelectedIterator<AgSr> Selected<AgSr>::begin() { return SelectedIterator<AgSr>{*this, 0}; }
+    template <typename AgSr> SelectedIterator<AgSr> Selected<AgSr>::end() { return SelectedIterator<AgSr>{*this, indexes.size()}; }
 
-    template <typename AgSr> SelectedIterator<AgSr> Selected<AgSr>::begin() const { return SelectedIterator<AgSr>{*this, indexes.begin()}; }
-    template <typename AgSr> SelectedIterator<AgSr> Selected<AgSr>::end() const { return SelectedIterator<AgSr>{*this, indexes.end()}; }
+    template <typename AgSr> SelectedIterator<AgSr> Selected<AgSr>::begin() const { return SelectedIterator<AgSr>{*this, 0}; }
+    template <typename AgSr> SelectedIterator<AgSr> Selected<AgSr>::end() const { return SelectedIterator<AgSr>{*this, indexes.size()}; }
 
     struct SelectedAntigens : public Selected<Antigens>
     {

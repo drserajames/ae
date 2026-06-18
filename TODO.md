@@ -528,6 +528,23 @@ C++ renderer; TAL composes them with the tree.
 
 ## 4. ssm-report — seasonal report generation  *(owner: report agent — 🟡 assembly core done)*
 
+> 🟢 **DONE (py314-kateri agent, 2026-06-18):** the "kateri handshake fails under Python 3.14"
+> report was a **misdiagnosis** — it is **not** an asyncio/kateri-transport bug. The report's
+> `style` step SIGTRAPs (exit 133) during semantic clade tagging
+> (`select_antigens(lambda ...)` iteration) **before** kateri is ever contacted, so kateri never
+> receives a chart. **Root cause:** a latent UB in `cc/chart/v3/selected-antigens-sera.hh`
+> `SelectedIterator::operator*` — `parent_[current_ - parent_.indexes.begin()]` subtracts an
+> iterator captured from the *original* `Selected`'s `indexes` against the iterator's own
+> *by-value copy* of that buffer (`named_vector_t` owns its `std::vector` by value → distinct
+> buffer → cross-buffer pointer arithmetic → out-of-bounds `operator[]`). `build-py314` is
+> compiled with `-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST` (build-arm64 is **not**),
+> which turns that OOB into `__builtin_trap()` (SIGTRAP). `build-arm64` (3.10) lacks hardening so
+> the same UB slid by. **Fix:** track position by index (`parent_[pos_]`) instead of cross-buffer
+> iterator arithmetic — correct for both builds. Rebuilt `build-py314`; `select_antigens` now
+> matches 3.10 exactly (seq antigens 2528, has_clade 2480), full export-path API byte-identical
+> across 3.10/3.14, `test/chart1.ace` relax stress 66.1247. `py/ae/utils/kateri.py` /
+> `main_loop.py` were **not** the problem and are unchanged.
+
 > **⚠ Direction change — consolidate around `vcm`, not the AD port.** The team already
 > builds reports on `ae` via the **`vcm`** tool (in each report working dir). The plan is to
 > shelve this AD-faithful port and bring vcm's library tier into `ae` — full audit + phased

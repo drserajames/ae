@@ -302,6 +302,20 @@ endif
 
 This works for both x86_64 Homebrew (`/usr/local`) and arm64 Homebrew (`/opt/homebrew`) because `brew --prefix libomp` returns the formula-specific prefix regardless of which Homebrew is in PATH.
 
+### libc++ hardening differs between builds — `build-py314` traps on UB that `build-arm64` ignores
+
+`build-py314/` (3.14) is configured with **`-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST`**;
+`build-arm64/` (3.10) is **not**. FAST hardening adds bounds/iterator checks that, on failure, call
+`__builtin_trap()` → **SIGTRAP (exit 133)**, with no Python traceback (faulthandler does not catch
+SIGTRAP — register it explicitly: `faulthandler.register(signal.SIGTRAP)`). This means a *latent*
+out-of-bounds/UB bug can run cleanly under the 3.10 build but hard-crash under the 3.14 build, and
+look like a "Python 3.14 incompatibility" when it is really a pre-existing C++ bug the 3.14 build's
+hardening simply exposes. One such bug (a cross-buffer iterator subtraction in
+`cc/chart/v3/selected-antigens-sera.hh` `SelectedIterator`, surfaced as a fake "kateri handshake
+failure" in the ssm-report `style` step) was found and fixed this way on 2026-06-18. When triaging a
+3.14-only SIGTRAP, suspect libc++ hardening catching real UB — get the native frame with a
+`backtrace()` SIGTRAP handler (lldb attach / core dumps are blocked by hardened-runtime Python).
+
 ---
 
 ## Build system (standard path)
