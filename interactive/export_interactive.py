@@ -26,6 +26,34 @@ from pathlib import Path
 import ae_backend
 from ae_backend import tree as TREE
 
+# --- viewer module bundle (F1) ------------------------------------------------
+# The viewer is authored as separate js/*.js modules and inlined into the template
+# at export time, so the output stays a single dependency-free file that opens from
+# file://. Order matters: state/colour/ui define the shared APIs others use, and
+# main.js (entry point) must come last. See CONTRACT.md / PLAN.md.
+MODULE_ORDER = [
+    "state.js",    # IV.State — selection store + view state + DOM helpers
+    "colour.js",   # IV.Colour — colour API
+    "ui.js",       # IV.UI — tooltip, legend, controls (used by tree/map handlers)
+    "tree.js",     # IV.Tree — phylogram render + highlight
+    "map.js",      # IV.Map — antigenic map render + highlight
+    "lines.js",    # IV.Lines — Stage-2 overlay scaffold
+    "grid.js",     # IV.Grid — Stage-2 all-centres scaffold
+    "main.js",     # entry point — MUST be last
+]
+
+
+def build_modules(js_dir: Path) -> str:
+    """Concatenate the viewer modules in MODULE_ORDER into one classic script."""
+    parts = []
+    for name in MODULE_ORDER:
+        p = js_dir / name
+        if not p.exists():
+            raise SystemExit(f"ERROR: viewer module missing: {p}")
+        parts.append(f"// ===== {name} =====\n{p.read_text()}")
+    return "\n".join(parts)
+
+
 # --- clade colour palette (stable, colour-blind-friendly-ish) -----------------
 PALETTE = [
     "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948",
@@ -262,10 +290,13 @@ def main():
 
     payload = json.dumps(bundle, separators=(",", ":"))
     tpl = open(args.template).read()
-    if "/*__DATA__*/" not in tpl:
-        print("ERROR: template missing /*__DATA__*/ placeholder", file=sys.stderr)
-        sys.exit(1)
-    html = tpl.replace("/*__DATA__*/", payload)
+    for placeholder in ("/*__DATA__*/", "/*__MODULES__*/"):
+        if placeholder not in tpl:
+            print(f"ERROR: template missing {placeholder} placeholder", file=sys.stderr)
+            sys.exit(1)
+    modules = build_modules(Path(args.template).with_name("js"))
+    # inline modules first (module source never contains the data token), then data
+    html = tpl.replace("/*__MODULES__*/", modules).replace("/*__DATA__*/", payload)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     open(args.out, "w").write(html)
     print(f"[out] wrote {args.out}  ({len(html)//1024} KB)", file=sys.stderr)

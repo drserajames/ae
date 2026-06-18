@@ -8,10 +8,43 @@ map figures are otherwise static PDF).
 ```
 interactive/
   export_interactive.py   # builds the viewer from a tree + chart(s) via ae_backend
-  viewer_template.html    # the viewer (vanilla JS + SVG, no external deps)
+                          #   + inline bundler: concatenates js/*.js into the template
+  viewer_template.html    # thin shell: markup + CSS + /*__DATA__*/ and /*__MODULES__*/ slots
+  js/                     # viewer modules (vanilla JS + SVG, no deps), inlined at export
+    state.js              #   IV.State — selection store + view state (shared contract)
+    colour.js             #   IV.Colour — colour API (shared contract)
+    ui.js                 #   IV.UI — tooltip, legend, header controls, titles
+    tree.js               #   IV.Tree — phylogram render + highlight
+    map.js                #   IV.Map — antigenic map render + highlight
+    lines.js              #   IV.Lines — Stage-2 overlay scaffold (error/connection lines)
+    grid.js               #   IV.Grid — Stage-2 all-centres grid scaffold
+    main.js               #   entry point (loaded last); wires bundle → modules
+  CONTRACT.md             # F0: the JSON bundle schema both exporter and viewer build against
+  PLAN.md                 # the v2 roadmap (issues + features, task ownership, parallelism)
   run.sh                  # wires up the ae arm64 / Python-3.10 env and runs the exporter
   data/                   # local scratch only — git-ignored, do NOT keep outputs here
 ```
+
+## Architecture (post-F1)
+
+The viewer is authored as separate `js/*.js` modules sharing a single `IV.*`
+namespace and **inlined into `viewer_template.html` at export time** (no bundler, no
+server) so the output stays one dependency-free file that opens from `file://`.
+Module load order is fixed by `MODULE_ORDER` in `export_interactive.py`
+(`state → colour → ui → tree → map → lines → grid → main`).
+
+Two cross-cutting modules define the shared APIs the rest build on — never
+duplicate this state:
+
+- **`state.js` (`IV.State`)** — the selection store and view state (`active`,
+  `selected`, `offClades`, `onlyMatched`, `chartIdx`, `colorBy`) with
+  `subscribe(fn)` / `notify()`. Each panel subscribes and re-applies its own
+  highlight when state changes.
+- **`colour.js` (`IV.Colour`)** — the colour API (`leaf`, `antigen`, `cladeColor`,
+  `clades`, `unmatched`) honouring the active `colorBy`.
+
+The bundle handed from exporter to viewer is specified in **`CONTRACT.md`**; the
+phased roadmap and per-agent task ownership are in **`PLAN.md`**.
 
 > **Where outputs go.** A generated viewer embeds the real WHO surveillance data
 > inline, so it must **not** live in the `ae` repo. Write it into the report run it
