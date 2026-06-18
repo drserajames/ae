@@ -159,3 +159,46 @@ scratch dir (never the repo), headless render; remember post-load `requestAnimat
 does not fire under `--virtual-time-budget` (override rAF→setTimeout to test
 zoom/pan/lines/colour repaints). Commit own files only; WHO-data check before commit
 (real data → report folder, not repo); push only on request.
+
+---
+
+# v4 — third feedback wave (12 fixes + 2 features)
+
+From a third round of testing. Theme: match the report's exact point SHAPES, fix the
+tree-label nomenclature, and a few layout/interaction fixes.
+
+## Canonical references (investigated against kateri / acmacs-data — use verbatim)
+
+**Point shapes** (kateri `lib/src/draw_on*.dart`, the report renderer):
+- **egg** (antigen): `M0,r C1.4r,0.95r 0.8r,-0.98r 0,-r C-0.8r,-0.98r -1.4r,0.95r 0,r Z`,
+  then **aspect scale x0.75** (width = 0.75·height). Replaces the too-pointy current egg (#4).
+- **uglyEgg** (egg serum): hexagon `M0,r L1.0r,0.6r L0.8r,-0.6r L0,-r L-0.8r,-0.6r L-1.0r,0.6r Z`,
+  aspect x0.75 (#5).
+- **reassortant** = egg (antigen) / uglyEgg (serum) **rotated 0.5 rad (~28.6°)** (#11/#12).
+- **vaccine** = NOT a star — the antigen's normal passage shape but **larger** (kateri size
+  ~40 vs ref ~20–32), black outline (#3).
+- Passage ⇒ SHAPE, **no outline ring** (#10). Antigen: cell→circle, egg→egg, reassortant→tilted
+  egg. Serum: cell→box(square), egg→uglyEgg, reassortant→tilted uglyEgg.
+
+**Clade labels (#2):** the bundle `clade_legend` already embeds the Pango name where one
+exists (`158K 189R (J.2.3)`, `135K 189R (J.2.4)`, or bare `K`), from `semantic_clades.py`
+clades-v10. Exporter derives `clade_short` (parse `\(([A-Za-z0-9.]+)\)`, else the legend if it
+is already a short token, else null). Tree labels with `clade_short`; clades with none are not
+labelled (never show the AA motif). Motif-only clades (`135A`, `189R`) have no Pango.
+
+**#1 lead:** edges render but `computeFit` reads a too-small `treeScroll` height (layout
+timing), squishing the phylogram into a ~156px band that reads as "no lines."
+
+## Tasks by agent
+
+| Agent | Items | Files |
+|-------|-------|-------|
+| Agent-MAP | glyph: fix `eggPath`(#4)/`uglyEggPath`(#5)+rotation(#11/#12), drop vaccine-star; map: vaccine=bigger passage shape(#3), reassortant tilted egg(#11)/serum tilted uglyEgg(#12), egg serum=uglyEgg(#5), **remove passage outline**(#10), remove darker gridlines(#6), gridlines on grid panels(#7), grid not overflowing legend(#8), **F1** sera outline = colour-by colour | `glyph.js`, `map.js`, `grid.js` |
+| Agent-TREE | #1 branch-line visibility (computeFit pane-height/layout), #2 Pango clade labels (`clade_short`, skip motif-only), #3 vaccine tip=bigger shape, #4 egg tip shape, #10 no passage outline, #11 reassortant tip=tilted egg | `tree.js` |
+| Agent-COLOUR | #9 legend clickable where it overlaps the map (z-index/pointer-events), coordinate #8, **F2** extend legend click-cycle to continent + amino-acid legends | `colour.js`, `ui.js`, template |
+| Agent-SELECT | **F2** generalise the clade cycle to a per-attribute cycle (clade/continent/aa value) + fold into `emphasis()` | `state.js` |
+| Agent-EXP | #2 export `clade_short` (Pango per clade or null) | `export_interactive.py`, `CONTRACT.md` |
+
+Dependencies: glyph shape fixes land with map+tree shape adoption; #2 needs Agent-EXP
+`clade_short` before Agent-TREE; F2 = Agent-SELECT (store) + Agent-COLOUR (legend) together.
+Verify/commit/WHO/rAF rules as in v3.
