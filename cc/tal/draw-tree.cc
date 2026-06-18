@@ -322,7 +322,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // --- vertical reserves: title (top); time-series / dash slot labels (bottom). The
     //     colour legend sits in the top-right corner (acmacs-tal), so it needs no bottom reserve. ---
     const double vmargin = 0.03 * height;
-    const bool want_legend = !legend_items.empty();
+    // AD draws the continent legend as the lower-left world map (LegendContinentMap),
+    // not as a coloured-square legend — so when the geo inset is present it IS the legend
+    // and the top-right square legend is suppressed (otherwise it duplicates the inset).
+    const bool want_legend = !legend_items.empty() && !params.geo_inset;
     const double top_reserve = params.title.empty() ? 0.0 : 0.05 * height;
     const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0) ? 0.07 * height : 0.0;
 
@@ -340,10 +343,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     ae::draw::CairoPdf pdf{output, width, height};
     pdf.background(WHITE);
 
-    // --- title (top, centred) ---
+    // --- title (top-left; acmacs-tal Title draws at offset [5,5], size 0.015·height) ---
     if (!params.title.empty()) {
-        const double title_fs = std::clamp(top_reserve * 0.45, 8.0, 26.0);
-        pdf.text(width / 2.0, vmargin + top_reserve * 0.5, params.title, title_fs, BLACK, /*center=*/true);
+        const double title_fs = std::clamp(0.015 * height, 8.0, 26.0);
+        pdf.text(margin, vmargin + top_reserve * 0.5 + title_fs * 0.5, params.title, title_fs, BLACK, /*center=*/false);
     }
 
     // --- hz-sections: left marker column (bracket + rotated label) + separator across the tree ---
