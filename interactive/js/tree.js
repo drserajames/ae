@@ -41,6 +41,8 @@
   const view = { z: 1, Ty: 0 };
   const fit = { kx: 1, ky: 1, pad: 16, W: 600, H: 600 };
   let pendingApply = false;
+  let svgEl = null;          // cached <svg> so apply() can keep it sized to the pane
+  let userInteracted = false; // once true, re-fits preserve the user's zoom/pan
 
   const clamp = (v, lo, hi) => v < lo ? lo : (v > hi ? hi : v);
   const shortName = s => s.replace(/_[A-Za-z0-9]+_[0-9A-Fa-f]+$/, "");
@@ -179,19 +181,11 @@
       (lf.ag && lf.ag.length ? `<br>${lf.ag.length} antigen(s) on map` : "<br><i>no antigen on this map</i>");
   }
 
-  // tip outline marks passage (P1), mirroring the map (map.js passageStroke): ring
-  // ONLY the salient passages (egg / reassortant). cell is the overwhelming default,
-  // so ringing every cell tip would bury the clade fills.
-  function passageStroke(lf) {
-    if (!(Colour.hasPassageMarkers && Colour.hasPassageMarkers())) return null;
-    const t = lf.passage;
-    return (t && t !== "cell") ? Colour.passageColor(t) : null;
-  }
-
-  // ---- per-tip glyphs (F2 vaccine / F3 serology / F7 egg), via the shared IV.Glyph
-  // factory so the tree and map draw identical shapes. vaccine + serology are
-  // antigen-level (not on the tree leaf), so resolve them per norm across ALL charts
-  // — a vaccine/serology strain is a strain property, independent of active centre.
+  // ---- per-tip glyphs, via the shared IV.Glyph factory so the tree and map draw
+  // identical shapes. Passage ⇒ SHAPE (cell→circle, egg→egg, reassortant→tilted egg),
+  // never an outline ring (#10). vaccine + serology are antigen-level (not on the tree
+  // leaf), so resolve them per norm across ALL charts — a vaccine/serology strain is a
+  // strain property, independent of the active centre.
   let normMeta = {};   // norm -> {vac, serology}
   function buildNormMeta() {
     normMeta = {};
@@ -202,36 +196,47 @@
       if (a.serology) m.serology = true;
     }
   }
-  const TIP_R = { circle: 3, serology: 4.4, egg: 4, reassortant: 4, star: 6.5 };
-  // role priority: vaccine > egg/reassortant (passage shape) > serology > default.
+  const TIP_R = { base: 3, passage: 3.6, serology: 4.4, vaccine: 6 };
+  // shape follows passage; size escalates vaccine > serology > default. Vaccine is NOT
+  // a star (#3) — it's the strain's normal passage shape, just larger + black outline.
   function tipGlyph(lf) {
-    const m = normMeta[lf.norm];
-    if (m && m.vac) return { kind: "star", r: TIP_R.star };
-    if (lf.passage === "egg") return { kind: "egg", r: TIP_R.egg };
-    if (lf.passage === "reassortant") return { kind: "reassortant", r: TIP_R.reassortant };
-    if (m && m.serology) return { kind: "circle", r: TIP_R.serology };
-    return { kind: "circle", r: TIP_R.circle };
+    const m = normMeta[lf.norm] || {};
+    let kind = "circle";
+    if (lf.passage === "egg") kind = "egg";                       // #4
+    else if (lf.passage === "reassortant") kind = "reassortant";  // #11 (tilted egg via Glyph)
+    let r = kind === "circle" ? TIP_R.base : TIP_R.passage;
+    if (m.serology) r = Math.max(r, TIP_R.serology);             // #F3
+    if (m.vac) r = TIP_R.vaccine;                                // #3 bigger
+    return { kind, r, vac: !!m.vac };
   }
   // glyphs must be positioned by GEOMETRY (cx/cy or path d) not by a transform —
   // S1's box-select reads getBBox(), which ignores an element's own transform.
   function glyphPathD(kind, cx, cy, r) {
     switch (kind) {
-      case "star": return IV.Glyph.starPath(cx, cy, r, 5, 0.46);
       case "egg": return IV.Glyph.eggPath(cx, cy, r);
       case "reassortant": return IV.Glyph.reassortantPath(cx, cy, r);
       default: return null;
     }
   }
-  function tipStrokeFor(lf, kind) {
-    if (kind === "star") return "#000";                 // vaccine: dark outline
-    return passageStroke(lf) || "rgba(0,0,0,.35)";      // egg/reassortant passage colour
-  }
-  function tipStrokeWFor(lf, kind) {
-    if (kind === "star") return 1.0;
-    return passageStroke(lf) ? 1.3 : 0.7;
-  }
+  // #10: no passage outline ring — neutral outline for definition, black for vaccine.
+  function tipStrokeFor(vac) { return vac ? "#000" : "rgba(0,0,0,.4)"; }
+  function tipStrokeWFor(vac) { return vac ? 1.1 : 0.6; }
 
-  // ---- clade labels at each clade's MRCA, like the report PDFs (F4) ----
+  // ---- clade labels at each clade's MRCA, like the report PDFs (F4 + #2) ----
+  // #2: label with the Pango short name (clade_short), never the AA motif. Prefer the
+  // authoritative bundle field; if absent (pre-exporter), derive it the same way the
+  // exporter will — the parenthetical Pango in clade_legend ("158K 189R (J.2.3)" → J.2.3),
+  // else the legend if it is already a single short token ("K"), else null (motif-only
+  // clades like 135A / 189R are not labelled).
+  function cladeShort(clade) {
+    const cs = IV.DATA.clade_short;
+    if (cs && Object.prototype.hasOwnProperty.call(cs, clade)) return cs[clade] || null;
+    const leg = (Colour.cladeLegend ? Colour.cladeLegend(clade) : clade) || "";
+    const m = /\(([A-Za-z0-9.]+)\)/.exec(leg);
+    if (m) return m[1];
+    if (leg && !/\s/.test(leg) && /^[A-Za-z][A-Za-z0-9.]*$/.test(leg)) return leg;
+    return null;
+  }
   let cladeLabels = [];   // [{clade, x(tree), row, color, text, prio, el}]
   function computeCladeLabels(root) {
     cladeLabels = [];
@@ -239,8 +244,10 @@
     leaves.forEach(lf => { if (lf.clade) (byClade[lf.clade] = byClade[lf.clade] || []).push(lf._y); });
     const prio = IV.DATA.clade_priority || {};
     for (const clade in byClade) {
+      const short = cladeShort(clade);
+      if (!short) continue;                             // #2: only label clades with a Pango name
       const rows = byClade[clade];
-      if (rows.length < 4) continue;                    // skip tiny clades (clutter)
+      if (rows.length < 2) continue;                    // skip singletons (clutter)
       const lo = Math.min(...rows), hi = Math.max(...rows);
       // MRCA = smallest node whose leaf-range [_lo,_hi] still contains [lo,hi]
       let node = root;
@@ -252,7 +259,7 @@
       cladeLabels.push({
         clade, x: node.x, row: (lo + hi) / 2, rowLo: lo, rowHi: hi,
         color: Colour.cladeColor(clade),
-        text: (Colour.cladeLegend ? Colour.cladeLegend(clade) : clade) || clade,
+        text: short,
         prio: (prio[clade] != null ? prio[clade] : 9999),
       });
     }
@@ -286,6 +293,7 @@
     buildNormMeta();
     computeCladeLabels(IV.DATA.tree);
     const svg = document.getElementById("treeSvg");
+    svgEl = svg;
     svg.innerHTML = "";
     tipNodes = {}; tipEntries = [];
     svg.setAttribute("width", fit.W);
@@ -318,10 +326,10 @@
     const tipsG = el("g", { id: "treeTips" });
     svg.appendChild(tipsG);
     leaves.forEach(lf => {
-      const g = tipGlyph(lf);   // {kind, r}
+      const g = tipGlyph(lf);   // {kind, r, vac}
       const opts = {
         class: "tip", fill: Colour.leaf(lf), dataNorm: lf.norm,
-        stroke: tipStrokeFor(lf, g.kind), strokeWidth: tipStrokeWFor(lf, g.kind),
+        stroke: tipStrokeFor(g.vac), strokeWidth: tipStrokeWFor(g.vac),
       };
       // build at origin; apply() positions by geometry (cx/cy for circle, d for paths)
       const node = g.kind === "circle" ? IV.Glyph.circle(0, 0, g.r, opts)
@@ -351,17 +359,30 @@
     bindViewport(svg);
     apply();
     refresh();
-    // background/occluded first paint can land with a zero-size pane; re-fit once size is known
-    if (fit.W < 10 || fit.H < 10) {
-      requestAnimationFrame(() => { computeFit(); apply(); });
-      setTimeout(() => { computeFit(); apply(); }, 200);
-    }
+    // #1: the first render can land before the flex panes have settled their height
+    // (seen squishing the tree into a ~156px band). Re-measure + re-fit across the
+    // next frame / a few ticks / window load, until the pane height stops changing.
+    requestAnimationFrame(refit);
+    [0, 60, 200, 500].forEach(d => setTimeout(refit, d));
+    window.addEventListener("load", refit, { once: true });
+  }
+
+  // re-measure the pane and re-fit; preserve the user's zoom/pan once they've interacted
+  function refit() {
+    computeFit();
+    if (!userInteracted) resetView();
+    clampPan();
+    apply();
   }
 
   // ---- viewport apply (positions everything from view state) ----
   function apply() {
     pendingApply = false;
     if (!edgesG) return;
+    if (svgEl) {   // keep the SVG sized to the (possibly re-measured) pane — #1
+      svgEl.setAttribute("width", fit.W);
+      svgEl.setAttribute("height", fit.H);
+    }
     const m = mat();
     edgesG.setAttribute("transform", `matrix(${m.a},0,0,${m.d},${m.e},${m.f})`);
     const showLabels = (view.z * fit.ky) >= 9;   // only label when rows are legible
@@ -420,6 +441,7 @@
     // trackpad pinch, which the browser reports as ctrl+wheel) expands tip spacing.
     sc.addEventListener("wheel", e => {
       e.preventDefault();
+      userInteracted = true;
       if (e.ctrlKey || e.metaKey) {
         const r = svg.getBoundingClientRect();
         zoomAtY(e.clientY - r.top, Math.exp(-e.deltaY * 0.0025));
@@ -430,25 +452,18 @@
       }
     }, { passive: false });
 
-    sc.addEventListener("dblclick", () => { resetView(); scheduleApply(); });
+    sc.addEventListener("dblclick", () => { userInteracted = false; resetView(); scheduleApply(); });
 
-    // re-fit on pane resize (keeps the tree filling its pane)
-    if (window.ResizeObserver) {
-      let to;
-      new ResizeObserver(() => {
-        clearTimeout(to);
-        to = setTimeout(() => { computeFit(); resetView(); apply(); }, 120);
-      }).observe(sc);
-    }
+    // #1: re-fit whenever the pane's measured size changes — this is what catches the
+    // initial layout settle (e.g. 156px → full height) as well as later window resizes.
+    // Re-fits preserve the user's zoom/pan once they've interacted (refit()).
+    if (window.ResizeObserver) new ResizeObserver(refit).observe(sc);
 
-    // #1: when the viewer loads behind another app, the first paint can land before
-    // the pane is sized / while rAF is throttled, leaving edges + tips invisible.
-    // Re-measure and re-apply *synchronously* (not via the throttled scheduleApply)
-    // when the app returns to the foreground — preserving the current zoom/pan.
-    const relayout = () => { computeFit(); clampPan(); apply(); };
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) relayout(); });
-    window.addEventListener("focus", relayout);
-    window.addEventListener("pageshow", relayout);
+    // also re-fit when the app returns to the foreground (first paint can land behind
+    // another window before the pane is sized / while rAF is throttled).
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) refit(); });
+    window.addEventListener("focus", refit);
+    window.addEventListener("pageshow", refit);
   }
 
   // ---- highlight refresh (hover / clade filter / selection) ----
