@@ -87,6 +87,10 @@ Each `--chart` is `LABEL=PATH`; the label names the centre in the viewer's
 - **Linking:** hover a tip → its antigen(s) light up on the map (and vice versa),
   matched by strain. Click clade swatches in the legend to filter; use the search
   box to find a strain; *map: linked only* dims map points that have no tree tip.
+- **Legend (persistent):** a colour key for the active *Colour* mode — clade
+  swatches with tree-tip counts (click to show/hide a clade), continent key, or a
+  uniform-colour note — alongside a fixed marker key (reference / vaccine / serum
+  shapes, plus egg/cell/reassortant passage colours once passage data is exported).
 
 ## How the link is made
 

@@ -29,10 +29,14 @@
   .serum { fill:none; stroke:#555; stroke-width:1.3px; }
   .dim { opacity:0.12; }
   .lift { stroke:#000; stroke-width:1.6px; }
-  #legend { padding:8px 10px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:4px 12px; font-size:11px; max-height:120px; overflow:auto; }
-  .lg { display:flex; align-items:center; gap:5px; cursor:pointer; user-select:none; padding:1px 4px; border-radius:3px; }
+  #legend { padding:8px 10px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:6px 20px; font-size:11px; max-height:120px; overflow:auto; }
+  .lgSec + .lgSec { border-left:1px solid var(--line); padding-left:16px; }
+  .lg { display:flex; align-items:center; gap:4px; user-select:none; padding:1px 4px; border-radius:3px; }
+  .lg[title] { cursor:pointer; }
   .lg.off { opacity:0.35; }
   .lg .sw { width:11px; height:11px; border-radius:50%; display:inline-block; border:1px solid rgba(0,0,0,.25); }
+  .lg .cnt { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .lg .cnt::before { content:"·"; margin:0 2px; }
   #tooltip { position:fixed; pointer-events:none; background:rgba(20,20,20,.92); color:#fff; font-size:11px; padding:5px 8px; border-radius:4px; max-width:280px; opacity:0; transition:opacity .05s; z-index:10; line-height:1.35; }
   .footnote { font-size:11px; color:var(--muted); padding:4px 10px; }
   mark { background:#ffe08a; }

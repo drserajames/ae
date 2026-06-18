@@ -155,7 +155,12 @@ contracts that feature modules build on (rather than re-deriving) are:
   `offClades`, `onlyMatched`, `chartIdx`, `colorBy`) with `subscribe(fn)` /
   `notify()`. Panels subscribe and re-apply highlight on change.
 - **`IV.Colour`** — colour API: `Colour.leaf(node)`, `Colour.antigen(ag)`,
-  `Colour.cladeColor(c)`, `Colour.clades()`, `Colour.unmatched()`, honouring the
-  active `State.colorBy`.
+  `Colour.cladeColor(c)`, `Colour.cladeLegend(c)`, `Colour.clades()`,
+  `Colour.unmatched()`, honouring the active `State.colorBy`. Continent key:
+  `Colour.continentColor(c)`, `Colour.continents()`. **Passage marker API (shared
+  with P1):** `Colour.passageColor(type)` / `Colour.passageLabel(type)` /
+  `Colour.passages()` (egg/cell/reassortant), and `Colour.hasPassageMarkers()`
+  — true only once the bundle carries `passage_color` (E1). P1 should colour
+  tip/point passage markers via these rather than re-deriving the palette.
 
 See `PLAN.md` for task ownership and `README.md` for module roles.
