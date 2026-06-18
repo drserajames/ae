@@ -138,13 +138,20 @@
     const onlyMatched = document.getElementById("onlyMatched");
     onlyMatched.onchange = () => State.setOnlyMatched(onlyMatched.checked);
 
+    // Search (S2): substring match across tree tips + active chart antigens,
+    // selecting EVERY match (multi-match) so both panels highlight them and fade
+    // the rest. Empty query clears the selection.
     const search = document.getElementById("search");
     search.oninput = () => {
       const q = search.value.trim().toUpperCase();
-      if (!q) { State.setActive(null); return; }
-      const lf = IV.Tree.leaves.find(l => l.name.toUpperCase().includes(q));
-      const ag = IV.DATA.charts[State.chartIdx].antigens.find(a => a.name.toUpperCase().includes(q));
-      State.setActive(lf ? lf.norm : (ag ? ag.norm : "__none__"));
+      if (!q) { State.clearSelection(); search.classList.remove("nohit"); search.title = ""; return; }
+      const hit = s => s && s.toUpperCase().includes(q);
+      const norms = new Set();
+      IV.Tree.leaves.forEach(l => { if (hit(l.name) || hit(l.norm)) norms.add(l.norm); });
+      IV.DATA.charts[State.chartIdx].antigens.forEach(a => { if (hit(a.name) || hit(a.norm)) norms.add(a.norm); });
+      State.setSelection(norms);
+      search.classList.toggle("nohit", norms.size === 0);
+      search.title = `${norms.size} strain(s) matched`;
     };
   }
 
@@ -157,8 +164,10 @@
       `Phylogenetic tree (${m.tree_file}) — ${IV.Tree.leaves.length} linked tips`;
     document.getElementById("mapTitle").textContent = `Antigenic map — ${ch.label}: ${ch.name}`;
     document.getElementById("foot").textContent =
-      "Hover a tip or map point to link the two panels by strain. Click legend swatches to filter clades. " +
-      "Open circle/black-edge = reference antigen; star = vaccine; squares = sera.";
+      "Hover a tip or map point to link the two panels by strain. " +
+      "Click to select (Shift/Cmd-click to add); drag a box on either panel to select many; " +
+      "search selects all matches; click empty space to clear. " +
+      "Click a clade swatch in the legend to show / hide that clade.";
   }
 
   IV.UI = { showTip, moveTip, hideTip, renderLegend, bindControls, updateTitles };
