@@ -30,9 +30,15 @@ Legend for field status:
   "passage_color": {             // [E1]  passage-type -> colour (P1 markers)
     "egg": "#FF0000", "cell": "#0000FF", "reassortant": "#FFA500"
   },
-  "aa": { "<norm>": { "<pos>": "<aa>" } }      // [E2]  shared norm -> AA table (C1)
+  "aa": { "<norm>": "QKIPGND..." }             // [E2]  shared norm -> aligned AA sequence (C1)
 }
 ```
+
+The `aa` table maps each matched `norm` to its **aligned HA1 AA sequence string**
+(reconstructed from the `.asr` tree). Residue at 1-based position `p` is
+`aa[norm][p-1]` — same numbering as clade names and tree-node `A` transitions. A
+string (not a `{pos: aa}` dict) keeps the table ~4× smaller and lets C1 read any
+position the user asks for.
 
 `norm` is the normalised strain key `LOCATION/ID/YEAR` (uppercase) used to link
 tree tips to chart antigens. It is the join key throughout the bundle.
@@ -109,10 +115,10 @@ collapsed during pruning. `x` is **cumulative branch length** from the root
   "norm_to_ag": { "<norm>": [i, ...] }, // [live] norm -> antigen indices in THIS chart
 
   // E2 additions (for stress/error overlays N1/N2/C2):
-  "titers":      [[ "<encoded>", ... ]], // [E2] antigens x sera, raw titer strings
-  "logged":      [[ <float|null>, ... ]],// [E2] log2 titers (null = missing/"*")
-  "column_bases":[ <float>, ... ],       // [E2] one per serum
-  "min_col_basis": "none"                // [E2] minimum column basis used
+  "titers":      [[ "<encoded>", ... ]], // [E2] na x ns, raw titer strings ("*"/"<N"/">N"/num)
+  "logged":      [[ <float|null>, ... ]],// [E2] na x ns, log2(titer/10); null = missing ("*")
+  "column_bases":[ <float>, ... ],       // [E2] one per serum; the bases the projection was optimised with (forced if present, else computed at min_col_basis) — these match the coords
+  "min_col_basis": "none"                // [E2] minimum column basis used (e.g. "none" or "1280")
 }
 ```
 

@@ -262,8 +262,31 @@ def load_chart(label, path, subtype, name2col, name2leg, prio, stats):
         x, y = xy(lay[na + j])
         sera.append({"i": j, "name": sr.name(), "x": x, "y": y})
 
-    return {"label": label, "name": ch.name(), "antigens": antigens, "sera": sera,
-            "n_antigens": na, "n_sera": ns}
+    out = {"label": label, "name": ch.name(), "antigens": antigens, "sera": sera,
+           "n_antigens": na, "n_sera": ns}
+    out.update(chart_titer_data(ch, proj, na, ns))
+    return out
+
+
+def chart_titer_data(ch, proj, na, ns) -> dict:
+    """E2: per-chart titer table + log2 titers + column bases, for the stress/error
+    overlays (N1/N2/C2). `titers` keeps the raw strings (so the viewer can tell `<`/`>`
+    thresholds and `*` missing apart); `logged` is log2(titer/10) with null for missing.
+    `column_bases` MUST be the bases the projection was optimised with — when the
+    projection carries forced column bases, those (not the recomputed ones) match the
+    map coordinates, so the overlay stress reproduces the optimiser's. (Using the
+    recomputed bases instead roughly doubles the apparent stress.)"""
+    t = ch.titers()
+    titers = [[str(t.titer(i, j)) for j in range(ns)] for i in range(na)]
+    logged_arr = t.logged_array(na, ns)         # (na, ns) float64, NaN for missing
+    logged = [[None if (v != v) else round(float(v), 4) for v in row]
+              for row in logged_arr]
+    mcb = proj.minimum_column_basis()
+    forced = list(proj.forced_column_bases())
+    cb = forced if len(forced) == ns else list(ch.column_bases(mcb))
+    colbases = [round(float(x), 4) for x in cb]
+    return {"titers": titers, "logged": logged,
+            "column_bases": colbases, "min_col_basis": mcb}
 
 
 # --- tree pruning -------------------------------------------------------------
@@ -298,11 +321,13 @@ def aa_transitions(parent_aa: str, node_aa: str) -> list:
 
 
 def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
-               norm_pt: dict, parent_aa: str = ""):
+               norm_pt: dict, parent_aa: str = "", aa_table: dict = None):
     """Return (pruned_node | None) keeping only paths to leaves whose normalised
     name is in keep_norms. Degree-2 internal nodes are collapsed (path
     compression); x = cumulative edge length ('c'). `parent_aa` is the reconstructed
-    AA sequence of the nearest kept ancestor, used to compute edge AA transitions."""
+    AA sequence of the nearest kept ancestor, used to compute edge AA transitions.
+    If `aa_table` is given, each kept leaf's reconstructed AA sequence is recorded
+    there as norm -> sequence string (E2 shared norm->aa table for C1)."""
     children = root.get("t", [])
     cum = root.get("c", root.get("M", 0.0)) or 0.0
     node_aa = root.get("a", "")
@@ -313,6 +338,8 @@ def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
         nn = norm_tree_name(name)
         if nn not in keep_norms:
             return None
+        if aa_table is not None and node_aa and nn not in aa_table:
+            aa_table[nn] = node_aa
         node = {
             "id": root.get("I"),
             "x": round(float(cum), 5),
@@ -331,7 +358,8 @@ def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
 
     # Children diff against THIS node's aa unless this node is collapsed away, in which
     # case its transitions must roll up onto the surviving descendant — handled below.
-    kept = [k for k in (prune_tree(c, keep_norms, norm_clade, norm_ag, norm_pt, node_aa)
+    kept = [k for k in (prune_tree(c, keep_norms, norm_clade, norm_ag, norm_pt,
+                                   node_aa, aa_table)
                         for c in children) if k]
     if not kept:
         return None
@@ -418,10 +446,14 @@ def main():
     # for the tree we attach the first chart's antigen indices (primary linkage key is norm)
     primary = charts[0]["norm_to_ag"]
 
-    pruned = prune_tree(troot, keep_norms, norm_clade, primary, norm_pt)
+    aa_table = {}   # E2: norm -> reconstructed AA sequence (shared, for C1 colour-by-AA)
+    pruned = prune_tree(troot, keep_norms, norm_clade, primary, norm_pt,
+                        aa_table=aa_table)
     if pruned is None:
         print("ERROR: no tips matched; pruned tree is empty.", file=sys.stderr)
         sys.exit(1)
+    print(f"[aa] sequences for {len(aa_table)} matched norms "
+          f"(len {len(next(iter(aa_table.values()))) if aa_table else 0})", file=sys.stderr)
 
     # count kept leaves
     n_kept = [0]
@@ -469,6 +501,7 @@ def main():
         "clade_legend": clade_legend,
         "passage_color": PASSAGE_COLOR,
         "unmatched_color": UNMATCHED_COLOR,
+        "aa": aa_table,
     }
 
     payload = json.dumps(bundle, separators=(",", ":"))
