@@ -195,14 +195,22 @@ contracts that feature modules build on (rather than re-deriving) are:
   `State.expandNorms(norms)` adds each serum's homologous-antigen norm so a serum
   click lights the serum + its homologous antigen + the matching tree tip
   (installSelect already routes clicks/box through `expandNorms`).
-  **F8 clade legend cycle (z-order tri-state):** the legend clade click calls
-  `State.cycleClade(clade)` (returns the new mode, cycling
-  `normal → select → back → normal`); read state via `State.cladeMode(clade)` and
-  `State.cladeZRank(clade)` (`1` front / `−1` back / `0` normal), reset all with
-  `State.resetCladeCycle()`. `emphasis()` already folds the modes in (a *front*
-  clade pops while others fade like a selection; a *back* clade dims), so the
-  visual comes for free; panels MAY additionally reorder points by `z` to draw
-  *back* clades behind and *front* clades on top.
+  **F2 legend cycle (per-attribute z-order tri-state):** generalises the v3 clade
+  cycle to whichever attribute colorBy selects — `clade`, `continent`, or `aa`
+  value. The legend (Agent-COLOUR) calls `State.cycleActive(value)` on the active
+  attribute's entries (returns the new mode, cycling
+  `normal → select → back → normal`); read state via `State.activeMode(value)` /
+  `State.activeZRank(value)` (`1` front / `−1` back / `0` normal) and clear all
+  with `State.resetCycle()`. Pass the value as the legend shows it: clade label,
+  **uppercase** continent (e.g. `ASIA`), or `Colour.aaValues()` residue string.
+  Generic forms exist (`cycleAttr/attrMode/attrZRank(attr, value)`) and the v3
+  clade names remain as aliases (`cycleClade`/`cladeMode`/`cladeZRank`/
+  `resetCladeCycle`). `emphasis()` resolves each point's value for the active
+  attribute and folds the mode in (a *front* group pops while the rest fade like a
+  selection; a *back* group dims), so every panel reflects it via its existing
+  refresh; panels MAY additionally reorder points by `z` to draw *back* behind and
+  *front* on top. Cycle state is keyed per `(attr, value)`, so it persists across
+  colorBy switches and each mode only ever sees its own groups.
 - **`IV.Colour`** — colour API: `Colour.leaf(node)`, `Colour.antigen(ag)`,
   `Colour.cladeColor(c)`, `Colour.cladeLegend(c)`, `Colour.clades()`,
   `Colour.unmatched()`, honouring the active `State.colorBy`. Continent key:
