@@ -560,14 +560,27 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             }
         }
 
-        // slot labels (rotated, reading upward) below the column
+        // slot labels (rotated, reading upward) below the column. AD's TimeSeries::labels
+        // formats month slots as "%b" + "%y" (e.g. "Mar 24", black), year slots as "%y".
+        static const char* const kMonth3[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
         const bool yearly = params.time_series_interval == "year";
         const double slot_fs = std::clamp(slot_w * 0.7, 5.0, 10.0);
         const double label_anchor_y = bottom + bottom_reserve * 0.9;
         for (std::size_t i = 0; i < n_slots; ++i) {
-            const std::string& slot_first = time_series.slots[i].first;
-            const std::string label = yearly ? slot_first.substr(0, 4) : slot_first.substr(0, 7);
-            pdf.text_rotated(x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + slot_fs * 0.35, label_anchor_y, label, slot_fs, GREY50, -90.0);
+            const std::string& slot_first = time_series.slots[i].first;     // "YYYY-MM-DD"
+            std::string label;
+            if (yearly) {
+                label = slot_first.substr(0, 4);
+            }
+            else {
+                const std::string yy = slot_first.size() >= 4 ? slot_first.substr(2, 2) : std::string{};
+                int mm = 0;
+                if (slot_first.size() >= 7) { try { mm = std::stoi(slot_first.substr(5, 2)); } catch (...) { mm = 0; } }
+                const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1] : slot_first.substr(5, 2);
+                label = fmt::format("{} {}", mon, yy);
+            }
+            pdf.text_rotated(x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + slot_fs * 0.35, label_anchor_y, label, slot_fs, BLACK, -90.0);
         }
     }
 
