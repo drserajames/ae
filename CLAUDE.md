@@ -31,8 +31,9 @@ ae/
 │   └── virus/           Virus name utilities
 ├── bin/                 Python CLI scripts (need PYTHONPATH=build)
 ├── subprojects/         Vendored dependencies (alglib, fmt, lexy, pybind11, etc.)
-├── build/               Symlink → build-arm64/ (native arm64, current default)
-├── build-arm64/         Native arm64 build — Apple Clang 16, arm64 Homebrew deps
+├── build/               Symlink → build-py314/ (native arm64, Python 3.14, current default)
+├── build-py314/         Native arm64 build for Python 3.14 (cpython-314) — current default
+├── build-arm64/         Native arm64 build for Python 3.10 (cpython-310) — fallback
 ├── build-x86_64/        Original x86_64 pre-migration build (preserved as fallback)
 ├── doc/                 Format documentation (ace-format.js, merge-types.org, etc.)
 ├── test/                Test charts (chart1.ace)
@@ -85,7 +86,19 @@ also now writes layout coordinates (`Projection.set_coordinates` / `Layout.__set
 
 ## Current build state (Apple Silicon)
 
-**`build/` → `build-arm64/`** — The active build is **native arm64**, compiled with Apple Clang 16 and arm64 Homebrew dependencies at `/opt/homebrew`. No Rosetta 2 needed.
+**`build/` → `build-py314/`** — The active build is **native arm64 for Python 3.14**
+(`ae_backend.cpython-314-darwin.so`), compiled with Apple Clang 16 and arm64 Homebrew
+dependencies at `/opt/homebrew`. No Rosetta 2 needed. Import it with the default
+`/opt/homebrew/bin/python3` (3.14.x).
+
+> **Python version history.** Homebrew bumped its default `python3` to **3.14** (Jun 2026).
+> CPython extensions are ABI-locked per minor version, so the older 3.10 `.so` would not
+> import under 3.14. The build was retargeted to 3.14 on **18 Jun 2026**. The previous
+> **`build-arm64/`** (`cpython-310`, native arm64) is preserved as a **Python 3.10 fallback**
+> — use `PYTHONPATH=…/ae/build-arm64` with a 3.10 interpreter if ever needed. The only change
+> required to retarget was a newer **meson (≥ ~1.4; built with 1.11.1)** — meson 1.1.0 relies
+> on the `distutils` that Python 3.14 removed. pybind11 2.10.0 and all other vendored deps
+> compiled against 3.14 unchanged.
 
 ```bash
 # Python usage — no arch flag needed
@@ -164,6 +177,50 @@ mv build build-x86_64   # rename old build if present
 ln -s build-arm64 build
 ```
 
+### Building for Python 3.14 (current default — this is what `build/` points at)
+
+The procedure above documents the original Python 3.10 build (`build-arm64/`). The active
+build now targets **Python 3.14** in `build-py314/`. Two deltas from the 3.10 procedure:
+
+1. **meson must be newer than 1.1.0** — meson 1.1.0 fails with *"is not a valid python or it
+   is missing distutils"* because Python 3.14 removed `distutils`. Use meson ≥ ~1.4 (this
+   build used **1.11.1**). ninja is unchanged (universal2; runs arm64).
+2. **`python3` in the native file points at 3.14**, and meson must run under an arm64 3.14
+   interpreter so clang inherits arm64.
+
+Homebrew Python is PEP-668 externally-managed, so install the build tools in a venv:
+
+```bash
+cd /Users/sarahjames/AC/eu/ae
+export PATH="/opt/homebrew/bin:$PATH"
+export PKG_CONFIG_PATH="/opt/homebrew/opt/brotli/lib/pkgconfig"
+export CMAKE_POLICY_VERSION_MINIMUM=3.5     # lexy/CMake-4.x workaround (see below)
+
+# arm64 venv with meson + ninja for Python 3.14
+arch -arm64 /opt/homebrew/bin/python3.14 -m venv /tmp/ae-py314-venv
+/tmp/ae-py314-venv/bin/python -m pip install meson ninja   # meson 1.11.1, ninja 1.13.0
+
+# Native file: Apple Clang 16 + Python 3.14
+cat > /tmp/ae-py314-native.ini << 'EOF'
+[binaries]
+c       = '/usr/bin/clang'
+cpp     = '/usr/bin/clang++'
+python3 = '/opt/homebrew/bin/python3.14'
+
+[properties]
+pkg_config_libdir = '/opt/homebrew/opt/brotli/lib/pkgconfig'
+EOF
+
+# Configure + compile (use the venv's arm64 ninja explicitly — meson may otherwise
+# pick up /usr/local/bin/ninja, the x86_64 Homebrew one that spawns x86_64 clang)
+arch -arm64 /tmp/ae-py314-venv/bin/meson setup build-py314 \
+    --native-file /tmp/ae-py314-native.ini -Doptimization=3 -Ddebug=true
+arch -arm64 /tmp/ae-py314-venv/bin/ninja -C build-py314
+
+# Make it the default once verified (keeps build-arm64 as the 3.10 fallback)
+ln -sfn build-py314 build
+```
+
 ### Why the arm64 meson and ninja matter
 
 Apple Clang **inherits the architecture of its parent process**. Running clang from an x86_64 process (even on an arm64 Mac) produces x86_64 binaries silently — `file` on the output will confirm the architecture. The pip-installed `~/Library/Python/3.10/bin/ninja` is a universal binary that runs as arm64 natively, ensuring the entire toolchain spawns arm64 clang.
@@ -182,8 +239,8 @@ exporting **`CMAKE_POLICY_VERSION_MINIMUM=3.5`** in the environment before runni
 ### Verifying the build architecture
 
 ```bash
-file build/ae_backend.cpython-310-darwin.so
-# → Mach-O 64-bit dynamically linked shared library arm64
+file build/ae_backend.cpython-314-darwin.so
+# → Mach-O 64-bit bundle arm64   (build-arm64/ still has the cpython-310 fallback)
 
 python3 -c "import sys; sys.path.insert(0, 'build'); import ae_backend, platform; print(platform.machine())"
 # → arm64
@@ -429,7 +486,7 @@ bin/chart-grid-test input.ace
 ## Common gotchas
 
 - `ae_backend` must be on `PYTHONPATH` (from `build/`) — it is **not** installed system-wide.
-- `build/` is a **symlink** to `build-arm64/`. To remove it: `rm build` (not `rm -rf build`, which would delete the build directory contents).
+- `build/` is a **symlink** to `build-py314/` (the Python 3.14 build; `build-arm64/` is the 3.10 fallback). Repoint with `ln -sfn build-py314 build`. To remove it: `rm build` (not `rm -rf build`, which would delete the build directory contents).
 - `.ace` files are usually XZ-compressed; opening with a text editor or `cat` will show binary garbage. Use `xz -d -c file.ace` to inspect raw JSON.
 - Titer `"*"` = missing; `"<N"` = below detection; `">N"` = above threshold. Do not treat these as numbers.
 - Column bases (`colbases`) are `log2(max_titer_per_serum)` and are fundamental to stress calculations — they are not stored in projections by default, only in forced-column-bases overrides.
@@ -437,5 +494,5 @@ bin/chart-grid-test input.ace
 - **New C++ code**: Always use `fmt::format_to(` (not bare `format_to(`). Both `std::format_to` and `fmt::format_to` are visible in C++20 mode under Apple Clang 16 and the unqualified form is ambiguous.
 - **Homebrew LLVM 22** (at `/opt/homebrew/opt/llvm/`) is installed but **not used** — incompatible with the vendored `lexy` subproject. Apple Clang 16 (`/usr/bin/clang++`) is the correct compiler.
 - **Rebuilding**: Run meson via `arch -arm64 python3.10` and ninja via `arch -arm64 ~/Library/Python/3.10/bin/ninja`. The x86_64 `/usr/local/bin/ninja` will silently produce x86_64 binaries even on an arm64 Mac.
-- **Python 3.14** (from arm64 Homebrew) lacks `distutils` and causes meson to fail. Always put `/Library/Frameworks/Python.framework/Versions/3.10/bin/python3` first in PATH when configuring the build.
+- **Python 3.14** (the current Homebrew default, which `build/`→`build-py314/` targets) lacks `distutils`, so **meson 1.1.0 fails** with *"is not a valid python or it is missing distutils"*. Fix by using a newer meson (≥ ~1.4; the active build used 1.11.1), not by downgrading Python. The old 3.10 instructions that put `/Library/Frameworks/Python.framework/Versions/3.10/bin/python3` first in PATH apply only to the legacy `build-arm64/` (3.10) fallback.
 - **`brew --prefix libomp`**: libomp is keg-only — always use the formula-specific form `brew --prefix libomp` rather than bare `brew --prefix` when constructing library/include paths.
