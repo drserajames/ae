@@ -112,3 +112,50 @@ After F0+F1 (serial, lead): **Agent-EXP** = E1→E2; **Agent-TREE** = T1–T4+P1
 **Agent-LINES** = N1,N2. Lead integrates + runs verification each stage. Worktree
 isolation per agent if they touch `export_interactive.py` concurrently (E1/E2 vs F1
 bundler) — otherwise file-per-module avoids conflicts.
+
+---
+
+# v3 — second feedback wave (7 fixes + 8 features)
+
+Status: v1/v2 (E1, T1–T4, M1/P1/G1, S1/S2, L1, E2, N1/N2, C1/C2) all landed and
+reviewed on `ae-interactive`. This wave is from a round of user testing.
+
+## Key finding — match the report by reading the chart's own `R` plot-specs
+
+The report's colours/styles are **baked into `styled.ace` under the `R` dict**, and the
+antigen semantic `T` carries more than E1 currently exports. Use these as the source of
+truth instead of re-deriving:
+- `R["-clades-v10"]["A"]` — list of `{T:{C:"<clade>"}, F:"#fill", O:"outline",
+  L:{p:priority, t:"legend"}}`. **This is the report's clade colour+legend+priority map.**
+- `R["-continent"]` — continent palette; `R["-vaccines-v10"]` — vaccine styling;
+  `R["serology"]` — serology styling.
+- Antigen `T`: `C9`=continent, `c9`=country, `p`=passage (`e`/`c`/`r`), `C`=clade list,
+  `R`=reference, `sequenced`. (Inspect with `decat styled.ace | python -m json.tool`.)
+
+## Serial foundation (land first; A1 & A2 are independent → parallel)
+
+- **A1 — Agent-EXP** (`export_interactive.py` + `CONTRACT.md`). Export report-authoritative
+  data: clade colours/legend/priority from `R["-clades-v10"]` (#2); antigen `continent`
+  (`T.C9`) + continent palette from `R["-continent"]` (#6); passage from `T.p` (#3/#4);
+  vaccine + serology flags/styling (#5, F2, F3); serum `norm` + each serum's homologous
+  antigen index (F1); per-chart projection `stress` (F6). Bump CONTRACT.
+- **A2 — shared glyph module `js/glyph.js`** (new; Agent-MAP authors). One source for point
+  shapes used by map + tree: circle, square (serum), star (vaccine), egg (egg antigen),
+  "ugly egg" (egg serum), reassortant glyph; role-based sizing. Add to `MODULE_ORDER`
+  before `tree.js`/`map.js`. Underpins #5, F2, F7.
+
+## Fan-out (after A1/A2). #1/#7/F4/F5 are independent and can start immediately.
+
+| Agent | Items | Files |
+|-------|-------|-------|
+| Agent-COLOUR | #2 report clade palette; #3 drop unused `cell` from marker key; #4 passage colours; #6 continent colouring of antigens; **F8** legend-click tri-state (select → send-to-back → normal) | `colour.js`, `ui.js`, (`state.js` w/ SELECT) |
+| Agent-MAP | #5 fix vaccine stars; #7 macOS zoom (pinch/wheel/buttons); F2 larger vaccines; **F5** 1-AU gridlines; **F6** stress in corner; F7 egg/serum shapes; A2 glyph | `map.js`, `glyph.js` |
+| Agent-TREE | #1 edges invisible when window unfocused (initial transform/rAF/layout); F2 larger vaccine tips; **F3** serology tips slightly larger; **F4** clade labels on tree (report-style); F7 egg-shape tips | `tree.js` |
+| Agent-SELECT | **F1** serum-click selects homologous antigen + tree tip (sera carry `data-norm`); F8 cycle semantics + send-to-back ordering | `state.js`, `map.js`/`tree.js` hooks |
+
+Dependencies: #2/#6/F1/F3/F6 need A1; #5/F2/F7 need A2; F8 shared COLOUR+SELECT (define
+cycle states once in `state.js`). Verify per task: re-export single + all-centres to a
+scratch dir (never the repo), headless render; remember post-load `requestAnimationFrame`
+does not fire under `--virtual-time-budget` (override rAF→setTimeout to test
+zoom/pan/lines/colour repaints). Commit own files only; WHO-data check before commit
+(real data → report folder, not repo); push only on request.
