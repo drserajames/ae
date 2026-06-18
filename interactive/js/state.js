@@ -71,28 +71,93 @@ window.IV = window.IV || {};
       else State.selected.add(norm);
       State.notify();
     },
+    deselect(norms) {
+      let changed = false;
+      for (const n of norms) if (State.selected.delete(n)) changed = true;
+      if (changed) State.notify();
+    },
     clearSelection() {
       if (!State.selected.size) return;
       State.selected.clear();
       State.notify();
     },
 
+    // ---- F1: serum -> homologous-antigen expansion --------------------------
+    // Selecting a serum should also light its homologous antigen (and thus the
+    // matching tree tip, which is keyed by the antigen's norm). The bundle gives
+    // each serum a `homologous` antigen index; we add that antigen's norm when it
+    // differs from the serum norm. Cached per active chart.
+    _homCache: { idx: -1, map: null },
+    _homMap() {
+      const idx = State.chartIdx;
+      if (State._homCache.idx === idx && State._homCache.map) return State._homCache.map;
+      const m = new Map();   // serum norm -> homologous antigen norm (only when different)
+      const ch = IV.DATA && IV.DATA.charts[idx];
+      if (ch && ch.sera && ch.antigens) for (const s of ch.sera) {
+        if (s.homologous == null || !s.norm) continue;
+        const ag = ch.antigens[s.homologous];
+        if (ag && ag.norm && ag.norm !== s.norm) m.set(s.norm, ag.norm);
+      }
+      State._homCache = { idx, map: m };
+      return m;
+    },
+    // Expand norms to include the homologous antigen norm for any serum norms.
+    expandNorms(norms) {
+      const hom = State._homMap();
+      const out = new Set();
+      for (const n of norms) { if (!n) continue; out.add(n); const h = hom.get(n); if (h) out.add(h); }
+      return [...out];
+    },
+
+    // ---- F8: per-clade legend cycle (z-order tri-state) ---------------------
+    // Agent-COLOUR's legend click cycles a clade through three states:
+    //   "normal" -> "select" (front) -> "back" -> "normal"
+    // "select": clade raised to front + emphasised (others fade, like a selection)
+    // "back":   clade sent behind everything (z-order) and de-emphasised
+    // The store owns the cycle; panels read cladeZRank() for draw order and get the
+    // emphasis (front pops / back dims) folded into emphasis() below for free.
+    cladeCycle: new Map(),   // clade -> "select" | "back"   (absent == "normal")
+    _zDirty: false,          // a cycle changed since the last z-order pass
+    cladeMode(c) { return (c && State.cladeCycle.get(c)) || "normal"; },
+    cycleClade(c) {
+      if (!c) return "normal";
+      const next = State.cladeMode(c) === "normal" ? "select"
+                 : State.cladeMode(c) === "select" ? "back" : "normal";
+      if (next === "normal") State.cladeCycle.delete(c); else State.cladeCycle.set(c, next);
+      State._zDirty = true;
+      State.notify();
+      return next;
+    },
+    resetCladeCycle() {
+      if (!State.cladeCycle.size) return;
+      State.cladeCycle.clear(); State._zDirty = true; State.notify();
+    },
+    // draw-order rank for a clade: 1 = front (on top), -1 = back (behind), 0 = normal.
+    cladeZRank(c) { const m = State.cladeMode(c); return m === "select" ? 1 : m === "back" ? -1 : 0; },
+    _anyFront() { for (const v of State.cladeCycle.values()) if (v === "select") return true; return false; },
+
     // Shared emphasis classifier so tree.js and map.js apply identical highlight
     // logic. `extraHidden` lets the map fold in its only-matched dimming. Returns
-    // the three boolean classes panels toggle: dim / lift / sel.
+    // the classes panels toggle (dim / lift / sel) plus a draw-order rank `z`.
     //   sel   — persistently selected (ring)
     //   lift  — transient hover focus (active)
-    //   dim   — faded: clade-hidden, OR a hover is focusing someone else, OR a
-    //           selection exists and this point is neither selected nor hovered.
+    //   dim   — faded: clade-hidden, sent-to-back (F8), a hover focusing someone
+    //           else, OR an emphasis (manual selection or front-clade F8) exists
+    //           and this point is none of it.
+    //   z     — F8 draw-order rank (-1 back, 0 normal, 1 front); panels may reorder.
     emphasis(norm, clade, extraHidden = false) {
       const hidden = extraHidden || State.isCladeHidden(clade);
       const isActive = !!State.active && norm === State.active;
       const isSel = State.selected.has(norm);
-      const hasSel = State.selected.size > 0;
-      const dim = hidden ||
+      const mode = State.cladeMode(clade);
+      const isFront = mode === "select", isBack = mode === "back";
+      // a "front" clade behaves as an emphasis layer alongside the manual selection
+      const hasEmph = State.selected.size > 0 || State._anyFront();
+      const isEmph = isSel || isFront;
+      const dim = hidden || isBack ||
         (!!State.active && !isActive) ||
-        (hasSel && !isSel && !isActive);
-      return { dim, lift: isActive, sel: isSel };
+        (hasEmph && !isEmph && !isActive);
+      return { dim, lift: isActive, sel: isSel, z: State.cladeZRank(clade) };
     },
   };
 
@@ -151,8 +216,14 @@ window.IV = window.IV || {};
 
       if (!d.moved) {             // a click, not a drag
         if (d.point) {
-          if (d.additive) State.toggleSelect(d.point);
-          else State.setSelection([d.point]);
+          // F1: a serum click also pulls its homologous antigen (+ its tree tip).
+          const norms = State.expandNorms([d.point]);
+          if (d.additive) {
+            if (State.isSelected(d.point)) State.deselect(norms);
+            else State.select(norms, { additive: true });
+          } else {
+            State.setSelection(norms);
+          }
         } else if (!d.additive) {
           State.clearSelection();   // click on empty space clears
         }
@@ -170,7 +241,7 @@ window.IV = window.IV || {};
         if (cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2)
           hits.add(el.getAttribute("data-norm"));
       });
-      State.select(hits, { additive: d.additive });
+      State.select(State.expandNorms(hits), { additive: d.additive });
     });
   };
 
