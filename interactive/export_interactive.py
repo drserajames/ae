@@ -20,15 +20,18 @@ Multiple charts are supported so the map panel can switch between centres
 (the all-centres option). The tree is shared across charts.
 """
 
-import argparse, json, os, re, shutil, subprocess, sys, tempfile
+import argparse, json, os, re, sys, tempfile
 from pathlib import Path
 
 import ae_backend
 from ae_backend import tree as TREE
 
-# semantic_clades lives in acmacs-data/ (canonical report clade palette). run.sh adds it
-# to PYTHONPATH; insert defensively here too so the exporter works when run directly.
-sys.path.insert(0, str(Path("/Users/sarahjames/AC/eu/acmacs-data")))
+# semantic_clades lives in the sibling acmacs-data/ checkout (canonical report clade
+# palette). run.sh adds it to PYTHONPATH; insert defensively here too so the exporter
+# works when run directly. Resolve relative to this file (…/eu/ae-interactive/interactive
+# → …/eu/acmacs-data) rather than hardcoding an absolute path.
+ACMACS_DATA = Path(__file__).resolve().parents[2] / "acmacs-data"
+sys.path.insert(0, str(ACMACS_DATA))
 
 # --- viewer module bundle (F1) ------------------------------------------------
 # The viewer is authored as separate js/*.js modules and inlined into the template
@@ -71,10 +74,6 @@ UNMATCHED_COLOR = "#d9d9d9"
 # Passage-type marker colours (P1). Mirrors chart_modifier.py serum-circle styling
 # (egg=red, cell=blue, reassortant=orange).
 PASSAGE_COLOR = {"egg": "#FF0000", "cell": "#0000FF", "reassortant": "#FFA500"}
-
-# decat decompresses .ace (brotli/xz/etc.) to stdout — used only to read the projection
-# transformation matrix, which has no ae_backend getter. Resolved at run time.
-DECAT = shutil.which("decat") or "/Users/sarahjames/AC/eu/bin/decat"
 
 
 def clade_palette(subtype: str):
@@ -120,21 +119,23 @@ def rederive_clades(ch, subtype: str):
         return False
 
 
-def read_transformation(path: str):
-    """Read the 2D projection transformation [a,b,c,d] from an .ace via decat (no
-    ae_backend getter exists). Returns identity [1,0,0,1] if unavailable."""
-    ident = [1.0, 0.0, 0.0, 1.0]
+def read_transformation(proj):
+    """Return the 2D projection transformation [a,b,c,d] from ae_backend's
+    Transformation object. It exposes no numeric getter (only mutators), but its
+    str() is a JSON list of the matrix coefficients, so parse that — in-process, from
+    the same projection object used for the layout (so it always matches the coords
+    being transformed, unlike re-reading the file's first projection). Returns
+    identity [1,0,0,1] (with a warning) if it can't be read."""
     try:
-        out = subprocess.run([DECAT, path], capture_output=True, check=True).stdout
-        d = json.loads(out)
-        t = d["c"]["P"][0].get("t")
+        t = json.loads(str(proj.transformation()))
         if isinstance(t, list) and len(t) == 4:
             return [float(v) for v in t]
-        return ident
+        print(f"[transform] WARNING: unexpected transformation {t!r}; using identity",
+              file=sys.stderr)
     except Exception as e:
-        print(f"[transform] WARNING: could not read transformation for {path} "
-              f"({e!r}); using identity", file=sys.stderr)
-        return ident
+        print(f"[transform] WARNING: could not read transformation ({e!r}); "
+              f"using identity", file=sys.stderr)
+    return [1.0, 0.0, 0.0, 1.0]
 
 
 def passage_type(ag):
@@ -216,8 +217,9 @@ def load_chart(label, path, subtype, name2col, name2leg, prio, stats):
     if subtype:
         rederive_clades(ch, subtype)
     na, ns = ch.number_of_antigens(), ch.number_of_sera()
-    lay = apply_transformation(ch.projection(0).layout().as_numpy(),  # (na+ns, dims)
-                               read_transformation(path))
+    proj = ch.projection(0)
+    lay = apply_transformation(proj.layout().as_numpy(),  # (na+ns, dims)
+                               read_transformation(proj))
 
     ref_idx = set()
     try:
