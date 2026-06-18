@@ -20,11 +20,16 @@ Multiple charts are supported so the map panel can switch between centres
 (the all-centres option). The tree is shared across charts.
 """
 
-import argparse, json, os, re, sys, tempfile
+import argparse, json, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 import ae_backend
 from ae_backend import tree as TREE
+
+# decat decompresses .ace (brotli/xz/…) to stdout. The report's authoritative plot
+# styles (R) and per-antigen semantic attributes (T) live in the chart JSON with no
+# convenient ae_backend getter, so v3 reads them straight from the decompressed chart.
+DECAT = shutil.which("decat") or "/Users/sarahjames/AC/eu/bin/decat"
 
 # semantic_clades lives in the sibling acmacs-data/ checkout (canonical report clade
 # palette). run.sh adds it to PYTHONPATH; insert defensively here too so the exporter
@@ -63,8 +68,9 @@ def build_modules(js_dir: Path) -> str:
 
 
 # --- clade colour palette -----------------------------------------------------
-# Canonical report palette comes from acmacs-data/semantic_clades.py (E1, see PLAN
-# "Colour matching"). PALETTE is only a fallback used if that module can't be loaded.
+# v3: clade colours/legend/priority come from the chart's OWN report plot-spec
+# (R["-clades-v10"]) so the viewer matches the report PDF exactly (see read_report_styles).
+# semantic_clades / PALETTE below are fallbacks only, used when a chart has no such style.
 PALETTE = [
     "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948",
     "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac", "#86bcb6", "#d37295",
@@ -100,24 +106,58 @@ def clade_palette(subtype: str):
     return name2col, name2leg, prio
 
 
-def rederive_clades(ch, subtype: str):
-    """Re-derive clade attributes the way chart_modifier does so assigned clade names
-    are canonical regardless of the input chart's prior styling (PLAN #1,#2). Best
-    effort: if seqdb/semantic aren't available, the chart's existing clades are used."""
+PASSAGE_FROM_T = {"e": "egg", "c": "cell", "r": "reassortant"}  # chart semantic T.p codes
+
+
+def read_chart_json(path):
+    """Decompress an .ace via decat and return its chart object (`c`), or {} on failure.
+    Used to read the report plot-spec styles (R) and per-point semantic attributes (T)
+    that have no convenient ae_backend getter."""
     try:
-        import semantic_clades as SC
-        from ae import semantic
-        try:
-            ch.populate_from_seqdb()
-        except Exception as e:
-            print(f"[clade] populate_from_seqdb skipped ({e!r})", file=sys.stderr)
-        entries = SC.semantic_attribute_data_for_subtype(subtype)["clades"]
-        semantic.clade.attributes(chart=ch, entries=entries)
-        return True
+        out = subprocess.run([DECAT, path], capture_output=True, check=True).stdout
+        return json.loads(out).get("c", {})
     except Exception as e:
-        print(f"[clade] re-derivation skipped, using stored clades ({e!r})",
-              file=sys.stderr)
-        return False
+        print(f"[chart-json] WARNING: could not read styles/semantics for {path} "
+              f"({e!r}); v3 fields fall back to ae_backend getters", file=sys.stderr)
+        return {}
+
+
+def clade_rules_from_R(R):
+    """Ordered clade rules from the report style R['-clades-v10']['A'], as
+    [(clade, fill, legend, legend_priority), ...] in list order. The report applies
+    these in order and the LAST matching rule wins a point's colour (so the most
+    specific clade combination shows), which `primary_clade` mirrors. Empty if absent."""
+    spec = (R or {}).get("-clades-v10") or {}
+    rules = []
+    for r in spec.get("A", []):
+        c = (r.get("T") or {}).get("C")
+        if isinstance(c, str):                  # skip non-clade selectors (e.g. "!i")
+            L = r.get("L") or {}
+            rules.append((c, r.get("F"), L.get("t") or c, L.get("p")))
+    return rules
+
+
+def continent_palette_from_R(R):
+    """continent -> colour from the report style R['-continent']['A'] (selector T.C9)."""
+    spec = (R or {}).get("-continent") or {}
+    out = {}
+    for r in spec.get("A", []):
+        c9 = (r.get("T") or {}).get("C9")
+        if c9 and r.get("F"):
+            out[c9] = r["F"]
+    return out
+
+
+def primary_clade(clades, rules):
+    """The clade whose -clades-v10 rule is applied LAST among the antigen's clades —
+    the report's layered styling means later rules paint over earlier, so the
+    last-matching (most specific) clade is the displayed colour. None if none match."""
+    cset = set(clades)
+    last = None
+    for c, _f, _l, _p in rules:
+        if c in cset:
+            last = c
+    return last
 
 
 def read_transformation(proj):
@@ -203,24 +243,36 @@ def apply_transformation(lay, t):
     return lay @ M
 
 
-def pick_clade(clades, prio):
-    """Choose the canonical primary clade for colouring: among an antigen's clade
-    labels, the one present in the palette with the highest priority (most specific).
-    Returns (primary | None, matched_a_palette_entry: bool)."""
-    cand = [c for c in clades if c in prio]
-    if cand:
-        return max(cand, key=lambda c: prio[c]), True
-    return (clades[0] if clades else None), False
-
-
-def load_chart(label, path, subtype, name2col, name2leg, prio, stats):
+def load_chart(label, path, fallback, clade_acc, cont_acc, stats):
+    """Load one chart and emit its viewer entry. v3: clade colours/legend/priority,
+    continent, passage and the vac/serology flags all come from the chart's OWN report
+    styles (R) and per-point semantic attributes (T), so the viewer matches the report.
+    `fallback` = (name2col, name2leg, prio) from semantic_clades, used only when a chart
+    has no `-clades-v10` style. `clade_acc`/`cont_acc` accumulate the shared palettes."""
     ch = ae_backend.chart_v3.Chart(path)
-    if subtype:
-        rederive_clades(ch, subtype)
     na, ns = ch.number_of_antigens(), ch.number_of_sera()
     proj = ch.projection(0)
     lay = apply_transformation(proj.layout().as_numpy(),  # (na+ns, dims)
                                read_transformation(proj))
+
+    cj = read_chart_json(path)                  # report styles (R) + semantics (T)
+    aj, sj = cj.get("a", []), cj.get("s", [])
+    rules = clade_rules_from_R(cj.get("R", {}))
+    if rules:
+        eff = rules                             # report rules, in list order (last wins)
+        print(f"[clade] {label}: using report -clades-v10 ({len(rules)} rules)",
+              file=sys.stderr)
+    else:                                       # fallback: semantic_clades, ordered so
+        name2col, name2leg, prio = fallback     # the last match is the most specific
+        eff = sorted(((n, name2col[n], name2leg.get(n, n), prio.get(n, 0)) for n in name2col),
+                     key=lambda r: r[3])
+        print(f"[clade] {label}: no -clades-v10; semantic_clades fallback "
+              f"({len(eff)} entries)", file=sys.stderr)
+    for c, f, l, p in eff:                       # accumulate the shared clade palette
+        clade_acc["color"][c] = f
+        clade_acc["legend"][c] = l
+        clade_acc["prio"][c] = p
+    cont_acc.update(continent_palette_from_R(cj.get("R", {})))
 
     ref_idx = set()
     try:
@@ -238,33 +290,48 @@ def load_chart(label, path, subtype, name2col, name2leg, prio, stats):
     for i in range(na):
         ag = ch.antigen(i)
         x, y = xy(lay[i])
-        clades = antigen_clades(ag)
-        primary, in_palette = pick_clade(clades, prio) if prio else \
-            (clades[0] if clades else None, bool(clades))
-        if clades and not in_palette and prio:
+        T = (aj[i].get("T") or {}) if i < len(aj) else {}
+        clades = T.get("C")
+        if clades is None:
+            clades = antigen_clades(ag)         # ae_backend fallback if no chart JSON
+        clades = list(clades) if isinstance(clades, list) else ([clades] if clades else [])
+        primary = primary_clade(clades, eff)
+        if clades and primary is None:
             stats["unmatched_clades"].add(clades[0])  # has a clade, none in palette
-        pt = passage_type(ag)
+        if primary:
+            stats["used_clades"].add(primary)
         antigens.append({
             "i": i,
             "name": ag.name(),
             "norm": norm_chart_name(ag.name()),
             "passage": str(ag.passage()) if hasattr(ag, "passage") else "",
-            "pt": pt,                       # classified passage type (egg/cell/reassortant)
+            "pt": PASSAGE_FROM_T.get(T.get("p")) or passage_type(ag),  # T.p canonical
             "date": str(ag.date() or ""),
             "x": x, "y": y,
             "clade": primary,
             "clades": clades,
-            "ref": i in ref_idx,
-            "vac": is_vaccine(ag),
+            "continent": T.get("C9") or None,
+            "country": T.get("c9") or None,
+            "ref": (i in ref_idx) or bool(T.get("R")),     # T.R = reference flag
+            "vac": bool(T.get("V")) or is_vaccine(ag),     # T.V truthy = vaccine
+            "serology": bool(T.get("serology")),           # report serology test antigen
         })
+
+    norm_to_first_ag = {}
+    for a in antigens:
+        norm_to_first_ag.setdefault(a["norm"], a["i"])
     sera = []
     for j in range(ns):
         sr = ch.serum(j)
         x, y = xy(lay[na + j])
-        sera.append({"i": j, "name": sr.name(), "x": x, "y": y})
+        snorm = norm_chart_name(sr.name())
+        sera.append({"i": j, "name": sr.name(), "x": x, "y": y,
+                     "norm": snorm,
+                     "homologous": norm_to_first_ag.get(snorm)})  # ag index or null
 
     out = {"label": label, "name": ch.name(), "antigens": antigens, "sera": sera,
-           "n_antigens": na, "n_sera": ns}
+           "n_antigens": na, "n_sera": ns,
+           "stress": round(float(proj.stress()), 4)}
     out.update(chart_titer_data(ch, proj, na, ns))
     return out
 
@@ -394,9 +461,12 @@ def main():
                     default=str(Path(__file__).with_name("viewer_template.html")))
     args = ap.parse_args()
 
-    # canonical report clade palette (name -> colour / legend / priority)
-    name2col, name2leg, prio = clade_palette(args.subtype)
-    stats = {"unmatched_clades": set()}
+    # clade/continent palettes are read from each chart's own report styles (v3); the
+    # semantic_clades palette is only a fallback for charts lacking a -clades-v10 style.
+    fallback = clade_palette(args.subtype)
+    clade_acc = {"color": {}, "legend": {}, "prio": {}}   # shared clade palette (merged)
+    cont_acc = {}                                          # shared continent palette
+    stats = {"unmatched_clades": set(), "used_clades": set()}
 
     # parse charts
     charts = []
@@ -405,8 +475,7 @@ def main():
             ap.error(f"--chart must be LABEL=PATH, got {spec!r}")
         label, path = spec.split("=", 1)
         print(f"[chart] {label}: {path}", file=sys.stderr)
-        charts.append(load_chart(label, path, args.subtype,
-                                 name2col, name2leg, prio, stats))
+        charts.append(load_chart(label, path, fallback, clade_acc, cont_acc, stats))
 
     # per-norm canonical clade + passage type (first non-null wins across charts)
     norm_clade, norm_pt = {}, {}
@@ -466,26 +535,29 @@ def main():
     cl(pruned)
     print(f"[tree] kept leaves={n_kept[0]}", file=sys.stderr)
 
-    # clade -> colour / legend. Canonical palette where available; any clade not in the
-    # palette (fallback path, or palette unavailable) gets a stable generated colour.
-    clade_set = sorted({a["clade"] for c in charts for a in c["antigens"] if a["clade"]})
-    clade_color, clade_legend = {}, {}
+    # clade colour / legend / priority — restricted to the clades that actually appear
+    # on a map, taking the report-authoritative values accumulated from R["-clades-v10"]
+    # (or the semantic_clades fallback). Every used clade comes from a matched rule, so
+    # it is present in clade_acc; the generated-colour branch is a defensive backstop.
+    used = sorted(stats["used_clades"])
+    clade_color, clade_legend, clade_priority = {}, {}, {}
     fb = 0
-    for cl in clade_set:
-        if cl in name2col:
-            clade_color[cl] = name2col[cl]
-            clade_legend[cl] = name2leg.get(cl, cl)
+    for cl in used:
+        if cl in clade_acc["color"]:
+            clade_color[cl] = clade_acc["color"][cl]
+            clade_legend[cl] = clade_acc["legend"].get(cl, cl)
+            clade_priority[cl] = clade_acc["prio"].get(cl)
         else:
             clade_color[cl] = PALETTE[fb % len(PALETTE)]
             clade_legend[cl] = cl
+            clade_priority[cl] = None
             fb += 1
     if stats["unmatched_clades"]:
-        print(f"[clade] {len(stats['unmatched_clades'])} clade label(s) had no palette "
-              f"match (shown grey): {sorted(stats['unmatched_clades'])[:12]}"
+        print(f"[clade] {len(stats['unmatched_clades'])} clade label(s) had no rule "
+              f"(shown grey): {sorted(stats['unmatched_clades'])[:12]}"
               f"{' ...' if len(stats['unmatched_clades']) > 12 else ''}", file=sys.stderr)
-    print(f"[clade] {len(clade_set)} clades on map; "
-          f"{sum(1 for c in clade_set if c in name2col)} canonical, {fb} generated",
-          file=sys.stderr)
+    print(f"[clade] {len(used)} clades on map ({len(used) - fb} from report styles, "
+          f"{fb} generated); {len(cont_acc)} continent colours", file=sys.stderr)
 
     bundle = {
         "meta": {
@@ -504,6 +576,8 @@ def main():
         "charts": charts,
         "clade_color": clade_color,
         "clade_legend": clade_legend,
+        "clade_priority": clade_priority,
+        "continent_color": cont_acc,
         "passage_color": PASSAGE_COLOR,
         "unmatched_color": UNMATCHED_COLOR,
         "aa": aa_table,
