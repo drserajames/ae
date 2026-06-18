@@ -60,6 +60,13 @@
       n._y = (Math.min(...ys) + Math.max(...ys)) / 2;
       return n._y;
     })(root);
+    // leaf-row range [_lo,_hi] per node, for clade MRCA lookup (F4)
+    (function range(n) {
+      if (!n.children || !n.children.length) { n._lo = n._hi = n._y; return; }
+      let lo = Infinity, hi = -Infinity;
+      n.children.forEach(c => { range(c); lo = Math.min(lo, c._lo); hi = Math.max(hi, c._hi); });
+      n._lo = lo; n._hi = hi;
+    })(root);
     leaves.forEach(lf => { (normToLeaves[lf.norm] = normToLeaves[lf.norm] || []).push(lf); });
   }
 
@@ -91,6 +98,8 @@
       .edge { stroke:#999; stroke-width:1; fill:none; vector-effect:non-scaling-stroke; }
       .ehit { stroke:transparent; stroke-width:8; fill:none; vector-effect:non-scaling-stroke; cursor:pointer; }
       .tipLabel { font-size:9px; fill:#333; pointer-events:none; }
+      .cladeLabel { font-size:11px; font-weight:700; pointer-events:none;
+        paint-order:stroke; stroke:#fff; stroke-width:3px; stroke-linejoin:round; }
       .treeHud { position:absolute; left:8px; bottom:8px; font-size:10px; color:#888;
         background:rgba(255,255,255,.8); padding:2px 6px; border-radius:4px; pointer-events:none; z-index:4; }
       #treeInfo { position:absolute; top:8px; right:8px; width:232px; max-height:72%; overflow:auto;
@@ -170,23 +179,112 @@
       (lf.ag && lf.ag.length ? `<br>${lf.ag.length} antigen(s) on map` : "<br><i>no antigen on this map</i>");
   }
 
-  // tip outline marks passage (P1), mirroring the map (map.js passageStroke):
-  // dual-encode clade as the fill (Colour.leaf) and passage as a ring, but ring
-  // ONLY the salient passages (egg / reassortant). cell is the overwhelming default
-  // for these assays, so ringing every cell tip would bury the clade fills and the
-  // overview reads as a wall of one colour. cell tips keep the neutral grey stroke;
-  // the legend still lists every passage colour.
+  // tip outline marks passage (P1), mirroring the map (map.js passageStroke): ring
+  // ONLY the salient passages (egg / reassortant). cell is the overwhelming default,
+  // so ringing every cell tip would bury the clade fills.
   function passageStroke(lf) {
     if (!(Colour.hasPassageMarkers && Colour.hasPassageMarkers())) return null;
     const t = lf.passage;
     return (t && t !== "cell") ? Colour.passageColor(t) : null;
   }
-  function tipStroke(lf) { return passageStroke(lf) || "rgba(0,0,0,.35)"; }
-  function tipStrokeW(lf) { return passageStroke(lf) ? 1.4 : 0.7; }
+
+  // ---- per-tip glyphs (F2 vaccine / F3 serology / F7 egg), via the shared IV.Glyph
+  // factory so the tree and map draw identical shapes. vaccine + serology are
+  // antigen-level (not on the tree leaf), so resolve them per norm across ALL charts
+  // — a vaccine/serology strain is a strain property, independent of active centre.
+  let normMeta = {};   // norm -> {vac, serology}
+  function buildNormMeta() {
+    normMeta = {};
+    for (const ch of IV.DATA.charts) for (const a of ch.antigens) {
+      if (!a.norm) continue;
+      const m = normMeta[a.norm] || (normMeta[a.norm] = { vac: false, serology: false });
+      if (a.vac) m.vac = true;
+      if (a.serology) m.serology = true;
+    }
+  }
+  const TIP_R = { circle: 3, serology: 4.4, egg: 4, reassortant: 4, star: 6.5 };
+  // role priority: vaccine > egg/reassortant (passage shape) > serology > default.
+  function tipGlyph(lf) {
+    const m = normMeta[lf.norm];
+    if (m && m.vac) return { kind: "star", r: TIP_R.star };
+    if (lf.passage === "egg") return { kind: "egg", r: TIP_R.egg };
+    if (lf.passage === "reassortant") return { kind: "reassortant", r: TIP_R.reassortant };
+    if (m && m.serology) return { kind: "circle", r: TIP_R.serology };
+    return { kind: "circle", r: TIP_R.circle };
+  }
+  // glyphs must be positioned by GEOMETRY (cx/cy or path d) not by a transform —
+  // S1's box-select reads getBBox(), which ignores an element's own transform.
+  function glyphPathD(kind, cx, cy, r) {
+    switch (kind) {
+      case "star": return IV.Glyph.starPath(cx, cy, r, 5, 0.46);
+      case "egg": return IV.Glyph.eggPath(cx, cy, r);
+      case "reassortant": return IV.Glyph.reassortantPath(cx, cy, r);
+      default: return null;
+    }
+  }
+  function tipStrokeFor(lf, kind) {
+    if (kind === "star") return "#000";                 // vaccine: dark outline
+    return passageStroke(lf) || "rgba(0,0,0,.35)";      // egg/reassortant passage colour
+  }
+  function tipStrokeWFor(lf, kind) {
+    if (kind === "star") return 1.0;
+    return passageStroke(lf) ? 1.3 : 0.7;
+  }
+
+  // ---- clade labels at each clade's MRCA, like the report PDFs (F4) ----
+  let cladeLabels = [];   // [{clade, x(tree), row, color, text, prio, el}]
+  function computeCladeLabels(root) {
+    cladeLabels = [];
+    const byClade = {};
+    leaves.forEach(lf => { if (lf.clade) (byClade[lf.clade] = byClade[lf.clade] || []).push(lf._y); });
+    const prio = IV.DATA.clade_priority || {};
+    for (const clade in byClade) {
+      const rows = byClade[clade];
+      if (rows.length < 4) continue;                    // skip tiny clades (clutter)
+      const lo = Math.min(...rows), hi = Math.max(...rows);
+      // MRCA = smallest node whose leaf-range [_lo,_hi] still contains [lo,hi]
+      let node = root;
+      for (;;) {
+        const child = (node.children || []).find(c => c._lo <= lo && c._hi >= hi);
+        if (!child) break;
+        node = child;
+      }
+      cladeLabels.push({
+        clade, x: node.x, row: (lo + hi) / 2, rowLo: lo, rowHi: hi,
+        color: Colour.cladeColor(clade),
+        text: (Colour.cladeLegend ? Colour.cladeLegend(clade) : clade) || clade,
+        prio: (prio[clade] != null ? prio[clade] : 9999),
+      });
+    }
+  }
+  // position labels each frame with a greedy vertical de-overlap; lower clade_priority
+  // wins a contested slot (matches the report's clade emphasis).
+  function placeCladeLabels(m) {
+    const placed = [], top = 6, bot = fit.H - 4;
+    cladeLabels.slice().sort((a, b) => a.prio - b.prio).forEach(L => {
+      if (!L.el) return;
+      // show the label whenever the clade's tip band is on screen, anchored within
+      // that band (so it "sticks" to the clade when zoomed/panned, not just at fit)
+      const yLo = m.d * L.rowLo + m.f, yHi = m.d * L.rowHi + m.f;
+      const y = clamp(m.d * L.row + m.f, Math.max(top, yLo), Math.min(bot, yHi));
+      const onScreen = yHi >= top && yLo <= bot;
+      const collide = placed.some(py => Math.abs(py - y) < 13);
+      if (onScreen && !collide) {
+        L.el.setAttribute("x", clamp(m.a * L.x + m.e + 6, 2, fit.W - 4));
+        L.el.setAttribute("y", y + 3);
+        L.el.style.display = "";
+        placed.push(y);
+      } else {
+        L.el.style.display = "none";
+      }
+    });
+  }
 
   function render() {
     ensureStyle();
     computeFit();
+    buildNormMeta();
+    computeCladeLabels(IV.DATA.tree);
     const svg = document.getElementById("treeSvg");
     svg.innerHTML = "";
     tipNodes = {}; tipEntries = [];
@@ -220,24 +318,44 @@
     const tipsG = el("g", { id: "treeTips" });
     svg.appendChild(tipsG);
     leaves.forEach(lf => {
-      const c = el("circle", { class: "tip", r: 3, fill: Colour.leaf(lf), "data-norm": lf.norm });
-      c.setAttribute("stroke", tipStroke(lf));
-      c.setAttribute("stroke-width", tipStrokeW(lf));
-      c.addEventListener("mouseenter", e => { State.setActive(lf.norm); IV.UI.showTip(e, tipHtml(lf)); });
-      c.addEventListener("mousemove", IV.UI.moveTip);
-      c.addEventListener("mouseleave", () => { State.setActive(null); IV.UI.hideTip(); });
-      tipsG.appendChild(c);
-      (tipNodes[lf.norm] = tipNodes[lf.norm] || []).push(c);
+      const g = tipGlyph(lf);   // {kind, r}
+      const opts = {
+        class: "tip", fill: Colour.leaf(lf), dataNorm: lf.norm,
+        stroke: tipStrokeFor(lf, g.kind), strokeWidth: tipStrokeWFor(lf, g.kind),
+      };
+      // build at origin; apply() positions by geometry (cx/cy for circle, d for paths)
+      const node = g.kind === "circle" ? IV.Glyph.circle(0, 0, g.r, opts)
+                                       : IV.Glyph.make(g.kind, 0, 0, g.r, opts);
+      node.addEventListener("mouseenter", e => { State.setActive(lf.norm); IV.UI.showTip(e, tipHtml(lf)); });
+      node.addEventListener("mousemove", IV.UI.moveTip);
+      node.addEventListener("mouseleave", () => { State.setActive(null); IV.UI.hideTip(); });
+      tipsG.appendChild(node);
+      (tipNodes[lf.norm] = tipNodes[lf.norm] || []).push(node);
       const t = el("text", { class: "tipLabel" });
       t.textContent = shortName(lf.name);
       tipsG.appendChild(t);
-      tipEntries.push({ node: lf, circle: c, label: t });
+      tipEntries.push({ node: lf, el: node, kind: g.kind, r: g.r, label: t });
+    });
+
+    // clade labels (F4) — one text per labelled clade, positioned in apply()
+    const cladeG = el("g", { id: "treeCladeLabels" });
+    svg.appendChild(cladeG);
+    cladeLabels.forEach(L => {
+      const t = el("text", { class: "cladeLabel", fill: L.color });
+      t.textContent = L.text;
+      cladeG.appendChild(t);
+      L.el = t;
     });
 
     IV.installSelect(svg);   // S1: click / drag-box selection (shared, idempotent)
     bindViewport(svg);
     apply();
     refresh();
+    // background/occluded first paint can land with a zero-size pane; re-fit once size is known
+    if (fit.W < 10 || fit.H < 10) {
+      requestAnimationFrame(() => { computeFit(); apply(); });
+      setTimeout(() => { computeFit(); apply(); }, 200);
+    }
   }
 
   // ---- viewport apply (positions everything from view state) ----
@@ -249,8 +367,8 @@
     const showLabels = (view.z * fit.ky) >= 9;   // only label when rows are legible
     for (const t of tipEntries) {
       const cx = m.a * t.node.x + m.e, cy = m.d * t.node._y + m.f;
-      t.circle.setAttribute("cx", cx);
-      t.circle.setAttribute("cy", cy);
+      if (t.kind === "circle") { t.el.setAttribute("cx", cx); t.el.setAttribute("cy", cy); }
+      else t.el.setAttribute("d", glyphPathD(t.kind, cx, cy, t.r));
       if (showLabels && cy >= -6 && cy <= fit.H + 6 && cx <= fit.W) {
         t.label.setAttribute("x", cx + 5);
         t.label.setAttribute("y", cy + 3);
@@ -259,6 +377,7 @@
         t.label.style.display = "none";
       }
     }
+    placeCladeLabels(m);   // F4: reposition + de-overlap clade labels
     const hud = document.getElementById("treeHud");
     if (hud) hud.textContent = view.z <= 1.001
       ? "fit · scroll = pan tips · ⌘/ctrl+scroll or pinch = expand · drag = select · click branch = AA"
@@ -321,6 +440,15 @@
         to = setTimeout(() => { computeFit(); resetView(); apply(); }, 120);
       }).observe(sc);
     }
+
+    // #1: when the viewer loads behind another app, the first paint can land before
+    // the pane is sized / while rAF is throttled, leaving edges + tips invisible.
+    // Re-measure and re-apply *synchronously* (not via the throttled scheduleApply)
+    // when the app returns to the foreground — preserving the current zoom/pan.
+    const relayout = () => { computeFit(); clampPan(); apply(); };
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) relayout(); });
+    window.addEventListener("focus", relayout);
+    window.addEventListener("pageshow", relayout);
   }
 
   // ---- highlight refresh (hover / clade filter / selection) ----
