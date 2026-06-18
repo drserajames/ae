@@ -150,8 +150,9 @@
         `</div>`;
     } else {
       body += `<div class="ti-sub" style="margin-top:5px">` +
-        (("A" in node) ? "No AA substitutions on this branch."
-                       : "AA substitutions not in this bundle (exporter E1 pending).") + `</div>`;
+        (IV.DATA.meta && IV.DATA.meta.aa_transitions
+          ? "No AA substitutions on this branch."
+          : "AA substitutions not in this bundle (exporter E1 pending).") + `</div>`;
     }
     const box = infoBox();
     box.innerHTML = `<div class="ti-h">${title}<span class="ti-x" title="close">×</span></div>` +

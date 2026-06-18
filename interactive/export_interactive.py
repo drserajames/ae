@@ -494,6 +494,10 @@ def main():
             "n_tree_leaves": n_total,
             "n_kept_leaves": n_kept[0],
             "n_matched_norms": len(keep_norms),
+            # True when the source tree carried ancestral AA sequences, so branch AA
+            # transitions were computed (E1). Lets the viewer tell "no substitutions on
+            # this branch" (A absent) from "transitions weren't exported" (flag false).
+            "aa_transitions": bool(aa_table),
         },
         "tree": pruned,
         "charts": charts,
