@@ -169,15 +169,19 @@
       (lf.ag && lf.ag.length ? `<br>${lf.ag.length} antigen(s) on map` : "<br><i>no antigen on this map</i>");
   }
 
-  // tip outline marks passage (P1): coloured ring for a known passage type, else
-  // neutral grey. Fill stays the clade/continent colour from Colour.leaf.
-  function tipStroke(lf) {
-    const pc = lf.passage ? Colour.passageColor(lf.passage) : null;
-    return pc || "rgba(0,0,0,.35)";
+  // tip outline marks passage (P1), mirroring the map (map.js passageStroke):
+  // dual-encode clade as the fill (Colour.leaf) and passage as a ring, but ring
+  // ONLY the salient passages (egg / reassortant). cell is the overwhelming default
+  // for these assays, so ringing every cell tip would bury the clade fills and the
+  // overview reads as a wall of one colour. cell tips keep the neutral grey stroke;
+  // the legend still lists every passage colour.
+  function passageStroke(lf) {
+    if (!(Colour.hasPassageMarkers && Colour.hasPassageMarkers())) return null;
+    const t = lf.passage;
+    return (t && t !== "cell") ? Colour.passageColor(t) : null;
   }
-  function tipStrokeW(lf) {
-    return (lf.passage && Colour.passageColor(lf.passage)) ? 1.7 : 0.7;
-  }
+  function tipStroke(lf) { return passageStroke(lf) || "rgba(0,0,0,.35)"; }
+  function tipStrokeW(lf) { return passageStroke(lf) ? 1.4 : 0.7; }
 
   function render() {
     ensureStyle();
