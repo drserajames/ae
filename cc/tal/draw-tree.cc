@@ -280,7 +280,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double margin = 0.03 * width;
     const double drawable_w = width - 2.0 * margin;
     const double gap = 0.012 * width;
-    const double hz_w = params.hz_sections.empty() ? 0.0 : 0.045 * drawable_w; // left marker column
+    const double hz_w = params.hz_sections.empty() ? 0.0 : 0.005 * drawable_w; // AD hz-section-marker reserve (no left label column)
     const double label_w = params.labels ? 0.16 * drawable_w : 0.0;
     const double clade_w = params.clades && !visible_clades.empty() ? 0.09 * drawable_w : 0.0;
     const double ts_w = params.time_series && !time_series.slots.empty() ? 0.34 * drawable_w : 0.0;
@@ -349,30 +349,22 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         pdf.text(margin, vmargin + top_reserve * 0.5 + title_fs * 0.5, params.title, title_fs, BLACK, /*center=*/false);
     }
 
-    // --- hz-sections: left marker column (bracket + rotated label) + separator across the tree ---
+    // --- hz-sections: faint horizontal separator across the figure at each section's top
+    //     boundary (acmacs-tal HzSections). AD draws NO left bracket/label column — the clade
+    //     names live solely in the right-hand Clades column — so ae only draws the separators
+    //     here (the clade labels are rendered by the clades column below). ---
     if (hz_w > 0.0) {
         std::unordered_map<std::string, double> name_y; // leaf seq_id -> vertical offset
         name_y.reserve(layout.leaves.size());
         for (const auto& leaf_node : layout.leaves)
             name_y.emplace(leaf_node.name, leaf_node.y);
-        const double bracket_x = margin + hz_w * 0.62;
-        const double sep_x_end = margin + hz_w + tree_w; // separator spans the tree
-        const double hz_label_fs = std::clamp(vstep * 1.2, 6.0, 12.0);
+        const double sep_x0 = margin + hz_w;             // separator spans the tree
+        const double sep_x_end = margin + hz_w + tree_w;
         for (const auto& section : params.hz_sections) {
             const auto first_it = name_y.find(section.first);
-            const auto last_it = name_y.find(section.last);
-            if (first_it == name_y.end() || last_it == name_y.end())
+            if (first_it == name_y.end())
                 continue; // unknown seq_id — skip the section
-            double y0 = first_it->second, y1 = last_it->second;
-            if (y0 > y1)
-                std::swap(y0, y1);
-            const double dy0 = dev_y(y0), dy1 = dev_y(y1);
-            pdf.line(bracket_x, dy0, bracket_x, dy1, BLACK, 0.8);                         // bracket spine
-            pdf.line(bracket_x, dy0, bracket_x + hz_w * 0.14, dy0, BLACK, 0.8);           // top tick
-            pdf.line(bracket_x, dy1, bracket_x + hz_w * 0.14, dy1, BLACK, 0.8);           // bottom tick
-            if (!section.label.empty())                                                  // label, rotated, centred
-                pdf.text_rotated(margin + hz_w * 0.42, (dy0 + dy1) / 2.0 + section.label.size() * hz_label_fs * 0.28, section.label, hz_label_fs, BLACK, -90.0);
-            pdf.line(bracket_x, dev_y(y0 - 0.5), sep_x_end, dev_y(y0 - 0.5), GREY, 0.3);  // top-boundary separator
+            pdf.line(sep_x0, dev_y(first_it->second - 0.5), sep_x_end, dev_y(first_it->second - 0.5), GREY, 0.3);
         }
     }
 
@@ -515,17 +507,21 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const int n_slots = std::max<int>(1, static_cast<int>(occupied.size()));
         const double slot_w = clade_w / static_cast<double>(n_slots);
         const double cap = std::clamp(slot_w * 0.16, 1.0, 4.0); // arrowhead half-width
-        const double clade_fs = std::clamp(vstep * 1.1, 5.0, 11.0);
+        // AD label_size = slot.width * label.scale (reports: ~0.007·height × 1.4 ≈ 0.0098·height).
+        const double clade_fs = std::clamp(0.0095 * height, 6.0, 14.0);
+        const double right_edge = x_clade0 + clade_w; // viewport.right (AD horizontal_line extends to here)
         for (const auto& draw : draws) {
             const Clade& clade = clade_sections[draw.rank];
             const double cx = x_clade0 + clade_w - (static_cast<double>(draw.slot) + 0.5) * slot_w; // slot 0 = right edge
             const Band* widest = nullptr;
             for (const auto& band : draw.bands) {
-                pdf.line(cx, band.y0, cx, band.y1, BLACK, 0.7);             // spine
+                pdf.line(cx, band.y0, cx, band.y1, BLACK, 0.7);             // double-arrow spine
                 pdf.line(cx - cap, band.y0 + cap, cx, band.y0, BLACK, 0.7); // top arrowhead (two strokes)
                 pdf.line(cx + cap, band.y0 + cap, cx, band.y0, BLACK, 0.7);
                 pdf.line(cx - cap, band.y1 - cap, cx, band.y1, BLACK, 0.7); // bottom arrowhead
                 pdf.line(cx + cap, band.y1 - cap, cx, band.y1, BLACK, 0.7);
+                pdf.line(cx, band.y0, right_edge, band.y0, BLACK, 0.4);     // top horizontal arm (AD horizontal_line)
+                pdf.line(cx, band.y1, right_edge, band.y1, BLACK, 0.4);     // bottom horizontal arm
                 if (widest == nullptr || band.size > widest->size)
                     widest = &band;
             }
