@@ -62,16 +62,66 @@
     return s;
   }
 
+  function footnoteInto(parent, text) {
+    const n = document.createElement("span");
+    n.className = "footnote"; n.style.padding = "0"; n.textContent = text;
+    parent.appendChild(n);
+  }
+
+  // C1 colour key: residue value at the active HA position(s), with tip counts.
+  function aaLegend(colKey) {
+    if (!Colour.aaPositions().length) {
+      footnoteInto(colKey, "enter HA position(s) above to colour by residue"); return;
+    }
+    const cnt = {};
+    (IV.Tree.leaves || []).forEach(l => { const v = Colour.aaValue(l.norm); if (v) cnt[v] = (cnt[v] || 0) + 1; });
+    const vals = Colour.aaValues();
+    if (!vals.length) {
+      footnoteInto(colKey, "no residue data at that position in the matched set"); return;
+    }
+    vals.forEach(v => {
+      const d = document.createElement("div"); d.className = "lg";
+      d.innerHTML = `<span class="sw" style="background:${Colour.aaColor(v)}"></span>${v}<span class="cnt">${cnt[v] || 0}</span>`;
+      colKey.appendChild(d);
+    });
+    const u = document.createElement("div"); u.className = "lg";
+    u.innerHTML = `<span class="sw" style="background:${Colour.unmatched()}"></span>no seq<span class="cnt"></span>`;
+    colKey.appendChild(u);
+  }
+
+  // C2 colour key: a sequential gradient bar for per-point stress (Σ error²).
+  function stressLegend(colKey) {
+    if (!Colour.hasStress()) {
+      footnoteInto(colKey, "titer data not exported (E2) — stress unavailable"); return;
+    }
+    const sc = Colour.stressScale();
+    const bar = document.createElement("div"); bar.className = "lg";
+    bar.innerHTML =
+      'low <span style="display:inline-block;width:120px;height:11px;border:1px solid rgba(0,0,0,.25);' +
+      `border-radius:2px;vertical-align:-1px;background:linear-gradient(to right,${sc.stops.join(",")})"></span> high`;
+    colKey.appendChild(bar);
+    const g = document.createElement("div"); g.className = "lg";
+    g.innerHTML = `<span class="sw" style="background:${Colour.unmatched()}"></span>no titer`;
+    colKey.appendChild(g);
+    footnoteInto(colKey, `Σ error² per point · scale top p95≈${sc.cap.toFixed(1)} (max ${sc.max.toFixed(1)})`);
+  }
+
   function renderLegend() {
     const lg = document.getElementById("legend"); lg.innerHTML = "";
     const counts = tipCounts();
 
     // ---- colour key (depends on colorBy) ----
-    const colKey = section(
-      State.colorBy === "clade" ? "Clade" :
-      State.colorBy === "continent" ? "Continent" : "Colour");
+    const titleByMode = {
+      clade: "Clade", continent: "Continent",
+      aa: "AA " + (Colour.aaPositions().join("+") || "position?"), stress: "Stress",
+    };
+    const colKey = section(titleByMode[State.colorBy] || "Colour");
 
-    if (State.colorBy === "clade") {
+    if (State.colorBy === "aa") {
+      aaLegend(colKey);
+    } else if (State.colorBy === "stress") {
+      stressLegend(colKey);
+    } else if (State.colorBy === "clade") {
       Colour.clades().sort().forEach(c => {
         const n = counts.clade[c] || 0;
         const d = document.createElement("div");
@@ -128,10 +178,29 @@
       o.value = i; o.textContent = `${c.label} (${c.n_antigens} ag, ${c.n_sera} sr)`;
       chartSel.appendChild(o);
     });
-    chartSel.onchange = () => { State.setChart(+chartSel.value); IV.Map.render(); State.notify(); updateTitles(); };
+    chartSel.onchange = () => {
+      State.setChart(+chartSel.value);
+      IV.Map.render();
+      if (State.colorBy === "stress") IV.Tree.render();   // per-chart stress recolours tips
+      renderLegend(); State.notify(); updateTitles();
+    };
 
-    document.getElementById("colorBy").onchange = e => {
-      State.setColorBy(e.target.value);
+    // Colour-mode controls. The two data-driven modes (C1 amino-acid, C2 stress)
+    // and the AA-position input are injected here rather than in the template, so
+    // they stay self-contained in this module and don't collide with map/grid work.
+    const colorBy = document.getElementById("colorBy");
+    if (IV.Colour.hasAA()) addOption(colorBy, "aa", "amino acid");
+    if (IV.Colour.hasStress()) addOption(colorBy, "stress", "stress");
+    const aaPos = makeAAInput(colorBy);
+
+    colorBy.onchange = e => {
+      const mode = e.target.value;
+      State.setColorBy(mode);
+      aaPos.wrap.style.display = mode === "aa" ? "" : "none";
+      if (mode === "aa" && Colour.aaPositions().length === 0) {
+        if (!aaPos.input.value) aaPos.input.value = "145";   // a useful H3 default
+        Colour.setAAPositions(aaPos.input.value);
+      }
       IV.Tree.render(); IV.Map.render(); renderLegend(); State.notify();
     };
 
@@ -168,6 +237,30 @@
       "Click to select (Shift/Cmd-click to add); drag a box on either panel to select many; " +
       "search selects all matches; click empty space to clear. " +
       "Click a clade swatch in the legend to show / hide that clade.";
+  }
+
+  function addOption(sel, value, label) {
+    if (Array.prototype.some.call(sel.options, o => o.value === value)) return;
+    const o = document.createElement("option");
+    o.value = value; o.textContent = label;
+    sel.appendChild(o);
+  }
+
+  // The colour-by-AA position box, inserted after the Colour control and hidden
+  // until that mode is active. Typing positions (e.g. "145, 159") recolours live.
+  function makeAAInput(colorBy) {
+    const wrap = document.createElement("label");
+    wrap.style.display = "none";
+    wrap.innerHTML = 'pos <input id="aaPos" type="text" size="8" placeholder="e.g. 145, 159" ' +
+      'style="font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;width:90px">';
+    const host = colorBy.closest("label") || colorBy;
+    host.parentNode.insertBefore(wrap, host.nextSibling);
+    const input = wrap.querySelector("#aaPos");
+    input.oninput = () => {
+      Colour.setAAPositions(input.value);
+      if (State.colorBy === "aa") { IV.Tree.render(); IV.Map.render(); renderLegend(); State.notify(); }
+    };
+    return { wrap, input };
   }
 
   IV.UI = { showTip, moveTip, hideTip, renderLegend, bindControls, updateTitles };
