@@ -77,6 +77,22 @@
     parent.appendChild(n);
   }
 
+  // F8 legend-cycle visual: "select" (front) = raised, blue outline + ▲; "back" =
+  // sent behind, faded + ▼; "normal" = plain. The store (state.js) owns the cycle
+  // and folds the front/back emphasis into State.emphasis() for the panels.
+  function cycleBadge(mode) {
+    if (mode === "select") return '<span style="margin-left:3px;color:#1558d6;font-size:9px">▲</span>';
+    if (mode === "back") return '<span style="margin-left:3px;color:#999;font-size:9px">▼</span>';
+    return "";
+  }
+  function styleCycleRow(d, mode) {
+    if (mode === "select") {
+      d.style.outline = "2px solid #1558d6"; d.style.outlineOffset = "-1px"; d.style.fontWeight = "600";
+    } else if (mode === "back") {
+      d.style.opacity = "0.45";
+    }
+  }
+
   // C1 colour key: residue value at the active HA position(s), with tip counts.
   function aaLegend(colKey) {
     if (!Colour.aaPositions().length) {
@@ -136,12 +152,14 @@
       const ag = agCladeCounts();
       Colour.cladesOrdered().forEach(c => {   // #2 report legend order (priority)
         const t = counts.clade[c] || 0, a = ag.clade[c] || 0;
+        const mode = State.cladeMode(c);      // F8: "normal" | "select" | "back"
         const d = document.createElement("div");
-        d.className = "lg" + (State.offClades.has(c) ? " off" : "");
-        d.title = `${t} tip(s) / ${a} antigen(s) — click to show / hide`;
+        d.className = "lg";
+        d.title = `${t} tip(s) / ${a} antigen(s) — click to cycle: bring to front → send to back → normal`;
         d.innerHTML = `<span class="sw" style="background:${Colour.cladeColor(c)}"></span>` +
-          `${Colour.cladeLegend(c)}<span class="cnt">${t}/${a}</span>`;
-        d.onclick = () => { State.toggleClade(c); d.classList.toggle("off"); };
+          `${Colour.cladeLegend(c)}<span class="cnt">${t}/${a}</span>` + cycleBadge(mode);
+        styleCycleRow(d, mode);
+        d.onclick = () => { State.cycleClade(c); renderLegend(); };
         colKey.appendChild(d);
       });
       const u = document.createElement("div"); u.className = "lg";
@@ -256,7 +274,7 @@
       "Hover a tip or map point to link the two panels by strain. " +
       "Click to select (Shift/Cmd-click to add); drag a box on either panel to select many; " +
       "search selects all matches; click empty space to clear. " +
-      "Click a clade swatch in the legend to show / hide that clade.";
+      "Click a clade swatch in the legend to cycle it: bring to front → send to back → normal.";
   }
 
   function addOption(sel, value, label) {
