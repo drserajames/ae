@@ -63,9 +63,10 @@ mkdir -p "$OUT"
   --chart "vidrl=$SSM/h3-hi-guinea-pig-vidrl/styled.ace" \
   --subtype "A(H3N2)" --assay HI --out "$OUT/h3-hi-vidrl.html"
 
-# all centres in one file (switchable in the viewer)
+# all five WHO Collaborating Centres in one file (switchable in the viewer)
 ./run.sh --tree "$SSM/tree/h3.asr.tjz" \
   --chart "cdc=$SSM/h3-hi-guinea-pig-cdc/styled.ace" \
+  --chart "cnic=$SSM/h3-hi-guinea-pig-cnic/styled.ace" \
   --chart "crick=$SSM/h3-hi-guinea-pig-crick/styled.ace" \
   --chart "niid=$SSM/h3-hi-guinea-pig-niid/styled.ace" \
   --chart "vidrl=$SSM/h3-hi-guinea-pig-vidrl/styled.ace" \
