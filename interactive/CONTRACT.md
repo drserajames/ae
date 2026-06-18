@@ -27,6 +27,7 @@ Legend for field status:
   "clade_color":   { "<clade>": "#rrggbb" },   // [v3] clade -> colour, from the report style R["-clades-v10"]
   "clade_legend":  { "<clade>": "<label>" },   // [v3] clade -> legend text, from the same rule's L.t
   "clade_priority":{ "<clade>": <int|null> },  // [v3] rule legend priority (L.p) for ordering the legend like the report
+  "clade_short":   { "<clade>": "<pango>|null" }, // [v4] Pango short name parsed from the legend (null if it's an AA motif)
   "continent_color": { "<CONTINENT>": "#rrggbb" }, // [v3] from R["-continent"]; key is uppercase T.C9
   "unmatched_color": "#d9d9d9",  // [live] colour for tips/antigens with no clade rule
   "passage_color": {             // [E1]  passage-type -> colour (P1 markers)
@@ -43,6 +44,11 @@ Legend for field status:
 > one). Each antigen's `clade` is the rule applied **last** among its clade labels (the
 > report layers rules, so the most specific clade wins); clades with no rule are greyed
 > and logged.
+>
+> **`clade_short` [v4]** maps each clade to its Pango short name or `null`: the
+> parenthesised Pango in the legend (`"135K 189R (J.2.4)"` → `J.2.4`), or the legend
+> itself when it carries no AA-motif digits (`"K"` → `K`), else `null` for a bare AA
+> motif (`"135K"`). Lets the viewer label by the short clade name when one exists.
 
 The `aa` table maps each matched `norm` to its **aligned full-HA AA sequence
 string** (reconstructed from the `.asr` tree; HA1 is the prefix, so HA1 numbering

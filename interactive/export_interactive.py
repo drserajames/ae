@@ -160,6 +160,23 @@ def primary_clade(clades, rules):
     return last
 
 
+_PANGO_RE = re.compile(r"\(([A-Za-z0-9.]+)\)")
+
+
+def clade_short(legend):
+    """v4 #2: the Pango short name for a clade legend, or None. If the legend carries a
+    parenthesised Pango (e.g. "135K 189R (J.2.4)") return that; else if the legend has no
+    AA-motif digits it is already a short name ("K"); else (an AA motif like "135K") None."""
+    if not legend:
+        return None
+    m = _PANGO_RE.search(legend)
+    if m:
+        return m.group(1)
+    if not re.search(r"\d", legend):
+        return legend
+    return None
+
+
 def read_transformation(proj):
     """Return the 2D projection transformation [a,b,c,d] from ae_backend's
     Transformation object. It exposes no numeric getter (only mutators), but its
@@ -552,12 +569,14 @@ def main():
             clade_legend[cl] = cl
             clade_priority[cl] = None
             fb += 1
+    clade_short_map = {cl: clade_short(clade_legend[cl]) for cl in used}  # v4 #2
     if stats["unmatched_clades"]:
         print(f"[clade] {len(stats['unmatched_clades'])} clade label(s) had no rule "
               f"(shown grey): {sorted(stats['unmatched_clades'])[:12]}"
               f"{' ...' if len(stats['unmatched_clades']) > 12 else ''}", file=sys.stderr)
     print(f"[clade] {len(used)} clades on map ({len(used) - fb} from report styles, "
-          f"{fb} generated); {len(cont_acc)} continent colours", file=sys.stderr)
+          f"{fb} generated); {sum(1 for v in clade_short_map.values() if v)} with Pango "
+          f"short name; {len(cont_acc)} continent colours", file=sys.stderr)
 
     bundle = {
         "meta": {
@@ -577,6 +596,7 @@ def main():
         "clade_color": clade_color,
         "clade_legend": clade_legend,
         "clade_priority": clade_priority,
+        "clade_short": clade_short_map,
         "continent_color": cont_acc,
         "passage_color": PASSAGE_COLOR,
         "unmatched_color": UNMATCHED_COLOR,
