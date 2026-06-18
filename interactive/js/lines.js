@@ -40,6 +40,12 @@
   const show = { error: false, conn: false };
   let ctlBuilt = false;
 
+  // Cap how many strains the overlay draws at once. paint() is selection×sera, so
+  // a T4 branch-click (which can select a whole subtree — ~1500 norms in the H3
+  // data) with both layers on would emit thousands of <line>s and jank the map.
+  // Above the cap we draw nothing (or just the hovered strain) and hint instead.
+  const MAX_LINE_NORMS = 40;
+
   const sigmoid = z => 1 / (1 + Math.exp(-z));
   const activeChart = () => IV.DATA && IV.DATA.charts[State.chartIdx];
   const hasE2 = ch => !!(ch && ch.logged && ch.column_bases);
@@ -114,6 +120,16 @@
         const norms = targetNorms();
         if (!norms.size) {
           hint = "hover a point or drag-box to select strains";
+        } else if (norms.size > MAX_LINE_NORMS) {
+          // Selection too large to draw. Keep a single hovered strain live so
+          // hover still works even with a big subtree selected.
+          if (State.active) {
+            const proj = getProj(ch);
+            if (proj) drawn = paint(svg, ch, proj, new Set([State.active]));
+            hint = `selection of ${norms.size} too large — showing hovered strain only`;
+          } else {
+            hint = `selection too large for lines (${norms.size} strains) — narrow the selection or hover a single strain`;
+          }
         } else {
           const proj = getProj(ch);
           if (proj) drawn = paint(svg, ch, proj, norms);
@@ -194,20 +210,24 @@
     box.querySelector("#lnErr").onchange = e => { show.error = e.target.checked; draw(); };
   }
 
+  // hint text is static + numeric (no user input), so innerHTML is safe here.
   function updateHint(drawn, hint) {
     const key = document.getElementById("lnKey");
     if (!key) return;
-    if (hint) { key.textContent = hint; return; }
     if (!show.error && !show.conn) { key.textContent = ""; return; }
     let h = "";
-    if (show.error)
+    if (show.error && drawn > 0)
       h += '<span style="color:' + RED + '">▬</span> too close ' +
            '<span style="color:' + BLUE + '">▬</span> too far<br>';
-    h += drawn + " line(s) · selected strains only";
+    h += hint ? hint : (drawn + " line(s) · selected strains only");
     key.innerHTML = h;
   }
 
   const Lines = {
+    // NB: the overlay lives inside #mapSvg, which IV.Map.render() clears. A bare
+    // IV.Map.render() with no following State.notify() would wipe it — harmless
+    // today because every render path (chart switch, colour, resize) also notifies,
+    // which fires refresh() below and redraws.
     render() { draw(); },     // full (re)draw — used on chart/colour re-render
     refresh() { draw(); },    // selection / hover change (subscribed to State)
     // exposed for verification / reuse (C2 per-point stress shares the math)
