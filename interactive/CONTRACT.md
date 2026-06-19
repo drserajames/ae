@@ -70,7 +70,8 @@ tree tips to chart antigens. It is the join key throughout the bundle.
   "tree_file": "h3.asr.tjz",
   "n_tree_leaves": 70000,   // leaves in the full source tree
   "n_kept_leaves": 2100,    // leaves kept after pruning to linked tips
-  "n_matched_norms": 2100   // distinct norms matched between charts and tree
+  "n_matched_norms": 2100,  // distinct norms matched between charts and tree
+  "generated": "2026-06-19" // [v6 F1] page-generation date (ISO, local date)
 }
 ```
 
@@ -121,7 +122,7 @@ collapsed during pruning. `x` is **cumulative branch length** from the root
 
 ```jsonc
 {
-  "label": "vidrl",          // [live] centre label (Centre dropdown)
+  "label": "VIDRL",          // [v6 #1] centre label, uppercased (Centre dropdown; display-only)
   "name": "A(H3N2) HI ...",  // [live] chart descriptive name
   "n_antigens": 2900,        // [live]
   "n_sera": 40,              // [live]
@@ -160,7 +161,8 @@ plots raw layout coords).
   "country": "THAILAND",      // [v3] country, from semantic T.c9 (null if absent)
   "ref": false,               // [v3] reference antigen (select_reference_antigens or semantic T.R)
   "vac": false,               // [v3] vaccine strain (semantic T.V truthy)
-  "serology": false           // [v3] report serology test antigen (semantic T.serology)
+  "serology": false,          // [v3] report serology test antigen (semantic T.serology)
+  "new": 0                    // [v6 F2] semantic T.new: 1=since previous report, 2=since previous VCM, 0=neither
 }
 ```
 
@@ -170,7 +172,15 @@ plots raw layout coords).
 {
   "i": 3, "name": "...", "x": 0.1, "y": 0.2,   // x/y null if not positioned
   "norm": "THAILAND/8/2022",   // [v3] join key, normalised like antigens (F1)
-  "homologous": 0              // [v3] index of the antigen sharing this norm, or null (F1)
+  "homologous": 0,             // [v3] index of the antigen sharing this norm, or null (F1)
+  "passage": "SIAT1",          // [v6 #6] raw serum passage string (str(serum.passage()))
+  "serum_id": "A9824",         // [v6 #6] serum.serum_id()
+  "serum_species": "",         // [v6 #6] serum.serum_species() ("" if unset)
+  "circle": {                  // [v6 F3] serum-circle radii, proj.serum_circles(fold=2.0)
+    "cb": 7.0,                 //   column basis (null if undefined)
+    "theoretical": 3.0,        //   theoretical radius, log2 units (Optional float, may be null)
+    "empirical": 3.35          //   empirical radius, log2 units (Optional float, may be null)
+  }
 }
 ```
 

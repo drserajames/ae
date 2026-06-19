@@ -21,6 +21,7 @@ Multiple charts are supported so the map panel can switch between centres
 """
 
 import argparse, json, os, re, shutil, subprocess, sys, tempfile
+from datetime import date
 from pathlib import Path
 
 import ae_backend
@@ -332,11 +333,13 @@ def load_chart(label, path, fallback, clade_acc, cont_acc, stats):
             "ref": (i in ref_idx) or bool(T.get("R")),     # T.R = reference flag
             "vac": bool(T.get("V")) or is_vaccine(ag),     # T.V truthy = vaccine
             "serology": bool(T.get("serology")),           # report serology test antigen
+            "new": int(T.get("new") or 0),                 # F2: 1=since prev report, 2=since prev VCM
         })
 
     norm_to_first_ag = {}
     for a in antigens:
         norm_to_first_ag.setdefault(a["norm"], a["i"])
+    circles = serum_circle_data(proj, ns)            # F3, indexed by serum_no
     sera = []
     for j in range(ns):
         sr = ch.serum(j)
@@ -344,9 +347,14 @@ def load_chart(label, path, fallback, clade_acc, cont_acc, stats):
         snorm = norm_chart_name(sr.name())
         sera.append({"i": j, "name": sr.name(), "x": x, "y": y,
                      "norm": snorm,
-                     "homologous": norm_to_first_ag.get(snorm)})  # ag index or null
+                     "homologous": norm_to_first_ag.get(snorm),  # ag index or null
+                     "passage": str(sr.passage()),               # #6
+                     "serum_id": sr.serum_id(),                  # #6
+                     "serum_species": sr.serum_species(),        # #6
+                     "circle": circles[j]})                      # F3
 
-    out = {"label": label, "name": ch.name(), "antigens": antigens, "sera": sera,
+    out = {"label": label.upper(),                    # #1 display-only uppercase
+           "name": ch.name(), "antigens": antigens, "sera": sera,
            "n_antigens": na, "n_sera": ns,
            "stress": round(float(proj.stress()), 4)}
     out.update(chart_titer_data(ch, proj, na, ns))
@@ -372,6 +380,37 @@ def chart_titer_data(ch, proj, na, ns) -> dict:
     colbases = [round(float(x), 4) for x in cb]
     return {"titers": titers, "logged": logged,
             "column_bases": colbases, "min_col_basis": mcb}
+
+
+def serum_circle_data(proj, ns):
+    """F3: per-serum serum-circle radii from proj.serum_circles(fold=2.0). Returns a list
+    (indexed by serum_no) of {cb, theoretical, empirical}; theoretical/empirical are
+    Optional floats (null when the circle is undefined — no homologous antigen, etc.).
+    All-null per serum if the computation is unavailable."""
+    blank = [{"cb": None, "theoretical": None, "empirical": None} for _ in range(ns)]
+    try:
+        circles = proj.serum_circles(fold=2.0)
+    except Exception as e:
+        print(f"[serum-circle] WARNING: unavailable ({e!r})", file=sys.stderr)
+        return blank
+
+    def num(call):
+        try:
+            v = call()
+            return None if v != v else round(float(v), 4)   # NaN -> None
+        except Exception:
+            return None
+
+    for c in circles:
+        no = getattr(c, "serum_no", None)
+        if no is None or not (0 <= no < ns):
+            continue
+        blank[no] = {
+            "cb": round(float(c.column_basis), 4),
+            "theoretical": num(c.theoretical),
+            "empirical": num(c.empirical),
+        }
+    return blank
 
 
 # --- tree pruning -------------------------------------------------------------
@@ -586,6 +625,7 @@ def main():
             "n_tree_leaves": n_total,
             "n_kept_leaves": n_kept[0],
             "n_matched_norms": len(keep_norms),
+            "generated": date.today().isoformat(),   # F1: page-generation date (ISO)
             # True when the source tree carried ancestral AA sequences, so branch AA
             # transitions were computed (E1). Lets the viewer tell "no substitutions on
             # this branch" (A absent) from "transitions weren't exported" (flag false).
