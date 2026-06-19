@@ -261,6 +261,53 @@ def apply_transformation(lay, t):
     return lay @ M
 
 
+_SSM_RE = re.compile(r"(\d{4}-\d{4})-ssm$")   # e.g. 2026-0223-ssm -> 2026-0223
+
+
+def comparison_charts(path):
+    """F2: locate the previous-report and previous-VCM charts for a styled.ace laid out
+    as <SSM>/<sub>/styled.ace. Prev report = <SSM>/previous/<sub>/<file> (the `previous`
+    symlink → the immediately preceding run). Prev VCM = same <sub>/<file> under the most
+    recent sibling <YYYY-MMDD>-ssm whose date prefix is earlier than this run's (the
+    symlink chain only reaches the preceding tc, so the VCM is found by scanning siblings).
+    Returns (prev_report_path|None, prev_vcm_path|None)."""
+    p = Path(path).resolve()
+    sub, fname, ssm = p.parent.name, p.name, p.parent.parent
+
+    pr = ssm / "previous" / sub / fname
+    prev_report = pr if pr.exists() else None
+
+    prev_vcm = None
+    m = _SSM_RE.search(ssm.name)
+    if m:
+        cur_date = m.group(1)
+        earlier = []
+        for d in ssm.parent.glob("*-ssm"):
+            mm = _SSM_RE.search(d.name)
+            if mm and mm.group(1) < cur_date:        # fixed-width YYYY-MMDD: lexical == chronological
+                earlier.append((mm.group(1), d))
+        if earlier:
+            cand = max(earlier)[1] / sub / fname
+            prev_vcm = cand if cand.exists() else None
+    return prev_report, prev_vcm
+
+
+def select_new_indices(cur, prev_path, label, kind):
+    """Indices of antigens in `cur` not present in the previous chart at prev_path, or
+    None (logged) if that chart is missing/unreadable."""
+    if prev_path is None:
+        print(f"[new] {label}: no previous {kind} chart found; new stays 0 for {kind}",
+              file=sys.stderr)
+        return None
+    try:
+        prev = ae_backend.chart_v3.Chart(str(prev_path))
+        return {no for no, _ in cur.select_new_antigens(prev)}
+    except Exception as e:
+        print(f"[new] {label}: {kind} comparison failed ({prev_path}): {e!r}",
+              file=sys.stderr)
+        return None
+
+
 def load_chart(label, path, fallback, clade_acc, cont_acc, stats):
     """Load one chart and emit its viewer entry. v3: clade colours/legend/priority,
     continent, passage and the vac/serology flags all come from the chart's OWN report
@@ -333,8 +380,28 @@ def load_chart(label, path, fallback, clade_acc, cont_acc, stats):
             "ref": (i in ref_idx) or bool(T.get("R")),     # T.R = reference flag
             "vac": bool(T.get("V")) or is_vaccine(ag),     # T.V truthy = vaccine
             "serology": bool(T.get("serology")),           # report serology test antigen
-            "new": int(T.get("new") or 0),                 # F2: 1=since prev report, 2=since prev VCM
+            "new": int(T.get("new") or 0),                 # F2 baseline (T.new is absent in styled.ace)
         })
+
+    # F2: T.new isn't stored, so compute "new" by comparing this chart to the previous
+    # report and previous VCM. Set 2 vs VCM, then 1 vs report (report wins — the tighter,
+    # more recent subset). When a comparison chart is found we own the value for every
+    # antigen (non-new → 0); a missing comparison leaves that tier untouched.
+    prev_report, prev_vcm = comparison_charts(path)
+    new_report = select_new_indices(ch, prev_report, label, "report")
+    new_vcm = select_new_indices(ch, prev_vcm, label, "VCM")
+    if new_report is not None or new_vcm is not None:
+        for ag in antigens:
+            i = ag["i"]
+            if new_report is not None and i in new_report:
+                ag["new"] = 1
+            elif new_vcm is not None and i in new_vcm:
+                ag["new"] = 2
+            elif new_report is not None and new_vcm is not None:
+                ag["new"] = 0          # both comparisons present and antigen in neither
+        nr = sum(1 for a in antigens if a["new"] == 1)
+        nv = sum(1 for a in antigens if a["new"] == 2)
+        print(f"[new] {label}: new=1 (vs report) {nr}, new=2 (vs VCM) {nv}", file=sys.stderr)
 
     norm_to_first_ag = {}
     for a in antigens:

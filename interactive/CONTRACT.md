@@ -162,9 +162,16 @@ plots raw layout coords).
   "ref": false,               // [v3] reference antigen (select_reference_antigens or semantic T.R)
   "vac": false,               // [v3] vaccine strain (semantic T.V truthy)
   "serology": false,          // [v3] report serology test antigen (semantic T.serology)
-  "new": 0                    // [v6 F2] semantic T.new: 1=since previous report, 2=since previous VCM, 0=neither
+  "new": 0                    // [v6 F2] 1=new since previous report, 2=new since previous VCM, 0=neither
 }
 ```
+
+> **`new` [v6 F2]** is not stored in `styled.ace`, so the exporter computes it by
+> comparing the chart to two earlier ones via `chart.select_new_antigens(prev)`: the
+> **previous report** (`<SSM>/previous/<sub>/styled.ace`, the immediately preceding run)
+> gives `1`, and the **previous VCM** (the most recent sibling `<YYYY-MMDD>-ssm` before
+> this run) gives `2`. Report takes precedence (tighter subset), so `1` overrides `2`.
+> A missing comparison chart is logged and leaves that tier at `0`.
 
 ### Serum [live]
 
