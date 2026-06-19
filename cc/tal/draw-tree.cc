@@ -321,13 +321,17 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
 
     // --- vertical reserves: title (top); time-series / dash slot labels (bottom). The
     //     colour legend sits in the top-right corner (acmacs-tal), so it needs no bottom reserve. ---
-    const double vmargin = 0.03 * height;
+    const double vmargin = 0.015 * height; // AD uses a small vertical margin so the tree fills the height
     // AD draws the continent legend as the lower-left world map (LegendContinentMap),
     // not as a coloured-square legend — so when the geo inset is present it IS the legend
     // and the top-right square legend is suppressed (otherwise it duplicates the inset).
     const bool want_legend = !legend_items.empty() && !params.geo_inset;
-    const double top_reserve = params.title.empty() ? 0.0 : 0.05 * height;
-    const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0) ? 0.07 * height : 0.0;
+    // AD draws time-series date labels at BOTH the top and bottom of the matrix, so the row
+    // range is inset by a date-label band top and bottom (the tree fills that full range, the
+    // title sits top-left within the top band). When there's no matrix, only the title needs
+    // a small top band.
+    const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0) ? 0.055 * height : 0.0;
+    const double top_reserve = bottom_reserve > 0.0 ? bottom_reserve : (params.title.empty() ? 0.0 : 0.035 * height);
 
     // --- vertical (shared) + tree horizontal transforms ---
     const double height_units = layout.height > 0.0 ? layout.height : 1.0;
@@ -343,10 +347,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     ae::draw::CairoPdf pdf{output, width, height};
     pdf.background(WHITE);
 
-    // --- title (top-left; acmacs-tal Title draws at offset [5,5], size 0.015·height) ---
+    // --- title (top-left, near the very top; acmacs-tal Title draws at offset [5,5]) ---
     if (!params.title.empty()) {
         const double title_fs = std::clamp(0.015 * height, 8.0, 26.0);
-        pdf.text(margin, vmargin + top_reserve * 0.5 + title_fs * 0.5, params.title, title_fs, BLACK, /*center=*/false);
+        pdf.text(margin, vmargin * 0.5 + title_fs, params.title, title_fs, BLACK, /*center=*/false);
     }
 
     // --- hz-sections: faint horizontal separator across the figure at each section's top
@@ -562,7 +566,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                                                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
         const bool yearly = params.time_series_interval == "year";
         const double slot_fs = std::clamp(slot_w * 0.7, 5.0, 10.0);
-        const double label_anchor_y = bottom + bottom_reserve * 0.9;
+        const double bottom_anchor_y = bottom + bottom_reserve * 0.9; // labels read upward, below the matrix
+        const double top_anchor_y = top - 2.0;                        // and above it (AD draws both)
         for (std::size_t i = 0; i < n_slots; ++i) {
             const std::string& slot_first = time_series.slots[i].first;     // "YYYY-MM-DD"
             std::string label;
@@ -576,7 +581,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1] : slot_first.substr(5, 2);
                 label = fmt::format("{} {}", mon, yy);
             }
-            pdf.text_rotated(x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + slot_fs * 0.35, label_anchor_y, label, slot_fs, BLACK, -90.0);
+            const double lx = x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + slot_fs * 0.35;
+            pdf.text_rotated(lx, bottom_anchor_y, label, slot_fs, BLACK, -90.0);
+            pdf.text_rotated(lx, top_anchor_y, label, slot_fs, BLACK, -90.0);
         }
     }
 
@@ -618,7 +625,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 const double y = dev_y(node.y);
                 pdf.line(col_x - dash_len / 2.0, y, col_x + dash_len / 2.0, y, found != aa_color.end() ? found->second : GREY, dash_lw);
             }
-            pdf.text_rotated(col_x + pos_fs * 0.35, bottom + bottom_reserve * 0.9, fmt::format("{}", bar.pos), pos_fs, BLACK, -90.0);
+            const std::string pos_label = fmt::format("{}", bar.pos);
+            pdf.text_rotated(col_x + pos_fs * 0.35, bottom + bottom_reserve * 0.9, pos_label, pos_fs, BLACK, -90.0); // bottom header
+            pdf.text_rotated(col_x + pos_fs * 0.35, dev_y(0.5) - 2.0, pos_label, pos_fs, BLACK, -90.0);              // top header (AD draws both)
         }
     }
 
@@ -686,7 +695,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 m = tree.parent(m);
             }
         };
-        const double mrca_fs = std::clamp(vstep * 0.9, 4.0, 11.0);
+        // AD's aa-transition label default scale is 0.01 (of height) with a tether (leader
+        // line, BLACK 0.3px) from the label back to the branch — see draw-aa-transitions.hh.
+        const double mrca_fs = 0.01 * height;
         for (const auto& label : params.mrca_labels) {
             const auto fi = leaf_by_name.find(label.first);
             const auto li = leaf_by_name.find(label.last);
@@ -703,8 +714,15 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             if (!label.color.empty()) {
                 try { color = Color{label.color}; } catch (const std::exception&) { }
             }
-            const double tx = dev_x(found->second.first) + label.offset_x * width;
-            const double ty = dev_y(found->second.second) + label.offset_y * height + fs * 0.3;
+            const double nx = dev_x(found->second.first), ny = dev_y(found->second.second); // branch point
+            const double tx = nx + label.offset_x * width;
+            const double ty = ny + label.offset_y * height + fs * 0.3;
+            // tether: thin line from the branch to the label (AD LabelTether). Drawn only when
+            // the label is displaced from the branch, so on-branch labels stay clean.
+            const double tw = pdf.text_size(label.text, fs).first;
+            const double anchor_x = tx < nx ? tx + tw : tx; // label's near edge
+            if (std::abs(anchor_x - nx) > fs * 0.5 || std::abs(ty - ny) > fs * 0.5)
+                pdf.line(nx, ny, anchor_x, ty - fs * 0.3, BLACK, 0.3);
             pdf.text(tx, ty, label.text, fs, color, /*center=*/false);
         }
     }
