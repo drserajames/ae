@@ -437,11 +437,15 @@ the `cc/draw/` surface API."*
       needs a bottom reserve. (AD draws the *continent* legend as the bottom-left world map —
       `LegendContinentMap`, `continent-map.hh`; ae has no map asset linked into `tal-draw`, so the
       coloured-squares legend top-right is the substitute. World-map inset stays open, #5.)
-    - **Clade column → far right, bracket staircase.** Moved the clades column to the **rightmost**
-      slot (past time-series + dash bars), matching AD. Each shown clade is now a vertical
-      **double-arrow bracket** (spine + arrowheads, BLACK) with a **rotated** name label, in a
-      **slot** (`set_slots` port): widest extent → slot 0 (right edge), overlapping sub-clades bumped
-      left → AD's nested staircase. ae's `compute_clade_sections` has **no section tolerance**
+    - **Clade column → bracket staircase, between matrix and dash-bars.** The clades column sits
+      after the time-series matrix and left of the aa dash-bars (AD column order). Each shown
+      clade is a vertical **double-arrow bracket** (spine + arrowheads, BLACK) with a **rotated**
+      name label and top/bottom **horizontal arms**, in a **slot** (`set_slots` port): widest
+      extent → slot 0 (the **LEFT** edge, matrix side), overlapping sub-clades bumped **right** →
+      AD's nested staircase with **deeper clades to the RIGHT of their parent** (e.g. h3 `K` right
+      of `J.2.4`). *(This is AD's time-series-to-the-left layout: `pos_x = viewport.left +
+      slot.width·(slot+1)`, horizontal_line from viewport.left to the spine. An earlier ae version
+      had slot 0 at the right edge / deeper-left — the opposite — now corrected.)* ae's `compute_clade_sections` has **no section tolerance**
       (acmacs-tal `section-inclusion/exclusion-tolerance`), so a clade interrupted by interspersed
       leaves fragments into dozens–hundreds of 1-leaf sections (e.g. `C (5a.2)`: 338 sections). Drawing
       them all was a cloud of ticks. Approximated the tolerances **at draw time**: drop sections below
