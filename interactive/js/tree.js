@@ -251,9 +251,14 @@
     for (const clade in byClade) {
       const short = cladeShort(clade);
       if (!short) continue;                             // #2: only label clades with a Pango name
-      const rows = byClade[clade];
+      const rows = byClade[clade].slice().sort((a, b) => a - b);
       if (rows.length < 2) continue;                    // skip singletons (clutter)
-      const lo = Math.min(...rows), hi = Math.max(...rows);
+      const lo = rows[0], hi = rows[rows.length - 1];
+      // #3: anchor at the MEDIAN row (where the bulk of the clade sits), not the
+      // (lo+hi)/2 midpoint — a few stray tips far from the clade pull the midpoint
+      // into a neighbouring clade (e.g. J.2.4's midpoint landed inside K). The dense
+      // "core" band [p15,p85] is used only to keep the label near the clade when zoomed.
+      const q = p => rows[clamp(Math.round(p * (rows.length - 1)), 0, rows.length - 1)];
       // MRCA = smallest node whose leaf-range [_lo,_hi] still contains [lo,hi]
       let node = root;
       for (;;) {
@@ -262,33 +267,39 @@
         node = child;
       }
       cladeLabels.push({
-        clade, x: node.x, row: (lo + hi) / 2, rowLo: lo, rowHi: hi,
+        clade, x: node.x, row: q(0.5), rowLo: q(0.15), rowHi: q(0.85),
         color: Colour.cladeColor(clade),
         text: short,
         prio: (prio[clade] != null ? prio[clade] : 9999),
       });
     }
   }
-  // position labels each frame with a greedy vertical de-overlap; lower clade_priority
-  // wins a contested slot (matches the report's clade emphasis).
+  // Position labels each frame, higher clade_priority first. #3: each label is
+  // anchored at its clade's median row and only NUDGED a little to de-overlap; if it
+  // can't fit within a small nudge it is dropped, never relocated far from its clade.
   function placeCladeLabels(m) {
-    const placed = [], top = 6, bot = fit.H - 4;
+    const placed = [], top = 8, bot = fit.H - 6, minGap = 12, maxNudge = 16;
     cladeLabels.slice().sort((a, b) => a.prio - b.prio).forEach(L => {
       if (!L.el) return;
-      // show the label whenever the clade's tip band is on screen, anchored within
-      // that band (so it "sticks" to the clade when zoomed/panned, not just at fit)
-      const yLo = m.d * L.rowLo + m.f, yHi = m.d * L.rowHi + m.f;
-      const y = clamp(m.d * L.row + m.f, Math.max(top, yLo), Math.min(bot, yHi));
-      const onScreen = yHi >= top && yLo <= bot;
-      const collide = placed.some(py => Math.abs(py - y) < 13);
-      if (onScreen && !collide) {
-        L.el.setAttribute("x", clamp(m.a * L.x + m.e + 6, 2, fit.W - 4));
-        L.el.setAttribute("y", y + 3);
-        L.el.style.display = "";
-        placed.push(y);
-      } else {
-        L.el.style.display = "none";
+      // anchor at the median row; if it's off-screen, keep it within the dense core
+      // band (so it stays near the clade when zoomed) rather than drifting to the edge
+      const c0 = m.d * L.rowLo + m.f, c1 = m.d * L.rowHi + m.f;
+      const lo = Math.min(c0, c1), hi = Math.max(c0, c1);
+      if (hi < top || lo > bot) { L.el.style.display = "none"; return; }   // clade off-screen
+      let y = clamp(m.d * L.row + m.f, Math.max(top, lo), Math.min(bot, hi));
+      if (placed.some(py => Math.abs(py - y) < minGap)) {                  // minimal nudge
+        let ok = false;
+        for (let off = 4; off <= maxNudge && !ok; off += 4) {
+          for (const cand of [y - off, y + off]) {
+            if (cand >= top && cand <= bot && !placed.some(py => Math.abs(py - cand) < minGap)) { y = cand; ok = true; break; }
+          }
+        }
+        if (!ok) { L.el.style.display = "none"; return; }                  // drop, don't fling
       }
+      L.el.setAttribute("x", clamp(m.a * L.x + m.e + 6, 2, fit.W - 50));
+      L.el.setAttribute("y", y + 3);
+      L.el.style.display = "";
+      placed.push(y);
     });
   }
 
