@@ -258,7 +258,7 @@
       svg.appendChild(node);
       (nodes[a.norm] = nodes[a.norm] || []).push(node);
       plc.push({ el: node, shape: sh.shape, rot: sh.rot || 0, x: a.x, y: a.y, r });
-      hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false, nw: a.new || 0, baseStroke, baseSW });
+      hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false, a: a, nw: a.new || 0, baseStroke, baseSW });
     }
 
     const vacs = [];
@@ -293,6 +293,7 @@
     const out = paintChart(svg, chart, geom, { r0: 3.5 });
     hiList = out.hi; placed = out.placed;
     applyNewHighlight();     // F2: re-apply new-since highlight to the fresh nodes
+    _covKey = coverageKey(); applyCoverageTo(hiList);   // F3: coverage outline (fill is from paintChart)
 
     bindViewHandlers(svg);
     IV.installSelect(svg);   // S1: click / drag-box selection (shared, idempotent)
@@ -422,6 +423,31 @@
     if (_f2r !== State.showNewReport || _f2v !== State.showNewVCM) {
       _f2r = State.showNewReport; _f2v = State.showNewVCM; applyNewHighlight();
     }
+    // F3 serum-coverage colour mode: re-paint fill + pink/black outline when the
+    // selected serum (covSerum) changes — Colour.antigen()/coverageOutline() depend
+    // on it, but a selection change fires only a notify (no re-render).
+    const ck = coverageKey();
+    if (ck !== _covKey) { _covKey = ck; applyCoverageTo(hiList); }
+  }
+
+  // ---- F3: serum-coverage colour mode --------------------------------------
+  // colorBy === "coverage" only *shows* once a serum is selected. coverageKey()
+  // changes whenever the active serum changes, so panels re-paint exactly then.
+  let _covKey = "";
+  function coverageKey() {
+    if (State.colorBy !== "coverage") return "";
+    const s = Colour.coverageSerum && Colour.coverageSerum();
+    return "cov:" + (s ? s.i : "none");
+  }
+  function applyCoverageTo(list) {
+    if (State.colorBy !== "coverage") return;
+    for (const n of list) {
+      if (n.serum || !n.a) continue;
+      n.el.setAttribute("fill", Colour.antigen(n.a));   // pale untitrated / bright titrated
+      const o = Colour.coverageOutline(n.a);
+      if (o) { n.el.setAttribute("stroke", o.stroke); n.el.setAttribute("stroke-width", o.width); }
+      else { n.el.setAttribute("stroke", n.baseStroke); n.el.setAttribute("stroke-width", n.baseSW); }
+    }
   }
 
   // F2 (v6): bold BLACK outline on "new since report/VCM" antigens, raised to front.
@@ -454,6 +480,8 @@
   IV.Map = {
     render, refresh, paintChart, gridLineEls,
     applyNewHighlight: applyNewTo,   // F2: shared with IV.Grid for the small multiples
+    applyCoverage: applyCoverageTo,  // F3: coverage fill+outline, shared with IV.Grid
+    coverageKey,                     // F3: gate grid re-paint on serum change
     get agByIdx() { return agByIdx; },
     zoomIn() { const w = (document.getElementById("mapWrap") || {}); zoomAt((w.clientWidth || 600) / 2, (w.clientHeight || 600) / 2, 1.4); },
     zoomOut() { const w = (document.getElementById("mapWrap") || {}); zoomAt((w.clientWidth || 600) / 2, (w.clientHeight || 600) / 2, 1 / 1.4); },

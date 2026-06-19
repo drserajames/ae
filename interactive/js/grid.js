@@ -28,6 +28,7 @@
   let structureBuilt = false;
   let activeView = "single";
   let lastColorBy = null;
+  let _covKey = "";         // F3: last coverage key (serum) the panels were painted for
 
   // Fit one chart's points into a PW×PH panel (its own orientation, y flipped).
   function fitProj(chart) {
@@ -98,6 +99,9 @@
   }
 
   function applyHighlight() {
+    // F3: re-paint coverage fill+outline only when the selected serum changes.
+    const ck = IV.Map.coverageKey ? IV.Map.coverageKey() : "";
+    const covChanged = ck !== _covKey; _covKey = ck;
     panels.forEach(p => {
       (p.hi || []).forEach(n => {
         const extraHidden = !n.serum && State.onlyMatched && !IV.Tree.normToLeaves[n.norm];
@@ -108,6 +112,7 @@
       });
       // F2: new-since bold outline, identical to the main map (shared from IV.Map).
       IV.Map.applyNewHighlight(p.hi || [], p.svg);
+      if (covChanged) IV.Map.applyCoverage(p.hi || []);
     });
   }
 
