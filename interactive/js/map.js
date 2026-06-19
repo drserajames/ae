@@ -196,7 +196,9 @@
       // Feature 1: serum outline = its strain's colour-by colour. Set fill/stroke as
       // attributes (not the .serum CSS class) so the .lift/.sel highlight classes still
       // override; `sr` is a non-styling marker class. Self-contained — no CSS needed.
-      const o = { class: "pt sr", fill: "none", stroke: serumColour(chart, s), strokeWidth: 1.3 };
+      // fill:"transparent" (not "none") so the whole box is a hit target — sera read
+      // as hollow but the interior is clickable, not just the 1px stroke (#2).
+      const o = { class: "pt sr", fill: "transparent", stroke: serumColour(chart, s), strokeWidth: 1.3 };
       if (s.norm) o.dataNorm = s.norm;
       if (ss.rot) o.rot = ss.rot;
       const node = G.make(ss.shape, X, Y, r, o);
@@ -295,13 +297,26 @@
 
   // Zoom/pan input — bound once to the (reused) #mapSvg node. Conflict-free with S1
   // selection (which owns left-button drag = box select):
-  //   wheel              → zoom to cursor (plain scroll-to-zoom; pinch/ctrl/cmd too)
-  //   shift + wheel      → pan
-  //   right/middle drag  → pan
-  //   double-click       → reset;  on-map +/- buttons step zoom
+  //   wheel               → zoom to cursor (plain scroll-to-zoom; pinch/ctrl/cmd too)
+  //   pan (#feature)      → hold Space + drag, OR the pan-tool toggle, OR right/middle
+  //                         drag, OR shift+wheel. Pan-tool/Space suppress box-select.
+  //   double-click        → reset;  on-map +/-/pan buttons
+  let panMode = false, spaceHeld = false, overMap = false, panBtn = null;
+  function panArmed() { return panMode || spaceHeld; }
+  function setCursor(grabbing) {
+    const svg = document.getElementById("mapSvg");
+    if (svg) svg.style.cursor = grabbing ? "grabbing" : (panArmed() ? "grab" : "");
+  }
+  function reflectPan() {
+    if (panBtn) { panBtn.style.background = panMode ? "#1558d6" : ""; panBtn.style.color = panMode ? "#fff" : ""; }
+    setCursor(false);
+  }
   function bindViewHandlers(svg) {
     if (handlersBound) return;
     handlersBound = true;
+
+    svg.addEventListener("mouseenter", () => { overMap = true; });
+    svg.addEventListener("mouseleave", () => { overMap = false; });
 
     svg.addEventListener("wheel", e => {
       if (!geom) return;
@@ -316,9 +331,12 @@
     }, { passive: false });
 
     let panDrag = null;
-    svg.addEventListener("mousedown", e => {       // non-left button = pan (S1 uses left)
-      if (e.button === 0 || !geom) return;
-      e.preventDefault(); panDrag = { x: e.clientX, y: e.clientY };
+    svg.addEventListener("mousedown", e => {
+      if (!geom) return;
+      // pan on: any non-left button, OR left button while the pan tool / Space is armed.
+      if (!(e.button !== 0 || panArmed())) return;        // else let S1 box-select run
+      if (e.button === 0) e.stopImmediatePropagation();   // suppress S1 for armed left-drag
+      e.preventDefault(); panDrag = { x: e.clientX, y: e.clientY }; setCursor(true);
     });
     svg.addEventListener("contextmenu", e => { if (panDrag) e.preventDefault(); });
     window.addEventListener("mousemove", e => {
@@ -326,10 +344,29 @@
       view.tx += e.clientX - panDrag.x; view.ty += e.clientY - panDrag.y;
       panDrag = { x: e.clientX, y: e.clientY }; clampView(); scheduleApply();
     });
-    window.addEventListener("mouseup", () => { panDrag = null; });
+    window.addEventListener("mouseup", () => { if (panDrag) { panDrag = null; setCursor(false); } });
     svg.addEventListener("dblclick", e => { e.preventDefault(); resetView(); });
 
-    // on-map zoom controls (button equivalents)
+    // Space = temporary hand tool, but only while hovering the map (so Space still
+    // works for focused controls / typing elsewhere).
+    const typing = () => { const a = document.activeElement; return a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); };
+    window.addEventListener("keydown", e => {
+      if (e.code === "Space" && overMap && !typing() && !spaceHeld) { spaceHeld = true; e.preventDefault(); setCursor(false); }
+    });
+    window.addEventListener("keyup", e => { if (e.code === "Space") { spaceHeld = false; setCursor(false); } });
+
+    // on-map controls. #3: move the cluster to the BOTTOM-right so it isn't hidden
+    // under the Overlays panel (lines.js, top-right). Add a discoverable pan toggle.
+    const mapCtl = document.querySelector(".mapCtl");
+    if (mapCtl) {
+      mapCtl.style.top = "auto"; mapCtl.style.bottom = "8px";
+      panBtn = document.createElement("button");
+      panBtn.id = "mapPan"; panBtn.type = "button";
+      panBtn.title = "Pan tool (toggle) — or hold Space and drag, or drag with the right button. Scroll = zoom; plain drag = box-select.";
+      panBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg>';
+      panBtn.onclick = () => { panMode = !panMode; reflectPan(); };
+      mapCtl.insertBefore(panBtn, mapCtl.firstChild);
+    }
     const zi = document.getElementById("mapZoomIn");
     const zo = document.getElementById("mapZoomOut");
     const zr = document.getElementById("mapZoomReset");
@@ -337,6 +374,19 @@
     if (zi) zi.onclick = () => { const c = ctr(); zoomAt(c[0], c[1], 1.4); };
     if (zo) zo.onclick = () => { const c = ctr(); zoomAt(c[0], c[1], 1 / 1.4); };
     if (zr) zr.onclick = resetView;
+
+    // discoverability: a faint one-line hint along the map bottom (between the
+    // bottom-left stress readout and the bottom-right controls).
+    const wrap = document.getElementById("mapWrap");
+    if (wrap && !document.getElementById("mapHint")) {
+      const h = document.createElement("div");
+      h.id = "mapHint";
+      h.style.cssText = "position:absolute;left:50%;bottom:8px;transform:translateX(-50%);" +
+        "font-size:10.5px;color:#999;background:rgba(255,255,255,.8);padding:2px 8px;border-radius:4px;" +
+        "pointer-events:none;z-index:4;white-space:nowrap;";
+      h.textContent = "scroll = zoom · Space- or right-drag = pan · drag = box-select · dbl-click = reset";
+      wrap.appendChild(h);
+    }
   }
 
   function refresh() {
