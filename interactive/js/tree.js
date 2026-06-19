@@ -193,11 +193,9 @@
     normMeta = {};
     for (const ch of IV.DATA.charts) for (const a of ch.antigens) {
       if (!a.norm) continue;
-      const m = normMeta[a.norm] || (normMeta[a.norm] = { vac: false, serology: false, newLevel: 0 });
+      const m = normMeta[a.norm] || (normMeta[a.norm] = { vac: false, serology: false });
       if (a.vac) m.vac = true;
       if (a.serology) m.serology = true;
-      const lvl = +a.new || 0;          // F2: antigen "new" = 1 (since report) / 2 (since VCM)
-      if (lvl > m.newLevel) m.newLevel = lvl;
     }
   }
   const TIP_R = { base: 3, passage: 3.6, serology: 4.4, vaccine: 6 };
@@ -229,29 +227,32 @@
   function tipStrokeFor(vac) { return vac ? "#000" : "rgba(0,0,0,.4)"; }
   function tipStrokeWFor(vac) { return vac ? 1.1 : 0.6; }
 
-  // ---- F2: bold black outline on tips that are "new" (since report / VCM) ----
-  // Antigen semantic `new` = 1 (since previous report) → width 3, 2 (since previous
-  // VCM) → width 6, raised to front — matching the map (chart_modifier.py:127). Driven
-  // by Agent-SELECT's Overlays toggles. Same gating as map.js (newOutlineWidth): the
-  // showNewReport toggle covers new>=1 (so new=2 shows at width 6 under it too), and
-  // showNewVCM covers new==2. Inert until Agent-EXP's antigen `new` field lands.
-  function newOutlineWidth(nw) {
-    let w = 0;
-    if (State.showNewReport && nw >= 1) w = nw === 2 ? 6 : 3;
-    if (State.showNewVCM && nw === 2) w = 6;
-    return w;
+  // ---- tip outlines: base, or the F3 serum-coverage outline when active ----
+  // #3 dropped the new-since bold outline (the new-since highlight is now the shared
+  // dim-others emphasis, via State.emphasis — no per-tip outline here). #4: when a
+  // single serum is selected (coverage mode), a tip whose antigen the serum titrated
+  // gets the pink (≤4-fold) / thicker-black (>4-fold) outline from Colour.coverageOutline,
+  // resolved per tip via norm→antigen on the active chart; untitrated tips dim via
+  // emphasis. Memoised on a coverage key so we only restyle when it actually changes.
+  let _outlineKey = null;
+  function outlineKey() {
+    const s = (Colour.coverageSerum && Colour.coverageSerum()) || null;
+    return State.colorBy + ":" + State.chartIdx + ":" + (s ? s.i : "-");
   }
-  let _newApplied = null;   // memo of last applied flags, so we only restyle on a change
-  function applyNewHighlight(force) {
-    const key = (State.showNewReport ? 1 : 0) + "|" + (State.showNewVCM ? 1 : 0);
-    if (!force && _newApplied === key) return;
-    _newApplied = key;
+  function applyTipOutlines(force) {
+    const key = outlineKey();
+    if (!force && key === _outlineKey) return;
+    _outlineKey = key;
+    const ch = IV.DATA.charts[State.chartIdx];
     for (const t of tipEntries) {
-      const w = newOutlineWidth(t.newLevel);
-      if (w) {
-        t.el.setAttribute("stroke", "#000");
-        t.el.setAttribute("stroke-width", w);
-        if (t.el.parentNode) t.el.parentNode.appendChild(t.el);   // raise to front
+      let out = null;
+      if (Colour.coverageOutline) {
+        const idxs = ch.norm_to_ag && ch.norm_to_ag[t.node.norm];
+        if (idxs && idxs.length) out = Colour.coverageOutline(ch.antigens[idxs[0]]);
+      }
+      if (out) {
+        t.el.setAttribute("stroke", out.stroke);
+        t.el.setAttribute("stroke-width", out.width);
       } else {
         t.el.setAttribute("stroke", tipStrokeFor(t.vac));
         t.el.setAttribute("stroke-width", tipStrokeWFor(t.vac));
@@ -286,11 +287,6 @@
       const rows = byClade[clade].slice().sort((a, b) => a - b);
       if (rows.length < 2) continue;                    // skip singletons (clutter)
       const lo = rows[0], hi = rows[rows.length - 1];
-      // #3: anchor at the MEDIAN row (where the bulk of the clade sits), not the
-      // (lo+hi)/2 midpoint — a few stray tips far from the clade pull the midpoint
-      // into a neighbouring clade (e.g. J.2.4's midpoint landed inside K). The dense
-      // "core" band [p15,p85] is used only to keep the label near the clade when zoomed.
-      const q = p => rows[clamp(Math.round(p * (rows.length - 1)), 0, rows.length - 1)];
       // MRCA = smallest node whose leaf-range [_lo,_hi] still contains [lo,hi]
       let node = root;
       for (;;) {
@@ -298,16 +294,21 @@
         if (!child) break;
         node = child;
       }
+      // #2: anchor the label at the clade's representative internal node (its MRCA)
+      // _y — the branch position in the render (the recursive child-midpoint that the
+      // edges use), NOT the median tip row. For nested/spread clades the median sits
+      // below the branch (K's median 1179 vs its branch y 922); node._y lands the label
+      // on the branch. node._lo/_hi (the MRCA's extent) bound it when zoomed.
       cladeLabels.push({
-        clade, x: node.x, row: q(0.5), rowLo: q(0.15), rowHi: q(0.85),
+        clade, x: node.x, row: node._y, rowLo: node._lo, rowHi: node._hi,
         color: Colour.cladeColor(clade),
         text: short,
         prio: (prio[clade] != null ? prio[clade] : 9999),
       });
     }
   }
-  // Position labels each frame, higher clade_priority first. #3: each label is
-  // anchored at its clade's median row and only NUDGED a little to de-overlap; if it
+  // Position labels each frame, higher clade_priority first. Each label is anchored at
+  // its clade's MRCA branch row (above) and only NUDGED a little to de-overlap; if it
   // can't fit within a small nudge it is dropped, never relocated far from its clade.
   function placeCladeLabels(m) {
     const placed = [], top = 8, bot = fit.H - 6, minGap = 12, maxNudge = 16;
@@ -343,7 +344,7 @@
     const svg = document.getElementById("treeSvg");
     svgEl = svg;
     svg.innerHTML = "";
-    tipNodes = {}; tipEntries = []; _newApplied = null;   // re-apply F2 highlight to fresh tips
+    tipNodes = {}; tipEntries = []; _outlineKey = null;   // re-apply tip outlines to fresh tips
     svg.setAttribute("width", fit.W);
     svg.setAttribute("height", fit.H);   // no viewBox: 1 user unit == 1 px (S1 box-select)
 
@@ -397,7 +398,7 @@
       t.textContent = shortName(lf.name);
       tipsG.appendChild(t);
       tipEntries.push({ node: lf, el: node, kind: g.kind, r: g.r, label: t,
-        vac: g.vac, newLevel: (normMeta[lf.norm] || {}).newLevel || 0 });
+        vac: g.vac });
     });
 
     // clade labels (F4) — one text per labelled clade, positioned in apply()
@@ -532,7 +533,7 @@
 
   // ---- highlight refresh (hover / clade filter / selection) ----
   function refresh() {
-    applyNewHighlight(false);   // F2: re-apply if the "new since" toggle flipped
+    applyTipOutlines(false);    // base outline, or the F3 serum-coverage outline (#4)
     leaves.forEach(lf => {
       (tipNodes[lf.norm] || []).forEach(c => {
         const e = State.emphasis(lf.norm, lf.clade);
