@@ -1,3 +1,4 @@
+#include <cctype>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -174,6 +175,36 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                     if (color_entry.is_object())
                         if (const std::string aa = get_string(color_entry["aa"]); !aa.empty())
                             bar.colors_by_aa.emplace(aa[0], get_string(color_entry["color"]));
+                }
+            }
+            // select-based (dash-bar): a list of {aa:["156N",...], color}
+            if (const auto& selects = entry["selects"]; selects.is_array()) {
+                const auto& sel_array = selects.array();
+                for (std::size_t j = 0; j < sel_array.size(); ++j) {
+                    const auto& sel = sel_array[j];
+                    if (!sel.is_object())
+                        continue;
+                    std::vector<AaCondition> conds;
+                    if (const auto& aa = sel["aa"]; aa.is_array()) {
+                        const auto& aa_arr = aa.array();
+                        for (std::size_t m = 0; m < aa_arr.size(); ++m) {
+                            const std::string cond = get_string(aa_arr[m]); // "156N" -> pos 156, aa 'N'
+                            std::size_t p = 0;
+                            while (p < cond.size() && std::isdigit(static_cast<unsigned char>(cond[p]))) ++p;
+                            if (p > 0 && p < cond.size())
+                                conds.push_back(AaCondition{std::stoi(cond.substr(0, p)), cond[p]});
+                        }
+                    }
+                    if (!conds.empty())
+                        bar.selects.emplace_back(std::move(conds), get_string(sel["color"]));
+                }
+            }
+            if (const auto& legend = entry["legend"]; legend.is_array()) {
+                const auto& leg_array = legend.array();
+                for (std::size_t j = 0; j < leg_array.size(); ++j) {
+                    const auto& le = leg_array[j];
+                    if (le.is_object())
+                        bar.legend.emplace_back(get_string(le["text"]), get_string(le["color"]));
                 }
             }
             params.dash_bars.push_back(std::move(bar));

@@ -98,13 +98,21 @@ namespace ae::tal
         NodeApply apply{};
     };
 
-    // A per-leaf dash column keyed by the amino acid at a position (acmacs-tal
-    // dash-bar-aa-at). Each shown leaf gets a dash coloured by its aa at `pos` (1-based):
-    // by `colors_by_aa` when given, else by frequency (most common = grey, variants pop).
+    // An amino-acid condition "<pos><aa>" (1-based position, required residue), e.g. "156N".
+    struct AaCondition { int pos{0}; char aa{0}; };
+
+    // A per-leaf dash column (acmacs-tal dash-bar / dash-bar-aa-at). Two flavours:
+    //  - pos-based (dash-bar-aa-at): colour each shown leaf by its aa at `pos` (1-based), via
+    //    `colors_by_aa` when given else by frequency (most common = grey, variants pop);
+    //  - select-based (dash-bar): colour each leaf by the FIRST matching `selects` entry (all of
+    //    its conditions hold), else not drawn.
+    // `legend` is the position+aa swatch list shown (in colour) at the bottom of the bar.
     struct DashBarAAAt
     {
         int pos{0};
         std::map<char, std::string> colors_by_aa{}; // aa char -> colour string ("#rrggbb"/name)
+        std::vector<std::pair<std::vector<AaCondition>, std::string>> selects{}; // (conditions, colour)
+        std::vector<std::pair<std::string, std::string>> legend{};               // (text, colour)
     };
 
     // A horizontal section of the tree (acmacs-tal hz-sections): the contiguous run of

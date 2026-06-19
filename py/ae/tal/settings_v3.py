@@ -303,6 +303,21 @@ def _expand_seq_id(sid: str) -> list:
     return [sid]
 
 
+def _dash_bar_legend(labels) -> list:
+    """A dash-bar's legend: [{text, color}] for each real label (text != ".") so the bar can
+    show its position+amino-acid variants in their colours (AD dash-bar labels). `labels` is
+    either an object keyed by aa (dash-bar-aa-at) or a list (dash-bar)."""
+    out: list = []
+    entries = labels.values() if isinstance(labels, dict) else (labels if isinstance(labels, list) else [])
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        text = e.get("text", "")
+        if isinstance(text, str) and text and text != "." and len(text) > 1:
+            out.append({"text": text, "color": e.get("color", "")})
+    return out
+
+
 def _select(select: dict, warnings: list) -> dict:
     out: dict = {}
     if "seq_id" in select:
@@ -564,6 +579,27 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                     if isinstance(colors, dict):
                         bar["colors"] = [{"aa": aa, "color": col}
                                          for aa, col in colors.items() if isinstance(aa, str) and aa]
+                    legend = _dash_bar_legend(cmd.get("labels"))
+                    if legend:
+                        bar["legend"] = legend
+                    schema.setdefault("dash_bars", []).append(bar)
+            elif name == "dash-bar":
+                # AD's clade/aa-select bar (dash-bar.cc): each leaf is coloured by the FIRST
+                # matching `nodes` select (a set of "<pos><aa>" conditions that must ALL hold);
+                # `labels` is the legend. Port as a select-based dash bar.
+                selects = []
+                for nd in cmd.get("nodes", []):
+                    if not isinstance(nd, dict):
+                        continue
+                    sel = nd.get("select", {})
+                    aa = sel.get("aa") if isinstance(sel, dict) else None
+                    if isinstance(aa, list) and aa and "color" in nd:
+                        selects.append({"aa": [str(a) for a in aa], "color": nd["color"]})
+                if selects:
+                    bar = {"selects": selects}
+                    legend = _dash_bar_legend(cmd.get("labels"))
+                    if legend:
+                        bar["legend"] = legend
                     schema.setdefault("dash_bars", []).append(bar)
             elif name == "nodes":
                 select_raw, apply_raw = cmd.get("select", {}), cmd.get("apply", {})
