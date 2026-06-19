@@ -185,6 +185,67 @@ window.IV = window.IV || {};
       return State._contCache[norm] || null;
     },
 
+    // ---- #3 (v7): new-since highlight as a "keep" emphasis layer ------------
+    // When showNewReport/showNewVCM is on, antigens with the matching `new` level
+    // are kept and the rest dim (folded into emphasis() — no bold outline). Keep
+    // set: showNewReport -> new==1; showNewVCM -> new>=1 (union when both on).
+    _newCache: null, _newDataFlag: null,
+    _newOf(norm) {                       // lazy norm -> max `new` level across charts
+      if (!State._newCache) {
+        const m = Object.create(null), d = IV.DATA;
+        if (d) (d.charts || []).forEach(ch => (ch.antigens || []).forEach(a => {
+          if (a.norm && a.new != null) { const v = +a.new; if (!(m[a.norm] >= v)) m[a.norm] = v; }
+        }));
+        State._newCache = m;
+      }
+      return State._newCache[norm];
+    },
+    _hasNewData() {
+      if (State._newDataFlag == null) {
+        let has = false; const d = IV.DATA;
+        for (const ch of (d && d.charts || [])) { for (const a of (ch.antigens || [])) { if (a.new != null) { has = true; break; } } if (has) break; }
+        State._newDataFlag = has;
+      }
+      return State._newDataFlag;
+    },
+    _newActive() { return (State.showNewReport || State.showNewVCM) && State._hasNewData(); },
+    _newMatch(norm) {
+      const n = State._newOf(norm);
+      if (n == null) return false;
+      return (State.showNewReport && n === 1) || (State.showNewVCM && n >= 1);
+    },
+
+    // ---- #4 (v7): serum-coverage — single source of truth ------------------
+    // Coverage is active when the Colour menu is in "coverage" mode AND EXACTLY
+    // one serum is selected (typically via double-click-isolate). Then antigens
+    // titrated against that serum are kept and untitrated ones dim (folded into
+    // emphasis()); panels draw the pink/black outlines on the titrated ones.
+    // map and tree both read coverageSerum()/coverageTitrated() so they agree.
+    _covCache: null,
+    _coverage() {
+      const active = State.colorBy === "coverage" && State.selected.size === 1;
+      if (!active) { State._covCache = null; return null; }
+      const norm = State.selected.values().next().value;
+      const key = State.chartIdx + "\x00" + norm;
+      if (State._covCache && State._covCache.key === key) return State._covCache.val;
+      const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
+      let val = null;
+      const s = ch && (ch.sera || []).find(sr => sr.norm === norm);
+      if (s && ch.logged) {                      // need E2 titers to judge titration
+        const titrated = new Set();
+        (ch.antigens || []).forEach(a => {
+          const row = ch.logged[a.i];
+          if (row && row[s.i] != null) titrated.add(a.norm);
+        });
+        val = { serum: { i: s.i, norm: s.norm }, titrated };
+      }
+      State._covCache = { key, val };
+      return val;
+    },
+    coverageActive() { return !!State._coverage(); },
+    coverageSerum() { const c = State._coverage(); return c ? c.serum : null; },
+    coverageTitrated(norm) { const c = State._coverage(); return !!(c && c.titrated.has(norm)); },
+
     // back-compat clade aliases (v3 F8 names; ui.js clade legend still calls these)
     cladeMode(c) { return State.attrMode("clade", c); },
     cladeZRank(c) { return State.attrZRank("clade", c); },
@@ -197,8 +258,9 @@ window.IV = window.IV || {};
     //   sel   — persistently selected (ring)
     //   lift  — transient hover focus (active)
     //   dim   — faded: clade-hidden, sent-to-back (F2), a hover focusing someone
-    //           else, OR an emphasis (manual selection or a front F2 group) exists
-    //           and this point is none of it.
+    //           else, OR a "keep" layer is active (manual selection, a front F2
+    //           group, the new-since set #3, or serum-coverage titration #4) and
+    //           this point is in none of the active keep-sets.
     //   z     — F2 draw-order rank (-1 back, 0 normal, 1 front); panels may reorder.
     emphasis(norm, clade, extraHidden = false) {
       const hidden = extraHidden || State.isCladeHidden(clade);
@@ -212,9 +274,15 @@ window.IV = window.IV || {};
       const isFront = mode === "select", isBack = mode === "back";
       const hasFront = attr ? State._anyFront(attr) : false;
 
-      // a "front" group behaves as an emphasis layer alongside the manual selection
-      const hasEmph = State.selected.size > 0 || hasFront;
-      const isEmph = isSel || isFront;
+      // #3 new-since + #4 coverage: additional "keep" layers that dim non-members
+      const newActive = State._newActive();
+      const newKeep = newActive && State._newMatch(norm);
+      const cov = State._coverage();
+      const covKeep = !!cov && cov.titrated.has(norm);
+
+      // any active keep-layer dims everything not in one of the active keep-sets
+      const hasEmph = State.selected.size > 0 || hasFront || newActive || !!cov;
+      const isEmph = isSel || isFront || newKeep || covKeep;
       const dim = hidden || isBack ||
         (!!State.active && !isActive) ||
         (hasEmph && !isEmph && !isActive);
@@ -307,14 +375,16 @@ window.IV = window.IV || {};
 
     // #2 (v6): double-click a point to ISOLATE it — select only that one strain,
     // bypassing the F1 homolog expansion, so a serum's lines/coverage apply to just
-    // that serum. Capture phase + stopPropagation so a point dblclick beats the
-    // panel's (bubble-phase) zoom-reset dblclick; a dblclick on empty space falls
-    // through untouched and still resets the view.
+    // that serum. Capture phase + stopImmediatePropagation so a point dblclick beats
+    // the panel's zoom-reset dblclick even when it is registered on the SAME node
+    // (#1 v7: map.js binds resetView on #mapSvg too — plain stopPropagation does not
+    // block a same-node listener). A dblclick on empty space falls through untouched
+    // and still resets the view.
     svg.addEventListener("dblclick", e => {
       const hit = e.target.closest("[data-norm]");
       if (!hit) return;            // empty space → let the panel zoom-reset handle it
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       State.setSelection([hit.getAttribute("data-norm")]);
     }, true);
   };
