@@ -171,10 +171,10 @@ namespace ae::draw
         cairo_restore(context_);
     }
 
-    void CairoPdf::text(double x, double y, std::string_view utf8, double font_size, Color color, bool center)
+    void CairoPdf::text(double x, double y, std::string_view utf8, double font_size, Color color, bool center, bool monospace)
     {
         const std::string str{utf8};
-        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_select_font_face(context_, monospace ? "monospace" : "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(context_, font_size);
         cairo_text_extents_t ext;
         cairo_text_extents(context_, str.c_str(), &ext);

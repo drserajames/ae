@@ -455,10 +455,11 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         name_y.reserve(layout.leaves.size());
         for (const auto& leaf_node : layout.leaves)
             name_y.emplace(leaf_node.name, leaf_node.y);
-        // AD confines the separators to the matrix/column area — NOT across the tree or the
-        // left margin. Span from the start of the time-series matrix to the page's right edge.
-        const double sep_x0 = ts_w > 0.0 ? x_ts0 : (x_clade0 > 0.0 ? x_clade0 : margin + hz_w + tree_w);
-        const double sep_x_end = width - margin;
+        // AD draws the separators across the MATRIX only and STOPS them at the clade bracket
+        // column — never across the tree/left margin nor into the clades/dash-bars. Span from
+        // the matrix start to the clade column's left edge (else the dash bars / right edge).
+        const double sep_x0 = ts_w > 0.0 ? x_ts0 : margin + hz_w + tree_w;
+        const double sep_x_end = clade_w > 0.0 ? x_clade0 : (dash_w > 0.0 ? x_dash0 : width - margin);
         for (const auto& section : params.hz_sections) {
             const auto first_it = name_y.find(section.first);
             if (first_it == name_y.end())
@@ -617,9 +618,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double angle = clockwise ? 90.0 : -90.0;
         // perpendicular offset to centre the text band in the slot; the sign flips with rotation
         const double xoff = clockwise ? -slot_fs * 0.35 : slot_fs * 0.35;
-        // reading anchors: clockwise reads downward (start high), anticlockwise reads upward (start low)
+        // reading anchors: clockwise reads downward (start high), anticlockwise reads upward.
+        // Keep BOTH the top and bottom labels TIGHT to the matrix (AD): the top label ends just
+        // above the first row (anchor = top - its length), the bottom starts just below.
+        const double sample_len = pdf.text_size("May 24", slot_fs).first;
         const double bottom_anchor_y = clockwise ? bottom + slot_fs * 0.6 : bottom + bottom_reserve * 0.9;
-        const double top_anchor_y = clockwise ? top - bottom_reserve * 0.9 : top - 2.0;
+        const double top_anchor_y = clockwise ? top - sample_len - 2.0 : top - 2.0;
         for (std::size_t i = 0; i < n_slots; ++i) {
             const std::string& slot_first = time_series.slots[i].first;     // "YYYY-MM-DD"
             std::string label;
@@ -793,9 +797,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 m = tree.parent(m);
             }
         };
-        // AD draws these small and grey (all-nodes label colour grey30) with a tether (leader
-        // line) to the branch. Default size kept modest so adjacent labels don't crowd.
-        const double mrca_fs = 0.008 * height;
+        // AD draws these small, grey (all-nodes label colour grey30) and MONOSPACE, with a
+        // tether (leader line) to the branch. Slightly smaller than before to match AD.
+        const double mrca_fs = 0.0068 * height;
         struct Placed { double nx, ny, tx, ty, fs, x0, x1, y0, y1; std::string text; Color color; };
         std::vector<Placed> placed;
         for (const auto& label : params.mrca_labels) {
@@ -844,7 +848,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const double anchor_x = p.tx < p.nx ? p.x1 : p.tx;
             if (std::abs(anchor_x - p.nx) > p.fs * 0.5 || std::abs(p.ty - p.ny) > p.fs * 0.5)
                 pdf.line(p.nx, p.ny, anchor_x, p.ty - p.fs * 0.3, GREY, 0.3);
-            pdf.text(p.tx, p.ty, p.text, p.fs, p.color, /*center=*/false);
+            pdf.text(p.tx, p.ty, p.text, p.fs, p.color, /*center=*/false, /*monospace=*/true);
         }
     }
 

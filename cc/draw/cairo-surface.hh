@@ -49,7 +49,7 @@ namespace ae::draw
         void path_negative_move(const double* first, const double* last, Color outline, double outline_width, Color fill);
         // Draw UTF-8 text via Cairo's built-in font API. When center is true the text's
         // bounding box is centred on (x, y); otherwise (x, y) is the box's top-left.
-        void text(double x, double y, std::string_view utf8, double font_size, Color color, bool center = true);
+        void text(double x, double y, std::string_view utf8, double font_size, Color color, bool center = true, bool monospace = false);
         // Draw UTF-8 text rotated by angle_degrees (positive = clockwise; -90 reads upward)
         // about (x, y), with (x, y) as the baseline-left anchor of the first glyph.
         void text_rotated(double x, double y, std::string_view utf8, double font_size, Color color, double angle_degrees);
