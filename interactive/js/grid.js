@@ -95,6 +95,7 @@
         t.textContent = "no positioned points"; p.svg.appendChild(t);
       }
     });
+    _covKey = "";        // panels were rebuilt → force the coverage re-apply below
     applyHighlight();
   }
 
@@ -102,6 +103,7 @@
     // F3: re-paint coverage fill+outline only when the selected serum changes.
     const ck = IV.Map.coverageKey ? IV.Map.coverageKey() : "";
     const covChanged = ck !== _covKey; _covKey = ck;
+    const activeChart = IV.DATA.charts[State.chartIdx];   // coverage is per the active chart
     panels.forEach(p => {
       (p.hi || []).forEach(n => {
         const extraHidden = !n.serum && State.onlyMatched && !IV.Tree.normToLeaves[n.norm];
@@ -111,8 +113,10 @@
         n.el.classList.toggle("sel", e.sel);
       });
       // v7 #3: new-since is a dim-the-others emphasis now (handled by the loop above
-      // via State.emphasis()), no bold outline. F3 coverage re-paints on serum change.
-      if (covChanged) IV.Map.applyCoverage(p.hi || []);
+      // via State.emphasis()), no bold outline. F3 coverage applies only to the active
+      // chart's panel — covSerum/titers come from chartIdx, so other panels would get
+      // a meaningless index-mapped outline.
+      if (covChanged && p.chart === activeChart) IV.Map.applyCoverage(p.hi || []);
     });
   }
 

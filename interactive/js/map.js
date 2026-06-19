@@ -292,7 +292,7 @@
 
     const out = paintChart(svg, chart, geom, { r0: 3.5 });
     hiList = out.hi; placed = out.placed;
-    _covKey = coverageKey(); applyCoverageTo(hiList);   // F3: coverage outline (fill is from paintChart)
+    applyCoverageTo(hiList);   // F3: coverage outline on the fresh nodes (no-op if not coverage)
 
     bindViewHandlers(svg);
     IV.installSelect(svg);   // S1: click / drag-box selection (shared, idempotent)
@@ -426,19 +426,18 @@
     }
     // v7 #3: new-since is now a dim-the-others emphasis folded into State.emphasis()
     // by Agent-SELECT — no special outline here, the loop above already dims.
-    // F3 serum-coverage: re-paint fill + pink/black outline when the selected serum
-    // changes — Colour.antigen()/coverageOutline() depend on it, but a selection
-    // change fires only a notify (no re-render).
-    const ck = coverageKey();
-    if (ck !== _covKey) { _covKey = ck; applyCoverageTo(hiList); }
+    // F3 serum-coverage: always (re)apply in coverage mode. An earlier ck!=_covKey
+    // gate could go stale and skip the re-apply (e.g. a selection set via the
+    // double-click-isolate path), leaving antigens with their base stroke — so the
+    // pink/black outlines never rendered. applyCoverageTo() no-ops when not in
+    // coverage mode, so this costs nothing otherwise.
+    applyCoverageTo(hiList);
   }
 
   // ---- F3: serum-coverage colour mode (v7) ---------------------------------
-  // Active only when EXACTLY one serum is selected (v7 #4). coverageKey() changes
-  // when that serum changes, so panels re-paint exactly then. Colour.antigen()
-  // gives the fill (untitrated points are dimmed via emphasis(), not pale-tinted)
-  // and Colour.coverageOutline() the pink/black outline (widths owned by colour.js).
-  let _covKey = "";
+  // Active only when EXACTLY one serum is selected (v7 #4). Colour.antigen() gives
+  // the fill (untitrated points are dimmed via emphasis(), not pale-tinted) and
+  // Colour.coverageOutline() the pink/black outline (widths owned by colour.js).
   function singleSelectedSerum() {
     const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
     if (!ch || !ch.sera) return null;
