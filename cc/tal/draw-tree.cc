@@ -566,7 +566,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double bottom = dev_y(layout.height + 0.5);
         for (std::size_t i = 0; i <= n_slots; ++i) // separators
             pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, GREY, 0.3);
-        const double dash_w = std::clamp(vstep * 0.5, 0.3, 2.5);
+        const double dash_w = std::clamp(vstep * 0.5, 0.15, 2.5); // thin marks (AD line_width 0.1) -> more white space
         for (const auto& node : layout.leaves) {
             const Leaf& leaf = tree.leaf(node_index_t{node.node});
             const std::string date = canonical_date(leaf.date);
@@ -575,7 +575,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             for (std::size_t i = 0; i < n_slots; ++i) {
                 if (time_series.slots[i].first <= date && date < time_series.slots[i].after_last) {
                     const double y = dev_y(node.y);
-                    pdf.line(x_ts0 + (static_cast<double>(i) + 0.2) * slot_w, y, x_ts0 + (static_cast<double>(i) + 0.8) * slot_w, y, leaf_color(leaf), dash_w);
+                    pdf.line(x_ts0 + (static_cast<double>(i) + 0.25) * slot_w, y, x_ts0 + (static_cast<double>(i) + 0.75) * slot_w, y, leaf_color(leaf), dash_w);
                     break;
                 }
             }
@@ -621,7 +621,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     if (dash_w > 0.0) {
         static const std::array<Color, 8> freq_palette{GREY, RED, BLUE, GREEN, ORANGE, PURPLE, Color{0x008080}, MAGENTA};
         const double dash_len = dash_col_w * 0.6;
-        const double dash_lw = std::clamp(vstep * 0.6, 0.3, 2.5);
+        const double dash_lw = std::clamp(vstep * 0.6, 0.15, 2.5); // thin marks, AD-like white space
         const double pos_fs = std::clamp(dash_col_w * 0.5, 6.0, 11.0);
         const double bottom = dev_y(layout.height + 0.5);
         for (std::size_t b = 0; b < params.dash_bars.size(); ++b) {
