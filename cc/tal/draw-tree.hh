@@ -123,6 +123,9 @@ namespace ae::tal
         std::string ladderize{};             // "" | "none" | "number-of-leaves" | "max-edge-length" — reorder children before layout
         bool labels{false};                  // draw each leaf's name to the right of its tip
         bool labels_avoid_collisions{true};  // suppress leaf labels that would overlap the one above
+        bool tip_names{false};               // draw EVERY shown leaf's name at its tip, tiny (~row height),
+                                             // no reserved column / no collision avoidance (AD DrawTree,
+                                             // faint at page scale, readable when zoomed)
         bool color_by_clade{false};  // colour leaf edges/labels/dashes by first clade
         bool color_by_continent{false}; // colour leaves by geographic continent (acmacs-tal color-by continent)
         bool color_edges{false};     // recolour tree EDGES by the active mode (tree color-by); else edges stay black

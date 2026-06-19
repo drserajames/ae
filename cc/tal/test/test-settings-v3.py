@@ -64,6 +64,35 @@ def check_dash_bar_colors() -> dict:
     }
 
 
+def check_tip_names_and_edges() -> dict:
+    """node-id-size enables per-leaf tip names; a tree color-by sets color_edges (so edges
+    recolour) while time-series/clades-whocc continent does NOT (edges stay black)."""
+    tal_tip = {"tal": [{"N": "node-id-size", "size": 0.0002}]}
+    s_tip, _ = translate(tal_tip)
+    tal_tree_cb = {"tal": [{"N": "tree", "color-by": "continent"}]}
+    s_tree, _ = translate(tal_tree_cb)
+    tal_ts = {"tal": [{"N": "time-series", "start": "2024-03", "end": "2026-03", "color-by": "continent"}]}
+    s_ts, _ = translate(tal_ts)
+    return {
+        "node-id-size -> tip_names": s_tip.get("tip_names") is True,
+        "tree color-by continent sets color_edges": s_tree.get("color_edges") is True,
+        "time-series continent does NOT set color_edges": "color_edges" not in s_ts,
+    }
+
+
+def check_time_series_slot() -> dict:
+    """time-series slot.width / label scale+rotation pass through to the schema."""
+    tal = {"tal": [{"N": "time-series", "start": "2024-03", "end": "2026-03",
+                    "slot": {"width": 0.005, "label": {"scale": 0.9, "rotation": "clockwise"}}}]}
+    s, _ = translate(tal)
+    ts = s.get("time_series", {})
+    return {
+        "slot.width passed": ts.get("slot_width") == 0.005,
+        "label.scale passed": ts.get("label_scale") == 0.9,
+        "label.rotation passed": ts.get("label_rotation") == "clockwise",
+    }
+
+
 def check_eval_condition() -> dict:
     """Direct grammar checks for the if-condition evaluator (port of eval_condition)."""
     d = {"whocc": "true", "off_flag": "false", "region": "EUROPE", "blank": ""}
@@ -141,6 +170,8 @@ def main():
     checks.update(check_imported_no_curation())
     checks.update(check_seq_id_alternation())
     checks.update(check_dash_bar_colors())
+    checks.update(check_tip_names_and_edges())
+    checks.update(check_time_series_slot())
     failures = [name for name, ok in checks.items() if not ok]
     if failures:
         print("FAIL:")

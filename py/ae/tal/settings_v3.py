@@ -607,7 +607,12 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                         defines.pop(var, None)
                 else:
                     warnings.append("for-each needs array 'values' and 'do' — skipped")
-            elif name in ("margins", "gap", "node-id-size", "set"):
+            elif name == "node-id-size":
+                # AD's report annotates every leaf tip with its strain name (tiny vector text,
+                # ~row height — faint at page scale, readable when zoomed). The presence of a
+                # node-id-size mod signals that annotation; enable per-leaf tip names.
+                schema["tip_names"] = True
+            elif name in ("margins", "gap", "set"):
                 pass  # no tal-draw equivalent / no-op for a one-off render
             else:
                 warnings.append(f"command {name!r} not handled — skipped")

@@ -398,6 +398,13 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const Color edge_col = edge_color_for(leaf); // tree edge colour (black under clades-whocc)
         const auto edge_it = edge_color_override.find(node.node);
         pdf.line(dev_x(node.x - leaf.edge.get()), y, dev_x(node.x), y, edge_it != edge_color_override.end() ? edge_it->second : edge_col, line_width);
+        // AD tip names: every shown leaf's seq_id at its tip, ~row height (vertical_step*0.8,
+        // UNCLAMPED so one fits per row), no column / no collision — faint at page scale,
+        // readable on zoom. Drawn in the leaf's matrix colour (AD coloring().color(leaf)).
+        if (params.tip_names && !leaf.name.empty()) {
+            const double tip_fs = vstep * 0.8;
+            pdf.text(dev_x(node.x) + tip_fs * 0.5, y + tip_fs * 0.3, leaf.name, tip_fs, color, /*center=*/false);
+        }
         if (params.labels && !leaf.name.empty()) {
             const auto lcol_it = label_color_override.find(node.node);
             const auto lscale_it = label_scale_override.find(node.node);
