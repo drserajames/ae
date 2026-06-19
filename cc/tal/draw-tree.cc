@@ -291,10 +291,13 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
 
     double cursor = margin + tree_w;
     double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0}, x_dash0{0.0};
+    // AD column order (left→right past the tree): labels, time-series matrix, clades, then the
+    // aa dash-bars (rightmost). The clades column's horizontal arms extend to its own right edge,
+    // just left of the dash-bars.
     if (label_w > 0.0) { cursor += gap; x_label0 = cursor; cursor += label_w; }
     if (ts_w > 0.0)    { cursor += gap; x_ts0 = cursor;    cursor += ts_w; }
-    if (dash_w > 0.0)  { cursor += gap; x_dash0 = cursor;  cursor += dash_w; }
-    if (clade_w > 0.0) { cursor += gap; x_clade0 = cursor; cursor += clade_w; } // clade column rightmost
+    if (clade_w > 0.0) { cursor += gap; x_clade0 = cursor; cursor += clade_w; }
+    if (dash_w > 0.0)  { cursor += gap; x_dash0 = cursor;  cursor += dash_w; } // aa dash-bars rightmost
 
     // --- legend items for the active colouring mode (aa-at-pos > continent > clade) ---
     std::vector<std::pair<std::string, Color>> legend_items;
