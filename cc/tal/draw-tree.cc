@@ -443,7 +443,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // --- title (top-left, near the very top; acmacs-tal Title draws at offset [5,5]) ---
     if (!params.title.empty()) {
         const double title_fs = std::clamp(0.015 * height, 8.0, 26.0);
-        pdf.text(margin, vmargin * 0.5 + title_fs, params.title, title_fs, BLACK, /*center=*/false);
+        pdf.text(margin, title_fs * 0.95, params.title, title_fs, BLACK, /*center=*/false); // near the very top (AD offset [5,5])
     }
 
     // --- hz-sections: faint horizontal separator across the figure at each section's top
