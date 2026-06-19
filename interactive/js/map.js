@@ -246,8 +246,8 @@
       node.setAttribute("fill", Colour.antigen(a));
       node.setAttribute("fill-opacity", a.ref ? 0.55 : 0.85);
       // #10: passage is shown by shape — no passage ring. Vaccine/ref get a black
-      // outline; everything else a thin neutral edge. Remember the base stroke so F2
-      // can restore it when the new-since highlight turns off.
+      // outline; everything else a thin neutral edge. Remember the base stroke so the
+      // F3 coverage outline can restore it when a point is untitrated / off.
       const baseStroke = a.vac ? "#000" : a.ref ? "#000" : "rgba(0,0,0,.35)";
       const baseSW = a.vac ? 1.6 : a.ref ? 1.3 : 0.6;
       node.setAttribute("stroke", baseStroke); node.setAttribute("stroke-width", baseSW);
@@ -258,7 +258,7 @@
       svg.appendChild(node);
       (nodes[a.norm] = nodes[a.norm] || []).push(node);
       plc.push({ el: node, shape: sh.shape, rot: sh.rot || 0, x: a.x, y: a.y, r });
-      hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false, a: a, nw: a.new || 0, baseStroke, baseSW });
+      hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false, a: a, baseStroke, baseSW });
     }
 
     const vacs = [];
@@ -292,7 +292,6 @@
 
     const out = paintChart(svg, chart, geom, { r0: 3.5 });
     hiList = out.hi; placed = out.placed;
-    applyNewHighlight();     // F2: re-apply new-since highlight to the fresh nodes
     _covKey = coverageKey(); applyCoverageTo(hiList);   // F3: coverage outline (fill is from paintChart)
 
     bindViewHandlers(svg);
@@ -367,7 +366,12 @@
       panDrag = { x: e.clientX, y: e.clientY }; clampView(); scheduleApply();
     });
     window.addEventListener("mouseup", () => { if (panDrag) { panDrag = null; setCursor(false); } });
-    svg.addEventListener("dblclick", e => { e.preventDefault(); resetView(); });
+    // v7 #1: a dblclick ON a point is S1's double-click-to-isolate (same #mapSvg node,
+    // so stopPropagation can't shield it) — leave it alone; only reset on empty space.
+    svg.addEventListener("dblclick", e => {
+      if (e.target.closest("[data-norm]")) return;
+      e.preventDefault(); resetView();
+    });
 
     // Space = temporary hand tool, but only while hovering the map (so Space still
     // works for focused controls / typing elsewhere).
@@ -420,66 +424,49 @@
       n.el.classList.toggle("lift", e.lift);
       n.el.classList.toggle("sel", e.sel);
     }
-    if (_f2r !== State.showNewReport || _f2v !== State.showNewVCM) {
-      _f2r = State.showNewReport; _f2v = State.showNewVCM; applyNewHighlight();
-    }
-    // F3 serum-coverage colour mode: re-paint fill + pink/black outline when the
-    // selected serum (covSerum) changes — Colour.antigen()/coverageOutline() depend
-    // on it, but a selection change fires only a notify (no re-render).
+    // v7 #3: new-since is now a dim-the-others emphasis folded into State.emphasis()
+    // by Agent-SELECT — no special outline here, the loop above already dims.
+    // F3 serum-coverage: re-paint fill + pink/black outline when the selected serum
+    // changes — Colour.antigen()/coverageOutline() depend on it, but a selection
+    // change fires only a notify (no re-render).
     const ck = coverageKey();
     if (ck !== _covKey) { _covKey = ck; applyCoverageTo(hiList); }
   }
 
-  // ---- F3: serum-coverage colour mode --------------------------------------
-  // colorBy === "coverage" only *shows* once a serum is selected. coverageKey()
-  // changes whenever the active serum changes, so panels re-paint exactly then.
+  // ---- F3: serum-coverage colour mode (v7) ---------------------------------
+  // Active only when EXACTLY one serum is selected (v7 #4). coverageKey() changes
+  // when that serum changes, so panels re-paint exactly then. Colour.antigen()
+  // gives the fill (untitrated points are dimmed via emphasis(), not pale-tinted)
+  // and Colour.coverageOutline() the pink/black outline (widths owned by colour.js).
   let _covKey = "";
+  function singleSelectedSerum() {
+    const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
+    if (!ch || !ch.sera) return null;
+    let found = null, n = 0;
+    for (const s of ch.sera) {
+      if (s.norm && State.selected.has(s.norm)) { if (++n > 1) return null; found = s; }
+    }
+    return n === 1 ? found : null;
+  }
   function coverageKey() {
     if (State.colorBy !== "coverage") return "";
-    const s = Colour.coverageSerum && Colour.coverageSerum();
+    const s = singleSelectedSerum();
     return "cov:" + (s ? s.i : "none");
   }
   function applyCoverageTo(list) {
     if (State.colorBy !== "coverage") return;
+    const one = singleSelectedSerum();
     for (const n of list) {
       if (n.serum || !n.a) continue;
-      n.el.setAttribute("fill", Colour.antigen(n.a));   // pale untitrated / bright titrated
-      const o = Colour.coverageOutline(n.a);
+      n.el.setAttribute("fill", Colour.antigen(n.a));
+      const o = one ? Colour.coverageOutline(n.a) : null;
       if (o) { n.el.setAttribute("stroke", o.stroke); n.el.setAttribute("stroke-width", o.width); }
       else { n.el.setAttribute("stroke", n.baseStroke); n.el.setAttribute("stroke-width", n.baseSW); }
     }
   }
 
-  // F2 (v6): bold BLACK outline on "new since report/VCM" antigens, raised to front.
-  // Driven by Agent-SELECT's State.showNewReport (new>=1) / showNewVCM (new==2);
-  // width 3 for new=1, 6 for new=2 (chart_modifier). Restores the base stroke when off.
-  let _f2r = false, _f2v = false;
-  // Outline width for an antigen given its `new` value and the active toggles, or 0.
-  // Shared with IV.Grid so the small multiples highlight identically.
-  function newOutlineWidth(nw) {
-    if (!nw) return 0;
-    let w = 0;
-    if (State.showNewReport && nw >= 1) w = nw === 2 ? 6 : 3;
-    if (State.showNewVCM && nw === 2) w = 6;
-    return w;
-  }
-  // Apply the new-since highlight to a hi-list of {el, serum, nw, baseStroke, baseSW}
-  // within `svg`, restoring base strokes when off and raising highlighted to front.
-  function applyNewTo(list, svg) {
-    const front = [];
-    for (const n of list) {
-      if (n.serum || !n.nw) continue;
-      const w = newOutlineWidth(n.nw);
-      if (w) { n.el.setAttribute("stroke", "#000"); n.el.setAttribute("stroke-width", w); front.push(n.el); }
-      else { n.el.setAttribute("stroke", n.baseStroke); n.el.setAttribute("stroke-width", n.baseSW); }
-    }
-    if (svg) for (const el of front) svg.appendChild(el);   // raise to front
-  }
-  function applyNewHighlight() { applyNewTo(hiList, document.getElementById("mapSvg")); }
-
   IV.Map = {
     render, refresh, paintChart, gridLineEls,
-    applyNewHighlight: applyNewTo,   // F2: shared with IV.Grid for the small multiples
     applyCoverage: applyCoverageTo,  // F3: coverage fill+outline, shared with IV.Grid
     coverageKey,                     // F3: gate grid re-paint on serum change
     get agByIdx() { return agByIdx; },

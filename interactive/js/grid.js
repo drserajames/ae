@@ -110,8 +110,8 @@
         n.el.classList.toggle("lift", e.lift);
         n.el.classList.toggle("sel", e.sel);
       });
-      // F2: new-since bold outline, identical to the main map (shared from IV.Map).
-      IV.Map.applyNewHighlight(p.hi || [], p.svg);
+      // v7 #3: new-since is a dim-the-others emphasis now (handled by the loop above
+      // via State.emphasis()), no bold outline. F3 coverage re-paints on serum change.
       if (covChanged) IV.Map.applyCoverage(p.hi || []);
     });
   }
