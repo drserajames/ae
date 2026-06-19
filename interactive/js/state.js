@@ -40,6 +40,15 @@ window.IV = window.IV || {};
     setColorBy(mode) { State.colorBy = mode; },
     setOnlyMatched(on) { State.onlyMatched = on; State.notify(); },
 
+    // ---- F2 (v6): "new since report / VCM" highlight toggles ----------------
+    // Driven by the Overlays checkboxes (Agent-LINES). map/tree render read these
+    // and bold-outline antigens/tips whose semantic `new` is 1 (since previous
+    // report) or 2 (since previous VCM). Flags only; the drawing lives in the panels.
+    showNewReport: false,   // highlight antigens with new >= 1
+    showNewVCM: false,      // highlight antigens with new == 2
+    setShowNewReport(on) { State.showNewReport = !!on; State.notify(); },
+    setShowNewVCM(on) { State.showNewVCM = !!on; State.notify(); },
+
     toggleClade(c) {
       if (State.offClades.has(c)) State.offClades.delete(c);
       else State.offClades.add(c);
@@ -295,6 +304,19 @@ window.IV = window.IV || {};
       });
       State.select(State.expandNorms(hits), { additive: d.additive });
     });
+
+    // #2 (v6): double-click a point to ISOLATE it — select only that one strain,
+    // bypassing the F1 homolog expansion, so a serum's lines/coverage apply to just
+    // that serum. Capture phase + stopPropagation so a point dblclick beats the
+    // panel's (bubble-phase) zoom-reset dblclick; a dblclick on empty space falls
+    // through untouched and still resets the view.
+    svg.addEventListener("dblclick", e => {
+      const hit = e.target.closest("[data-norm]");
+      if (!hit) return;            // empty space → let the panel zoom-reset handle it
+      e.preventDefault();
+      e.stopPropagation();
+      State.setSelection([hit.getAttribute("data-norm")]);
+    }, true);
   };
 
   IV.State = State;
