@@ -59,12 +59,12 @@ OUT="$SSM/interactive"          # outputs belong with the report data, not in ae
 mkdir -p "$OUT"
 
 # single centre
-./run.sh --tree "$SSM/tree/h3.asr.tjz" \
+./run.sh --tree "$SSM/tree/h3.asr.after-2021.tjz" \
   --chart "vidrl=$SSM/h3-hi-guinea-pig-vidrl/styled.ace" \
   --subtype "A(H3N2)" --assay HI --out "$OUT/h3-hi-vidrl.html"
 
 # all five WHO Collaborating Centres in one file (switchable in the viewer)
-./run.sh --tree "$SSM/tree/h3.asr.tjz" \
+./run.sh --tree "$SSM/tree/h3.asr.after-2021.tjz" \
   --chart "cdc=$SSM/h3-hi-guinea-pig-cdc/styled.ace" \
   --chart "cnic=$SSM/h3-hi-guinea-pig-cnic/styled.ace" \
   --chart "crick=$SSM/h3-hi-guinea-pig-crick/styled.ace" \

@@ -13,7 +13,7 @@ OUT="$SSM/interactive"
 HERE="${0:A:h}"
 mkdir -p "$OUT"
 
-"$HERE/run.sh" --tree "$SSM/tree/h3.asr.tjz" \
+"$HERE/run.sh" --tree "$SSM/tree/h3.asr.after-2021.tjz" \
   --chart "cdc=$SSM/h3-hi-guinea-pig-cdc/styled.ace" \
   --chart "cnic=$SSM/h3-hi-guinea-pig-cnic/styled.ace" \
   --chart "crick=$SSM/h3-hi-guinea-pig-crick/styled.ace" \
