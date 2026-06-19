@@ -236,6 +236,14 @@ contracts that feature modules build on (rather than re-deriving) are:
   `Colour.passages()` (egg/cell/reassortant), and `Colour.hasPassageMarkers()`
   — true only once the bundle carries `passage_color` (E1). P1 should colour
   tip/point passage markers via these rather than re-deriving the palette.
+  **colorBy modes** add `clade` / `continent` / `aa` / `stress` / `time` / `coverage`.
+  `time` (v6 F1): viridis over [oldest antigen date … `meta.generated`]; gated on
+  `Colour.hasTime()`, window via `Colour.timeWindow()`, ramp `Colour.timeStops(n)`.
+  `coverage` (v6 F3): active when a serum is selected (`Colour.coverageSerum()`);
+  `Colour.antigen(a)` returns the clade colour, paled (HSV) when the selected serum
+  did not titrate that antigen. **Map should call `Colour.coverageOutline(a)` →
+  `{stroke,width}|null`** to draw the titrated outline (pink ≥ homologous−2 log2,
+  else black, 3px); gated on `Colour.hasCoverage()`.
 
 Two more APIs feature modules build on rather than re-deriving:
 

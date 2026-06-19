@@ -37,6 +37,11 @@
   // sequential scale for colour-by-stress (C2): ColorBrewer YlOrRd, low→high.
   const SEQ = ["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"];
 
+  // viridis 3-point Bézier control colours for colour-by-time (F1; acmacs-tal
+  // color-gradient.cc): oldest #440154 → mid #40ffff → newest #fde725. Quadratic
+  // Bernstein per channel.
+  const VIRIDIS = [[68, 1, 84], [64, 255, 255], [253, 231, 37]];
+
   let cladeColor = {};      // clade label -> hex (from bundle.clade_color, report style)
   let cladeLegend = {};     // clade label -> legend text (from bundle.clade_legend)
   let cladePriority = {};   // clade label -> report legend priority (higher = earlier)
@@ -57,6 +62,17 @@
   let stressMax = 0;        // true max (legend label)
   let stressChart = -1;     // chart index stress is cached for
 
+  // ---- F1: colour by time since collection -----------------------------------
+  let metaGenerated = null; // bundle.meta.generated (page-generation date) or null
+  let timeOldest = null, timeNewest = null, timeGen = null; // epoch ms (per chart)
+  let timeChart = -1;
+
+  // ---- F3: serum-coverage colouring (active when a serum is selected) ---------
+  const COV_PINK = "#ff1493";          // titrated ≥ (homologous − 2 log2) outline
+  let covSig = null;                   // chart|serumIdx signature for the cache
+  let covSerum = null;                 // the selected serum (active chart) or null
+  let covThreshold = null;             // log2(homologous/10) − 2 for that serum
+
   const Colour = {
     init(bundle) {
       cladeColor = bundle.clade_color || {};
@@ -69,7 +85,8 @@
       UNMATCHED = bundle.unmatched_color || "#d9d9d9";
       aaSeq = bundle.aa || {};
       aaHasData = !!(bundle.aa && Object.keys(aaSeq).length);
-      stressChart = -1;     // force recompute on first use
+      metaGenerated = (bundle.meta && bundle.meta.generated) || null;
+      stressChart = -1; timeChart = -1;   // force recompute on first use
     },
     unmatched() { return UNMATCHED; },
     cladeColor(c) { return cladeColor[c] || UNMATCHED; },
@@ -129,12 +146,54 @@
     stressColor(s) { return s == null ? UNMATCHED : seqColor(stressCap > 0 ? Math.min(1, s / stressCap) : 0); },
     stressScale() { ensureStress(); return { cap: stressCap, max: stressMax, stops: SEQ.slice() }; },
 
+    // ---- F1: colour by collection date (viridis over [oldest … generated]) ----
+    hasTime() { ensureTime(); return timeOldest != null; },
+    timeColor(dateStr) { ensureTime(); return timeColorOf(dateStr); },
+    timeStops(n) { n = n || 7; const o = []; for (let i = 0; i < n; i++) o.push(viridis(i / (n - 1))); return o; },
+    // date window for the legend; `generatedExplicit` = came from meta.generated.
+    timeWindow() {
+      ensureTime();
+      return {
+        oldest: isoDate(timeOldest), newest: isoDate(timeNewest), generated: isoDate(timeGen),
+        generatedExplicit: metaGenerated != null,
+      };
+    },
+
+    // ---- F3: serum-coverage colouring ---------------------------------------
+    // The mode needs the chart's logged titers + ≥1 serum; it only *shows* once a
+    // serum is selected (coverageSerum()). Fill = the antigen's clade colour, pale
+    // (HSV desaturate/lighten) when untitrated by the selected serum, bright when
+    // titrated. The titrated outline (pink ≥ homologous−2, else black, 3px) is
+    // returned by coverageOutline(a) for the map to apply per point.
+    hasCoverage() { const ch = IV.DATA && IV.DATA.charts[State.chartIdx]; return !!(ch && ch.logged && ch.sera && ch.sera.length); },
+    coverageSerum() { ensureCoverage(); return covSerum; },
+    coverageOutline(a) {
+      if (State.colorBy !== "coverage") return null;
+      ensureCoverage();
+      if (!covSerum) return null;
+      const ch = IV.DATA.charts[State.chartIdx];
+      const lr = ch.logged && ch.logged[a.i];
+      const titer = lr ? lr[covSerum.i] : null;
+      if (titer == null) return null;             // untitrated → no special outline
+      const pink = covThreshold != null && titer >= covThreshold;
+      return { stroke: pink ? COV_PINK : "#000", width: 3 };
+    },
+    coveragePink() { return COV_PINK; },
+
     leaf(lf) {
       switch (State.colorBy) {
         case "none": return BASE;
         case "continent": return contColor[(lf.continent || "").toUpperCase()] || UNMATCHED;
         case "aa": { const v = aaValueOf(lf.norm); return v ? (aaValueColor[v] || UNMATCHED) : UNMATCHED; }
         case "stress": { ensureStress(); const s = stressByNorm[lf.norm]; return s == null ? UNMATCHED : Colour.stressColor(s); }
+        case "time": { ensureTime(); return timeColorOf(lf.date); }
+        case "coverage": {
+          ensureCoverage();
+          if (!covSerum) return UNMATCHED;
+          const ch = IV.DATA.charts[State.chartIdx];
+          const idxs = ch.norm_to_ag && ch.norm_to_ag[lf.norm];
+          return (idxs && idxs.length) ? coverageFill(idxs[0]) : UNMATCHED;
+        }
         default: return lf.clade ? (cladeColor[lf.clade] || UNMATCHED) : UNMATCHED;
       }
     },
@@ -144,6 +203,8 @@
         case "continent": return contColor[(a.continent || "").toUpperCase()] || UNMATCHED; // #6
         case "aa": { const v = aaValueOf(a.norm); return v ? (aaValueColor[v] || UNMATCHED) : UNMATCHED; }
         case "stress": { ensureStress(); const s = stressByAg[a.i]; return s == null ? UNMATCHED : Colour.stressColor(s); }
+        case "time": { ensureTime(); return timeColorOf(a.date); }
+        case "coverage": { ensureCoverage(); return covSerum ? coverageFill(a.i) : UNMATCHED; }
         default: return a.clade ? (cladeColor[a.clade] || UNMATCHED) : UNMATCHED;
       }
     },
@@ -204,6 +265,114 @@
     const nz = all.filter(v => v > 0).sort((p, q) => p - q);
     stressCap = nz.length ? nz[Math.min(nz.length - 1, Math.floor(nz.length * 0.95))] : stressMax;
     if (!(stressCap > 0)) stressCap = stressMax || 1;
+  }
+
+  // F1: date-window for the active chart (oldest..newest antigen date; newest
+  // anchor = meta.generated when it's a valid date ≥ the newest antigen). Cached.
+  function ensureTime() {
+    const idx = State.chartIdx;
+    if (timeChart === idx) return;
+    timeChart = idx;
+    timeOldest = timeNewest = timeGen = null;
+    const ch = IV.DATA && IV.DATA.charts[idx];
+    if (!ch) return;
+    let mn = Infinity, mx = -Infinity;
+    for (const a of ch.antigens) {
+      const t = dateMs(a.date);
+      if (t == null) continue;
+      if (t < mn) mn = t;
+      if (t > mx) mx = t;
+    }
+    if (mn === Infinity) return;
+    timeOldest = mn; timeNewest = mx;
+    const g = dateMs(metaGenerated);
+    timeGen = (g != null && g >= mx) ? g : mx;   // anchor newest = generation date
+  }
+  function timeColorOf(dateStr) {
+    const t = dateMs(dateStr);
+    if (t == null || timeOldest == null) return UNMATCHED;
+    const span = timeGen - timeOldest;
+    return viridis(span > 0 ? (t - timeOldest) / span : 0);
+  }
+  // quadratic Bézier (Bernstein) through the three VIRIDIS control colours
+  function viridis(t) {
+    t = Math.max(0, Math.min(1, t));
+    const u = 1 - t, b0 = u * u, b1 = 2 * u * t, b2 = t * t;
+    const ch = k => Math.round(b0 * VIRIDIS[0][k] + b1 * VIRIDIS[1][k] + b2 * VIRIDIS[2][k]);
+    return `rgb(${ch(0)},${ch(1)},${ch(2)})`;
+  }
+  function dateMs(s) {
+    if (!s || typeof s !== "string") return null;
+    const t = Date.parse(s);
+    return Number.isFinite(t) ? t : null;
+  }
+  function isoDate(ms) {
+    if (ms == null) return null;
+    try { return new Date(ms).toISOString().slice(0, 10); } catch (_) { return null; }
+  }
+
+  // F3: resolve the selected serum (first selected serum in the active chart) and
+  // its coverage threshold = log2(homologous/10) − 2 (logged units). Cached by a
+  // (chart|serum) signature so it only recomputes when the selected serum changes.
+  function ensureCoverage() {
+    const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
+    let serum = null;
+    if (ch && ch.sera) {
+      for (const s of ch.sera) { if (s.norm && State.selected.has(s.norm)) { serum = s; break; } }
+    }
+    const sig = State.chartIdx + "|" + (serum ? serum.i : "none");
+    if (sig === covSig) return;
+    covSig = sig; covSerum = serum; covThreshold = null;
+    if (serum && ch.logged && serum.homologous != null) {
+      const hom = ch.logged[serum.homologous];
+      const ht = hom ? hom[serum.i] : null;
+      covThreshold = (ht == null) ? null : ht - 2;
+    }
+  }
+  // fill for antigen index `ai` vs the selected serum: clade colour, pale if the
+  // serum did not titrate it, bright if it did.
+  function coverageFill(ai) {
+    const ch = IV.DATA.charts[State.chartIdx];
+    const ag = ch.antigens[ai];
+    const base = (ag && ag.clade) ? (cladeColor[ag.clade] || UNMATCHED) : UNMATCHED;
+    const lr = ch.logged && ch.logged[ai];
+    const titer = lr ? lr[covSerum.i] : null;
+    return titer == null ? pale(base) : base;
+  }
+  // HSV desaturate + lighten by ~0.4 (a solid pale tint, NOT alpha).
+  function pale(col) {
+    const rgb = toRgb(col);
+    if (!rgb) return col;
+    let [h, s, v] = rgb2hsv(rgb[0], rgb[1], rgb[2]);
+    s *= 0.4; v = v + (1 - v) * 0.4;
+    const o = hsv2rgb(h, s, v);
+    return `rgb(${o[0]},${o[1]},${o[2]})`;
+  }
+  function toRgb(col) {
+    if (typeof col !== "string") return null;
+    if (col[0] === "#" && col.length >= 7) return hex2rgb(col);
+    const m = col.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    return m ? [+m[1], +m[2], +m[3]] : null;
+  }
+  function rgb2hsv(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    let h = 0;
+    if (d) {
+      if (mx === r) h = ((g - b) / d) % 6;
+      else if (mx === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    return [h, mx ? d / mx : 0, mx];
+  }
+  function hsv2rgb(h, s, v) {
+    const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
   }
 
   // interpolate the SEQ stops at t in [0,1] -> "#rrggbb"

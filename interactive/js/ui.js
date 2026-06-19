@@ -46,13 +46,15 @@
     const G = IV.Glyph;
     const body = {
       ref: '<circle cx="7" cy="7" r="5" fill="#fff" stroke="#000" stroke-width="1.3"/>',
-      vac: `<path d="${G.starPath(7, 7, 6, 5, 0.46)}" fill="${color || "#888"}" stroke="rgba(0,0,0,.4)" stroke-width="0.6"/>`,
+      // #4: vaccine = the (larger) passage shape with a bold black outline, NOT a
+      // star — map.js draws it as its passage shape, just bigger + black-edged.
+      vac: `<circle cx="7" cy="7" r="6" fill="${color || "#bbb"}" stroke="#000" stroke-width="1.7"/>`,
       serum: '<rect x="2.5" y="2.5" width="9" height="9" fill="none" stroke="#555" stroke-width="1.3"/>',
       dot: `<circle cx="7" cy="7" r="5" fill="${color}" stroke="rgba(0,0,0,.3)" stroke-width="0.6"/>`,
-      // passage glyphs match the map/tree (F7): egg shape + reassortant triangle,
-      // filled with the passage colour (#4).
+      // #4: passage glyphs match the map/tree exactly — egg shape, and reassortant
+      // = a TILTED egg (egg rotated 0.5 rad), not a triangle; passage-colour fill.
       egg: `<path d="${G.eggPath(7, 7, 5.5)}" fill="${color}" stroke="rgba(0,0,0,.45)" stroke-width="0.7"/>`,
-      reassortant: `<path d="${G.reassortantPath(7, 7.5, 4.8)}" fill="${color}" stroke="rgba(0,0,0,.45)" stroke-width="0.7"/>`,
+      reassortant: `<path d="${G.eggPath(7, 7, 5.5, 0.5)}" fill="${color}" stroke="rgba(0,0,0,.45)" stroke-width="0.7"/>`,
     }[kind];
     return `<svg width="14" height="14" viewBox="0 0 14 14" style="vertical-align:-3px">${body}</svg>`;
   }
@@ -144,6 +146,48 @@
     footnoteInto(colKey, `Σ error² per point · scale top p95≈${sc.cap.toFixed(1)} (max ${sc.max.toFixed(1)})`);
   }
 
+  // F1 colour key: viridis gradient over the collection-date window, oldest →
+  // newest (anchored at the page-generation date), with the dates labelled.
+  function timeLegend(colKey) {
+    if (!Colour.hasTime()) {
+      footnoteInto(colKey, "no collection dates in this chart"); return;
+    }
+    const w = Colour.timeWindow();
+    const bar = document.createElement("div"); bar.className = "lg";
+    bar.innerHTML =
+      `${w.oldest} <span style="display:inline-block;width:130px;height:11px;border:1px solid rgba(0,0,0,.25);` +
+      `border-radius:2px;vertical-align:-1px;background:linear-gradient(to right,${Colour.timeStops(7).join(",")})"></span> ${w.generated}`;
+    colKey.appendChild(bar);
+    const g = document.createElement("div"); g.className = "lg";
+    g.innerHTML = `<span class="sw" style="background:${Colour.unmatched()}"></span>no date`;
+    colKey.appendChild(g);
+    footnoteInto(colKey, w.generatedExplicit
+      ? `newest = report generated ${w.generated}`
+      : `newest = latest antigen ${w.newest} (generation date not exported)`);
+  }
+
+  // F3 colour key: serum-coverage, only meaningful once a serum is selected.
+  function coverageLegend(colKey) {
+    if (!Colour.hasCoverage()) {
+      footnoteInto(colKey, "titer data not exported (E2) — coverage unavailable"); return;
+    }
+    const s = Colour.coverageSerum();
+    if (!s) {
+      footnoteInto(colKey, "select a serum (click its square on the map) to show its coverage"); return;
+    }
+    const pink = Colour.coveragePink();
+    const row = (swStyle, label) => {
+      const d = document.createElement("div"); d.className = "lg";
+      d.innerHTML = `<span class="sw" style="${swStyle}"></span>${label}`;
+      colKey.appendChild(d);
+    };
+    row("background:#888", "titrated (bright)");
+    row("background:#d8d8d8", "untitrated (pale)");
+    row(`background:#fff;border:2px solid ${pink}`, "titrated ≥ homologous−2");
+    row("background:#fff;border:2px solid #000", "titrated < homologous−2");
+    footnoteInto(colKey, `serum: ${s.name}`);
+  }
+
   function renderLegend() {
     const lg = document.getElementById("legend"); lg.innerHTML = "";
     const counts = tipCounts();
@@ -151,7 +195,8 @@
     // ---- colour key (depends on colorBy) ----
     const titleByMode = {
       clade: "Clade", continent: "Continent",
-      aa: "AA " + (Colour.aaPositions().join("+") || "position?"), stress: "Stress",
+      aa: "AA " + (Colour.aaPositions().join("+") || "position?"),
+      stress: "Stress", time: "Collection date", coverage: "Serum coverage",
     };
     const colKey = section(titleByMode[State.colorBy] || "Colour");
 
@@ -159,6 +204,10 @@
       aaLegend(colKey);
     } else if (State.colorBy === "stress") {
       stressLegend(colKey);
+    } else if (State.colorBy === "time") {
+      timeLegend(colKey);
+    } else if (State.colorBy === "coverage") {
+      coverageLegend(colKey);
     } else if (State.colorBy === "clade") {
       // count = tips/antigens (tree tips / active-chart map points). The two are
       // told apart by magnitude (antigens smaller, except the unsequenced row).
@@ -231,7 +280,8 @@
     chartSel.onchange = () => {
       State.setChart(+chartSel.value);
       IV.Map.render();
-      if (State.colorBy === "stress") IV.Tree.render();   // per-chart stress recolours tips
+      // stress + time are per-chart, so their tip colours change with the chart
+      if (State.colorBy === "stress" || State.colorBy === "time") IV.Tree.render();
       renderLegend(); State.notify(); updateTitles();
     };
 
@@ -241,6 +291,8 @@
     const colorBy = document.getElementById("colorBy");
     if (IV.Colour.hasAA()) addOption(colorBy, "aa", "amino acid");
     if (IV.Colour.hasStress()) addOption(colorBy, "stress", "stress");
+    if (IV.Colour.hasTime()) addOption(colorBy, "time", "collection date");
+    if (IV.Colour.hasCoverage()) addOption(colorBy, "coverage", "serum coverage");
     const aaPos = makeAAInput(colorBy);
 
     colorBy.onchange = e => {
@@ -318,6 +370,20 @@
     };
     return { wrap, input };
   }
+
+  // F3: serum-coverage fill depends on which serum is selected, but a selection
+  // change only triggers panel refresh() (class toggles), not a re-fill. So when in
+  // coverage mode and the selected serum changes, re-render both panels + legend.
+  let lastCovSerum = undefined;
+  State.subscribe(() => {
+    if (State.colorBy !== "coverage") { lastCovSerum = undefined; return; }
+    const s = Colour.coverageSerum();
+    const id = s ? s.i : null;
+    if (id !== lastCovSerum) {
+      lastCovSerum = id;
+      IV.Tree.render(); IV.Map.render(); renderLegend();
+    }
+  });
 
   IV.UI = { showTip, moveTip, hideTip, renderLegend, bindControls, updateTitles };
 })(window.IV);
