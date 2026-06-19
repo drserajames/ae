@@ -508,7 +508,15 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 ]
             elif name == "dash-bar-aa-at":
                 if "pos" in cmd:
-                    schema.setdefault("dash_bars", []).append({"pos": int(cmd["pos"])})
+                    bar = {"pos": int(cmd["pos"])}
+                    # AD's per-aa colour map (`colors`: {aa: colour}, "transparent" = don't
+                    # draw that aa) — pass it through as the schema's [{aa, color}] array so the
+                    # bar shows AD's exact variant colours instead of the frequency palette.
+                    colors = cmd.get("colors")
+                    if isinstance(colors, dict):
+                        bar["colors"] = [{"aa": aa, "color": col}
+                                         for aa, col in colors.items() if isinstance(aa, str) and aa]
+                    schema.setdefault("dash_bars", []).append(bar)
             elif name == "nodes":
                 select_raw, apply_raw = cmd.get("select", {}), cmd.get("apply", {})
                 if not isinstance(select_raw, dict) or not isinstance(apply_raw, dict):

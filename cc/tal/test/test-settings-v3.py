@@ -48,6 +48,22 @@ def check_seq_id_alternation() -> dict:
     }
 
 
+def check_dash_bar_colors() -> dict:
+    """dash-bar-aa-at `colors` (aa->colour object, "transparent" = don't draw) must pass
+    through to the schema as a [{aa,color}] array so the bar shows AD's exact variant colours."""
+    tal = {"tal": [
+        {"N": "dash-bar-aa-at", "pos": 135, "colors": {"T": "transparent", "K": "#07e8c4", "A": "#00939f"}},
+    ]}
+    schema, _ = translate(tal)
+    bar = schema.get("dash_bars", [{}])[0]
+    cols = {c["aa"]: c["color"] for c in bar.get("colors", [])}
+    return {
+        "dash-bar pos passed": bar.get("pos") == 135,
+        "dash-bar colors -> [{aa,color}]": cols.get("K") == "#07e8c4" and cols.get("A") == "#00939f",
+        "dash-bar transparent preserved": cols.get("T") == "transparent",
+    }
+
+
 def check_eval_condition() -> dict:
     """Direct grammar checks for the if-condition evaluator (port of eval_condition)."""
     d = {"whocc": "true", "off_flag": "false", "region": "EUROPE", "blank": ""}
@@ -124,6 +140,7 @@ def main():
     checks.update(check_eval_condition())
     checks.update(check_imported_no_curation())
     checks.update(check_seq_id_alternation())
+    checks.update(check_dash_bar_colors())
     failures = [name for name, ok in checks.items() if not ok]
     if failures:
         print("FAIL:")

@@ -603,12 +603,16 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 continue;
             const sequences::pos0_t pos0{static_cast<std::size_t>(bar.pos - 1)};
             const double col_x = x_dash0 + (static_cast<double>(b) + 0.5) * dash_col_w;
-            // colours: explicit colors_by_aa, else by aa frequency (most common -> grey, variants pop)
+            // colours: explicit colors_by_aa, else by aa frequency (most common -> grey, variants pop).
+            // "transparent" (AD's most-common aa) means don't draw that aa's dash.
+            const bool explicit_colors = !bar.colors_by_aa.empty();
             std::unordered_map<char, Color> aa_color;
+            std::unordered_set<char> hide_aa;
             for (const auto& [aa, color_string] : bar.colors_by_aa) {
-                try { aa_color.emplace(aa, Color{color_string}); } catch (const std::exception&) { }
+                if (color_string == "transparent" || color_string == "TRANSPARENT") { hide_aa.insert(aa); continue; }
+                try { aa_color.emplace(aa, Color{color_string}); } catch (const std::exception&) { hide_aa.insert(aa); }
             }
-            if (aa_color.empty()) {
+            if (aa_color.empty() && !explicit_colors) {
                 std::unordered_map<char, int> counts;
                 for (const auto& node : layout.leaves) {
                     const Leaf& leaf = tree.leaf(node_index_t{node.node});
@@ -624,7 +628,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 const Leaf& leaf = tree.leaf(node_index_t{node.node});
                 if (leaf.aa.size() <= pos0)
                     continue;
-                const auto found = aa_color.find(leaf.aa[pos0]);
+                const char a = leaf.aa[pos0];
+                if (hide_aa.count(a))
+                    continue;                      // "transparent" aa — not drawn (AD)
+                const auto found = aa_color.find(a);
+                if (found == aa_color.end() && explicit_colors)
+                    continue;                      // explicit palette: only the listed aas are drawn
                 const double y = dev_y(node.y);
                 pdf.line(col_x - dash_len / 2.0, y, col_x + dash_len / 2.0, y, found != aa_color.end() ? found->second : GREY, dash_lw);
             }
