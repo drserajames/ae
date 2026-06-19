@@ -373,8 +373,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         name_y.reserve(layout.leaves.size());
         for (const auto& leaf_node : layout.leaves)
             name_y.emplace(leaf_node.name, leaf_node.y);
-        const double sep_x0 = margin + hz_w;             // separator spans the tree
-        const double sep_x_end = margin + hz_w + tree_w;
+        // AD confines the separators to the matrix/column area — NOT across the tree or the
+        // left margin. Span from the start of the time-series matrix to the page's right edge.
+        const double sep_x0 = ts_w > 0.0 ? x_ts0 : (x_clade0 > 0.0 ? x_clade0 : margin + hz_w + tree_w);
+        const double sep_x_end = width - margin;
         for (const auto& section : params.hz_sections) {
             const auto first_it = name_y.find(section.first);
             if (first_it == name_y.end())
@@ -503,9 +505,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             draws.push_back({k, std::move(bands), y0, y1, 0});
         }
 
-        // slot assignment (acmacs-tal set_slots): widest extent first -> slot 0 (right edge);
-        // a clade overlapping an already-placed clade in a slot is bumped left, so sub-clades
-        // stack inward of their parent — AD's right-hand bracket staircase.
+        // slot assignment (acmacs-tal set_slots): widest extent first -> slot 0 (the LEFT edge,
+        // nearest the matrix); a clade overlapping an already-placed one is bumped to a higher
+        // slot -> further RIGHT. So a parent sits left and its nested sub-clades step rightward,
+        // matching AD's report layout (time-series-to-the-left: deeper clades increment right).
         std::sort(draws.begin(), draws.end(), [](const CladeDraw& a, const CladeDraw& b) { return (a.y1 - a.y0) > (b.y1 - b.y0); });
         std::vector<std::vector<std::pair<double, double>>> occupied; // per slot: occupied [y0,y1] extents
         for (auto& draw : draws) {
@@ -524,10 +527,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double cap = std::clamp(slot_w * 0.16, 1.0, 4.0); // arrowhead half-width
         // AD label_size = slot.width * label.scale (reports: ~0.007·height × 1.4 ≈ 0.0098·height).
         const double clade_fs = std::clamp(0.0095 * height, 6.0, 14.0);
-        const double right_edge = x_clade0 + clade_w; // viewport.right (AD horizontal_line extends to here)
+        const double left_edge = x_clade0; // viewport.left (AD horizontal_line extends to here, matrix side)
         for (const auto& draw : draws) {
             const Clade& clade = clade_sections[draw.rank];
-            const double cx = x_clade0 + clade_w - (static_cast<double>(draw.slot) + 0.5) * slot_w; // slot 0 = right edge
+            const double cx = x_clade0 + (static_cast<double>(draw.slot) + 0.5) * slot_w; // slot 0 = left edge
             const Band* widest = nullptr;
             for (const auto& band : draw.bands) {
                 pdf.line(cx, band.y0, cx, band.y1, BLACK, 0.7);             // double-arrow spine
@@ -535,15 +538,15 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 pdf.line(cx + cap, band.y0 + cap, cx, band.y0, BLACK, 0.7);
                 pdf.line(cx - cap, band.y1 - cap, cx, band.y1, BLACK, 0.7); // bottom arrowhead
                 pdf.line(cx + cap, band.y1 - cap, cx, band.y1, BLACK, 0.7);
-                pdf.line(cx, band.y0, right_edge, band.y0, BLACK, 0.4);     // top horizontal arm (AD horizontal_line)
-                pdf.line(cx, band.y1, right_edge, band.y1, BLACK, 0.4);     // bottom horizontal arm
+                pdf.line(left_edge, band.y0, cx, band.y0, BLACK, 0.4);      // top horizontal arm (AD horizontal_line, matrix side)
+                pdf.line(left_edge, band.y1, cx, band.y1, BLACK, 0.4);      // bottom horizontal arm
                 if (widest == nullptr || band.size > widest->size)
                     widest = &band;
             }
-            if (widest != nullptr) { // name label, rotated to read upward, just left of the spine
+            if (widest != nullptr) { // name label, rotated to read upward, just right of the spine
                 const std::string name = clade_display_for(clade.name);
                 const double ym = (widest->y0 + widest->y1) / 2.0;
-                pdf.text_rotated(cx - cap - clade_fs * 0.35, ym + name.size() * clade_fs * 0.28, name, clade_fs, BLACK, -90.0);
+                pdf.text_rotated(cx + cap + clade_fs * 0.9, ym + name.size() * clade_fs * 0.28, name, clade_fs, BLACK, -90.0);
             }
         }
     }
@@ -724,9 +727,11 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 m = tree.parent(m);
             }
         };
-        // AD's aa-transition label default scale is 0.01 (of height) with a tether (leader
-        // line, BLACK 0.3px) from the label back to the branch — see draw-aa-transitions.hh.
-        const double mrca_fs = 0.01 * height;
+        // AD draws these small and grey (all-nodes label colour grey30) with a tether (leader
+        // line) to the branch. Default size kept modest so adjacent labels don't crowd.
+        const double mrca_fs = 0.008 * height;
+        struct Placed { double nx, ny, tx, ty, fs, x0, x1, y0, y1; std::string text; Color color; };
+        std::vector<Placed> placed;
         for (const auto& label : params.mrca_labels) {
             const auto fi = leaf_by_name.find(label.first);
             const auto li = leaf_by_name.find(label.last);
@@ -739,20 +744,41 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             if (found == pos.end())
                 continue;
             const double fs = label.size > 0.0 ? label.size * height : mrca_fs;
-            Color color = BLACK;
+            Color color = GREY50;
             if (!label.color.empty()) {
                 try { color = Color{label.color}; } catch (const std::exception&) { }
             }
             const double nx = dev_x(found->second.first), ny = dev_y(found->second.second); // branch point
             const double tx = nx + label.offset_x * width;
             const double ty = ny + label.offset_y * height + fs * 0.3;
-            // tether: thin line from the branch to the label (AD LabelTether). Drawn only when
-            // the label is displaced from the branch, so on-branch labels stay clean.
             const double tw = pdf.text_size(label.text, fs).first;
-            const double anchor_x = tx < nx ? tx + tw : tx; // label's near edge
-            if (std::abs(anchor_x - nx) > fs * 0.5 || std::abs(ty - ny) > fs * 0.5)
-                pdf.line(nx, ny, anchor_x, ty - fs * 0.3, BLACK, 0.3);
-            pdf.text(tx, ty, label.text, fs, color, /*center=*/false);
+            placed.push_back({nx, ny, tx, ty, fs, tx, tx + tw, ty - fs, ty, label.text, color});
+        }
+        // vertical collision avoidance (AD shifts overlapping label boxes apart): process
+        // top-to-bottom; if a label's box overlaps an already-placed one in x, nudge it down.
+        std::sort(placed.begin(), placed.end(), [](const Placed& a, const Placed& b) { return a.y0 < b.y0; });
+        std::vector<Placed> done;
+        done.reserve(placed.size());
+        for (auto& p : placed) {
+            for (bool moved = true; moved;) {
+                moved = false;
+                for (const auto& q : done) {
+                    if (p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1) {
+                        const double dy = q.y1 - p.y0 + p.fs * 0.15;
+                        p.y0 += dy; p.y1 += dy; p.ty += dy;
+                        moved = true;
+                    }
+                }
+            }
+            done.push_back(p);
+        }
+        for (const auto& p : done) {
+            // tether: thin line from the branch to the label's near edge (AD LabelTether),
+            // drawn only when the label sits off the branch (incl. after a collision nudge).
+            const double anchor_x = p.tx < p.nx ? p.x1 : p.tx;
+            if (std::abs(anchor_x - p.nx) > p.fs * 0.5 || std::abs(p.ty - p.ny) > p.fs * 0.5)
+                pdf.line(p.nx, p.ny, anchor_x, p.ty - p.fs * 0.3, GREY, 0.3);
+            pdf.text(p.tx, p.ty, p.text, p.fs, p.color, /*center=*/false);
         }
     }
 

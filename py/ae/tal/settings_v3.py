@@ -473,6 +473,11 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 # stored transitions) shows transitions.
                 pernode = cmd.get("per-node")
                 emitted_mrca = False
+                # default label style for all nodes (AD `all-nodes.label`) — the report sets
+                # colour grey30; per-node entries inherit it unless they override.
+                all_nodes_label = (cmd.get("all-nodes") or {}).get("label") or {}
+                default_color = all_nodes_label.get("color") if isinstance(all_nodes_label, dict) else None
+                default_scale = all_nodes_label.get("scale") if isinstance(all_nodes_label, dict) else None
                 if isinstance(pernode, list):
                     # AD selects each curated label's node by draw-time node_id, which ae's tree
                     # doesn't carry — but every entry ALSO records its node's first/last leaf seq_ids
@@ -497,6 +502,10 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                                 ml["color"] = lab["color"]
                             if isinstance(lab.get("scale"), (int, float)):
                                 ml["size"] = lab["scale"]
+                        if "color" not in ml and isinstance(default_color, str):
+                            ml["color"] = default_color           # all-nodes default (grey30)
+                        if "size" not in ml and isinstance(default_scale, (int, float)):
+                            ml["size"] = default_scale
                         schema.setdefault("mrca_labels", []).append(ml)
                         emitted_mrca = True
                     if skipped:
