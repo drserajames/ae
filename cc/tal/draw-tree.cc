@@ -645,7 +645,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
 
     // --- dash-bar-aa-at columns: per-leaf dash coloured by the amino acid at a position ---
     if (dash_w > 0.0) {
-        static const std::array<Color, 8> freq_palette{GREY, RED, BLUE, GREEN, ORANGE, PURPLE, Color{0x008080}, MAGENTA};
+        // AD's "Ana" distinct palette (acmacs-base color-distinct.cc): the frequency-order
+        // fallback colours (most common aa -> #03569b dark blue, then dark red, yellow, …).
+        static const std::array<Color, 16> freq_palette{
+            Color{0x03569b}, Color{0xe72f27}, Color{0xffc808}, Color{0xa2b324}, Color{0xa5b8c7},
+            Color{0x049457}, Color{0xf1b066}, Color{0x742f32}, Color{0x9e806e}, Color{0x75ada9},
+            Color{0x675b2c}, Color{0xa020f0}, Color{0x8b8989}, Color{0xe9a390}, Color{0xdde8cf}, Color{0x00939f}};
         const double dash_len = dash_col_w * 0.6;
         const double dash_lw = std::clamp(vstep * 0.6, 0.15, 2.5); // thin marks, AD-like white space
         const double pos_fs = std::clamp(dash_col_w * 0.5, 6.0, 11.0);
@@ -654,28 +659,28 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         for (std::size_t b = 0; b < params.dash_bars.size(); ++b) {
             const DashBarAAAt& bar = params.dash_bars[b];
             const double col_x = x_dash0 + (static_cast<double>(b) + 0.5) * dash_col_w;
+            std::unordered_map<char, Color> aa_color; // resolved aa -> colour (for the legend swatches)
             if (bar.pos >= 1) {
-                // pos-based (dash-bar-aa-at): colour each leaf by its aa at pos.
+                // pos-based (dash-bar-aa-at): colour each leaf by its aa at pos. AD assigns EVERY
+                // aa a colour — frequency-order palette by default (colors.get_or), then overridden
+                // per-aa by the explicit `colors` map; "transparent" means that aa is not drawn.
                 const sequences::pos0_t pos0{static_cast<std::size_t>(bar.pos - 1)};
-                const bool explicit_colors = !bar.colors_by_aa.empty();
-                std::unordered_map<char, Color> aa_color;
                 std::unordered_set<char> hide_aa;
-                for (const auto& [aa, color_string] : bar.colors_by_aa) {
-                    if (color_string == "transparent" || color_string == "TRANSPARENT") { hide_aa.insert(aa); continue; }
-                    try { aa_color.emplace(aa, Color{color_string}); } catch (const std::exception&) { hide_aa.insert(aa); }
+                std::unordered_map<char, int> counts;
+                for (const auto& node : layout.leaves) {
+                    const Leaf& leaf = tree.leaf(node_index_t{node.node});
+                    if (leaf.aa.size() > pos0)
+                        ++counts[leaf.aa[pos0]];
                 }
-                if (aa_color.empty() && !explicit_colors) {
-                    std::unordered_map<char, int> counts;
-                    for (const auto& node : layout.leaves) {
-                        const Leaf& leaf = tree.leaf(node_index_t{node.node});
-                        if (leaf.aa.size() > pos0)
-                            ++counts[leaf.aa[pos0]];
-                    }
-                    std::vector<std::pair<char, int>> ranked(counts.begin(), counts.end());
-                    std::sort(ranked.begin(), ranked.end(), [](const auto& l, const auto& r) { return l.second > r.second; });
-                    for (std::size_t r = 0; r < ranked.size(); ++r)
-                        aa_color.emplace(ranked[r].first, freq_palette[std::min(r, freq_palette.size() - 1)]);
+                std::vector<std::pair<char, int>> ranked(counts.begin(), counts.end());
+                std::sort(ranked.begin(), ranked.end(), [](const auto& l, const auto& r) { return l.second > r.second; });
+                for (std::size_t r = 0; r < ranked.size(); ++r)
+                    aa_color[ranked[r].first] = freq_palette[std::min(r, freq_palette.size() - 1)]; // frequency fallback
+                for (const auto& [aa, color_string] : bar.colors_by_aa) {                          // explicit override
+                    if (color_string == "transparent" || color_string == "TRANSPARENT") { hide_aa.insert(aa); aa_color.erase(aa); continue; }
+                    try { aa_color[aa] = Color{color_string}; } catch (const std::exception&) {}
                 }
+                aa_color['X'] = GREY;                                                               // AD: X -> grey
                 for (const auto& node : layout.leaves) {
                     const Leaf& leaf = tree.leaf(node_index_t{node.node});
                     if (leaf.aa.size() <= pos0)
@@ -684,8 +689,6 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                     if (hide_aa.count(a))
                         continue;                      // "transparent" aa — not drawn (AD)
                     const auto found = aa_color.find(a);
-                    if (found == aa_color.end() && explicit_colors)
-                        continue;                      // explicit palette: only the listed aas are drawn
                     const double y = dev_y(node.y);
                     pdf.line(col_x - dash_len / 2.0, y, col_x + dash_len / 2.0, y, found != aa_color.end() ? found->second : GREY, dash_lw);
                 }
@@ -714,15 +717,21 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                     }
                 }
             }
-            // legend at the bottom: each position+aa in its colour, stacked, reading upward
-            // (AD dash-bar labels). Falls back to the bare position number when no legend given.
+            // legend at the bottom: each position+aa label in its colour, stacked, reading
+            // upward. AD draws each label in the leaf's ACTUAL colour (colors.get(aa)) — so for a
+            // pos bar with a known aa, recolour the swatch from aa_color (the resolved map); fall
+            // back to the .tal label colour otherwise. (Bare position number when no legend.)
             const double leg_fs = std::clamp(dash_col_w * 0.42, 5.0, 9.0);
             if (!bar.legend.empty()) {
                 double ly = bottom + bottom_reserve * 0.96;
-                for (const auto& [text, cstr] : bar.legend) {
-                    Color c = BLACK; try { if (!cstr.empty()) c = Color{cstr}; } catch (const std::exception&) {}
-                    pdf.text_rotated(col_x + leg_fs * 0.35, ly, text, leg_fs, c, -90.0);
-                    ly -= pdf.text_size(text, leg_fs).first + leg_fs * 0.5;
+                for (const auto& item : bar.legend) {
+                    Color c = BLACK;
+                    const auto resolved = item.aa ? aa_color.find(item.aa) : aa_color.end();
+                    if (resolved != aa_color.end())
+                        c = resolved->second;                                       // actual draw colour (AD)
+                    else { try { if (!item.color.empty()) c = Color{item.color}; } catch (const std::exception&) {} }
+                    pdf.text_rotated(col_x + leg_fs * 0.35, ly, item.text, leg_fs, c, -90.0);
+                    ly -= pdf.text_size(item.text, leg_fs).first + leg_fs * 0.5;
                 }
             }
             else if (bar.pos >= 1) {

@@ -304,17 +304,23 @@ def _expand_seq_id(sid: str) -> list:
 
 
 def _dash_bar_legend(labels) -> list:
-    """A dash-bar's legend: [{text, color}] for each real label (text != ".") so the bar can
+    """A dash-bar's legend: [{text, color, aa}] for each real label (text != ".") so the bar can
     show its position+amino-acid variants in their colours (AD dash-bar labels). `labels` is
-    either an object keyed by aa (dash-bar-aa-at) or a list (dash-bar)."""
+    either an object keyed by aa (dash-bar-aa-at) or a list (dash-bar). For the object form the
+    key is the amino acid, so the renderer can recolour the swatch with the leaf's ACTUAL colour
+    (AD draws each label in colors.get(aa))."""
     out: list = []
-    entries = labels.values() if isinstance(labels, dict) else (labels if isinstance(labels, list) else [])
-    for e in entries:
+    items = labels.items() if isinstance(labels, dict) else (
+        [(None, e) for e in labels] if isinstance(labels, list) else [])
+    for aa, e in items:
         if not isinstance(e, dict):
             continue
         text = e.get("text", "")
         if isinstance(text, str) and text and text != "." and len(text) > 1:
-            out.append({"text": text, "color": e.get("color", "")})
+            entry = {"text": text, "color": e.get("color", "")}
+            if isinstance(aa, str) and len(aa) == 1:
+                entry["aa"] = aa
+            out.append(entry)
     return out
 
 

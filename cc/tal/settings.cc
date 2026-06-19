@@ -203,8 +203,10 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                 const auto& leg_array = legend.array();
                 for (std::size_t j = 0; j < leg_array.size(); ++j) {
                     const auto& le = leg_array[j];
-                    if (le.is_object())
-                        bar.legend.emplace_back(get_string(le["text"]), get_string(le["color"]));
+                    if (le.is_object()) {
+                        const std::string aa = get_string(le["aa"]);
+                        bar.legend.push_back(DashBarAAAt::LegendItem{get_string(le["text"]), get_string(le["color"]), aa.empty() ? char{0} : aa[0]});
+                    }
                 }
             }
             params.dash_bars.push_back(std::move(bar));

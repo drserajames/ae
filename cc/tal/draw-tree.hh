@@ -112,7 +112,8 @@ namespace ae::tal
         int pos{0};
         std::map<char, std::string> colors_by_aa{}; // aa char -> colour string ("#rrggbb"/name)
         std::vector<std::pair<std::vector<AaCondition>, std::string>> selects{}; // (conditions, colour)
-        std::vector<std::pair<std::string, std::string>> legend{};               // (text, colour)
+        struct LegendItem { std::string text; std::string color; char aa{0}; }; // aa=0 -> no actual-colour lookup
+        std::vector<LegendItem> legend{};
     };
 
     // A horizontal section of the tree (acmacs-tal hz-sections): the contiguous run of
