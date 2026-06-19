@@ -193,9 +193,11 @@
     normMeta = {};
     for (const ch of IV.DATA.charts) for (const a of ch.antigens) {
       if (!a.norm) continue;
-      const m = normMeta[a.norm] || (normMeta[a.norm] = { vac: false, serology: false });
+      const m = normMeta[a.norm] || (normMeta[a.norm] = { vac: false, serology: false, newLevel: 0 });
       if (a.vac) m.vac = true;
       if (a.serology) m.serology = true;
+      const lvl = +a.new || 0;          // F2: antigen "new" = 1 (since report) / 2 (since VCM)
+      if (lvl > m.newLevel) m.newLevel = lvl;
     }
   }
   const TIP_R = { base: 3, passage: 3.6, serology: 4.4, vaccine: 6 };
@@ -226,6 +228,32 @@
   // #10: no passage outline ring — neutral outline for definition, black for vaccine.
   function tipStrokeFor(vac) { return vac ? "#000" : "rgba(0,0,0,.4)"; }
   function tipStrokeWFor(vac) { return vac ? 1.1 : 0.6; }
+
+  // ---- F2: bold black outline on tips that are "new" (since report / VCM) ----
+  // Antigen semantic `new` = 1 (since previous report) → width 3, 2 (since previous
+  // VCM) → width 6, raised to front — matching the map (chart_modifier.py:127).
+  // Driven by Agent-SELECT's Overlays "new since" toggle; the flag's final name isn't
+  // landed yet, so read it defensively (any of these truthy ⇒ on). Inert until both
+  // the toggle and Agent-EXP's antigen `new` field exist (newLevel stays 0).
+  function newHighlightOn() {
+    return !!(State.showNew || State.newSince || State.highlightNew);
+  }
+  let _newApplied = null;   // memo: last applied on/off, so we only restyle on a flip
+  function applyNewHighlight(force) {
+    const on = newHighlightOn();
+    if (!force && _newApplied === on) return;
+    _newApplied = on;
+    for (const t of tipEntries) {
+      if (on && t.newLevel) {
+        t.el.setAttribute("stroke", "#000");
+        t.el.setAttribute("stroke-width", t.newLevel >= 2 ? 6 : 3);
+        if (t.el.parentNode) t.el.parentNode.appendChild(t.el);   // raise to front
+      } else {
+        t.el.setAttribute("stroke", tipStrokeFor(t.vac));
+        t.el.setAttribute("stroke-width", tipStrokeWFor(t.vac));
+      }
+    }
+  }
 
   // ---- clade labels at each clade's MRCA, like the report PDFs (F4 + #2) ----
   // #2: label with the Pango short name (clade_short), never the AA motif. Prefer the
@@ -311,7 +339,7 @@
     const svg = document.getElementById("treeSvg");
     svgEl = svg;
     svg.innerHTML = "";
-    tipNodes = {}; tipEntries = [];
+    tipNodes = {}; tipEntries = []; _newApplied = null;   // re-apply F2 highlight to fresh tips
     svg.setAttribute("width", fit.W);
     svg.setAttribute("height", fit.H);   // no viewBox: 1 user unit == 1 px (S1 box-select)
 
@@ -364,7 +392,8 @@
       const t = el("text", { class: "tipLabel" });
       t.textContent = shortName(lf.name);
       tipsG.appendChild(t);
-      tipEntries.push({ node: lf, el: node, kind: g.kind, r: g.r, label: t });
+      tipEntries.push({ node: lf, el: node, kind: g.kind, r: g.r, label: t,
+        vac: g.vac, newLevel: (normMeta[lf.norm] || {}).newLevel || 0 });
     });
 
     // clade labels (F4) — one text per labelled clade, positioned in apply()
@@ -499,6 +528,7 @@
 
   // ---- highlight refresh (hover / clade filter / selection) ----
   function refresh() {
+    applyNewHighlight(false);   // F2: re-apply if the "new since" toggle flipped
     leaves.forEach(lf => {
       (tipNodes[lf.norm] || []).forEach(c => {
         const e = State.emphasis(lf.norm, lf.clade);
