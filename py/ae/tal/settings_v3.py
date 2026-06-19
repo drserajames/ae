@@ -444,6 +444,18 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 if "end" in cmd:
                     ts["end"] = cmd["end"]
                 ts.setdefault("interval", "month")
+                # slot geometry (fraction of height) + date-label scale/rotation, so the
+                # column is AD's narrow width and the dates AD's small clockwise labels.
+                slot = cmd.get("slot")
+                if isinstance(slot, dict):
+                    if isinstance(slot.get("width"), (int, float)):
+                        ts["slot_width"] = float(slot["width"])
+                    label = slot.get("label")
+                    if isinstance(label, dict):
+                        if isinstance(label.get("scale"), (int, float)):
+                            ts["label_scale"] = float(label["scale"])
+                        if isinstance(label.get("rotation"), str):
+                            ts["label_rotation"] = label["rotation"]
                 # the matrix is coloured by the time-series color-by (AD reports use continent;
                 # ae has the exact AD continent palette). Set the leaf colour mode accordingly.
                 if cmd.get("color-by") == "continent":
@@ -535,18 +547,25 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 # leaf colouring: color-by is a string ("continent") or an object
                 # ({"N": "pos-aa-frequency"|"pos-aa-colors", "pos": N}). Both pos modes
                 # map to color_by_pos (frequency colouring; explicit aa scheme approximated).
+                # A `tree` element's color-by recolours the tree EDGES (acmacs-tal DrawTree);
+                # the continent colouring of the WHOCC report comes instead from the
+                # time-series / clades-whocc and tints only the matrix (edges stay black). So
+                # set color_edges only here, when the tree itself asks for an edge colouring.
                 cb = cmd.get("color-by")
                 if isinstance(cb, str):
                     if cb == "continent":
                         schema["color_by_continent"] = True
+                        schema["color_edges"] = True
                     elif cb not in ("", "uniform"):
                         warnings.append(f"tree color-by {cb!r} not supported — skipped")
                 elif isinstance(cb, dict):
                     cbn = cb.get("N")
                     if cbn == "continent":
                         schema["color_by_continent"] = True
+                        schema["color_edges"] = True
                     elif cbn in ("pos-aa-frequency", "pos-aa-colors") and "pos" in cb:
                         schema["color_by_pos"] = {"pos": int(cb["pos"])}
+                        schema["color_edges"] = True
                     else:
                         warnings.append(f"tree color-by {cbn!r} not supported — skipped")
                 if isinstance(cmd.get("legend"), dict) and cmd["legend"].get("show"):

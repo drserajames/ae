@@ -125,6 +125,7 @@ namespace ae::tal
         bool labels_avoid_collisions{true};  // suppress leaf labels that would overlap the one above
         bool color_by_clade{false};  // colour leaf edges/labels/dashes by first clade
         bool color_by_continent{false}; // colour leaves by geographic continent (acmacs-tal color-by continent)
+        bool color_edges{false};     // recolour tree EDGES by the active mode (tree color-by); else edges stay black
         int color_by_pos{0};         // colour leaves by amino acid at this 1-based position (0 = off)
         std::map<char, std::string> color_by_pos_colors{}; // aa char -> colour for color_by_pos; empty = colour by frequency
         bool clades{false};          // draw the clade-sections column
@@ -132,6 +133,9 @@ namespace ae::tal
         std::string time_series_interval{"month"}; // year | month | week | day
         std::string time_series_start{};            // optional "YYYY-MM-DD" range start
         std::string time_series_end{};              // optional "YYYY-MM-DD" range end
+        double time_series_slot_width{0.0};         // slot width as a fraction of height (AD slot.width); 0 = fallback
+        double time_series_label_scale{0.0};        // date-label size = slot_width * scale * height; 0 = derived
+        std::string time_series_label_rotation{};   // "clockwise" | "anticlockwise" (date reading direction)
         std::string title{};         // page title (top, centred); empty = none
         bool legend{false};          // draw a clade colour legend (bottom row)
         bool geo_inset{false};       // draw the continent-coloured world-map inset (lower-left); doubles as the continent legend (acmacs-tal LegendContinentMap)

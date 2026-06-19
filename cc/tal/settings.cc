@@ -57,6 +57,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
     params.labels_avoid_collisions = get_bool(config["labels_avoid_collisions"], true);
     params.color_by_clade = get_bool(config["color_by_clade"]);
     params.color_by_continent = get_bool(config["color_by_continent"]);
+    params.color_edges = get_bool(config["color_edges"]);
     if (const auto& cbp = config["color_by_pos"]; cbp.is_object()) {
         params.color_by_pos = static_cast<int>(get_double(cbp["pos"], 0.0));
         if (const auto& colors = cbp["colors"]; colors.is_array()) {
@@ -77,6 +78,9 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         params.time_series_interval = get_string(time_series["interval"], "month");
         params.time_series_start = get_string(time_series["start"]);
         params.time_series_end = get_string(time_series["end"]);
+        params.time_series_slot_width = get_double(time_series["slot_width"], 0.0);
+        params.time_series_label_scale = get_double(time_series["label_scale"], 0.0);
+        params.time_series_label_rotation = get_string(time_series["label_rotation"]);
     }
     if (const auto& legend = config["legend"]; legend.is_object())
         params.legend = get_bool(legend["show"]);

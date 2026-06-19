@@ -262,6 +262,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // explicit by-continent / by-aa-pos colourings do, matching acmacs-tal which recolours
     // edges only for those modes). Keeps the tree black under clades-whocc.
     const auto edge_color_for = [&](const Leaf& leaf) -> Color {
+        if (!params.color_edges)             // WHOCC report: matrix is continent-coloured, edges stay black
+            return BLACK;
         if (params.color_by_pos > 0)
             return leaf.aa.size() > color_pos0 ? pos_color_for(leaf.aa[color_pos0]) : GREY50;
         if (params.color_by_continent)
@@ -283,7 +285,13 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double hz_w = params.hz_sections.empty() ? 0.0 : 0.005 * drawable_w; // AD hz-section-marker reserve (no left label column)
     const double label_w = params.labels ? 0.16 * drawable_w : 0.0;
     const double clade_w = params.clades && !visible_clades.empty() ? 0.09 * drawable_w : 0.0;
-    const double ts_w = params.time_series && !time_series.slots.empty() ? 0.34 * drawable_w : 0.0;
+    // AD sizes the time-series column as n_slots * slot.width (slot.width a fraction of
+    // height); honour it so the column is AD's narrow width, falling back to 0.34·drawable.
+    const double ts_w = (params.time_series && !time_series.slots.empty())
+        ? (params.time_series_slot_width > 0.0
+               ? static_cast<double>(time_series.slots.size()) * params.time_series_slot_width * height
+               : 0.34 * drawable_w)
+        : 0.0;
     const double dash_col_w = 0.022 * drawable_w;                       // width of one dash-bar column
     const double dash_w = static_cast<double>(params.dash_bars.size()) * dash_col_w;
     const int n_right = (label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0) + (dash_w > 0.0);
@@ -563,14 +571,23 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             }
         }
 
-        // slot labels (rotated, reading upward) below the column. AD's TimeSeries::labels
-        // formats month slots as "%b" + "%y" (e.g. "Mar 24", black), year slots as "%y".
+        // slot labels (rotated). AD's TimeSeries::labels formats month slots as "%b" + "%y"
+        // (e.g. "Mar 24", black), year slots as "%y". The report's slot.label sets a small
+        // scale (size = slot.width * scale * height) and rotation "clockwise" (dates read
+        // top-to-bottom). Drawn at BOTH the top and bottom of the matrix.
         static const char* const kMonth3[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
         const bool yearly = params.time_series_interval == "year";
-        const double slot_fs = std::clamp(slot_w * 0.7, 5.0, 10.0);
-        const double bottom_anchor_y = bottom + bottom_reserve * 0.9; // labels read upward, below the matrix
-        const double top_anchor_y = top - 2.0;                        // and above it (AD draws both)
+        const double slot_fs = (params.time_series_label_scale > 0.0 && params.time_series_slot_width > 0.0)
+            ? std::max(params.time_series_slot_width * params.time_series_label_scale * height, 2.5)
+            : std::clamp(slot_w * 0.7, 5.0, 10.0);
+        const bool clockwise = params.time_series_label_rotation == "clockwise";
+        const double angle = clockwise ? 90.0 : -90.0;
+        // perpendicular offset to centre the text band in the slot; the sign flips with rotation
+        const double xoff = clockwise ? -slot_fs * 0.35 : slot_fs * 0.35;
+        // reading anchors: clockwise reads downward (start high), anticlockwise reads upward (start low)
+        const double bottom_anchor_y = clockwise ? bottom + slot_fs * 0.6 : bottom + bottom_reserve * 0.9;
+        const double top_anchor_y = clockwise ? top - bottom_reserve * 0.9 : top - 2.0;
         for (std::size_t i = 0; i < n_slots; ++i) {
             const std::string& slot_first = time_series.slots[i].first;     // "YYYY-MM-DD"
             std::string label;
@@ -584,9 +601,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1] : slot_first.substr(5, 2);
                 label = fmt::format("{} {}", mon, yy);
             }
-            const double lx = x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + slot_fs * 0.35;
-            pdf.text_rotated(lx, bottom_anchor_y, label, slot_fs, BLACK, -90.0);
-            pdf.text_rotated(lx, top_anchor_y, label, slot_fs, BLACK, -90.0);
+            const double lx = x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + xoff;
+            pdf.text_rotated(lx, bottom_anchor_y, label, slot_fs, BLACK, angle);
+            pdf.text_rotated(lx, top_anchor_y, label, slot_fs, BLACK, angle);
         }
     }
 
