@@ -72,8 +72,11 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         }
     }
 
-    if (const auto& clades = config["clades"]; clades.is_object())
+    if (const auto& clades = config["clades"]; clades.is_object()) {
         params.clades = get_bool(clades["show"]);
+        params.clades_slot_width = get_double(clades["slot_width"], 0.0);
+        params.clades_label_scale = get_double(clades["label_scale"], 0.0);
+    }
     if (const auto& time_series = config["time_series"]; time_series.is_object()) {
         params.time_series = get_bool(time_series["show"]);
         params.time_series_interval = get_string(time_series["interval"], "month");
@@ -100,7 +103,15 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
             if (!entry.is_object())
                 continue;
             if (std::string name = get_string(entry["name"]); !name.empty())
-                params.clade_styles.insert_or_assign(std::move(name), CladeStyle{.color = get_string(entry["color"]), .display_name = get_string(entry["display_name"]), .hide = get_bool(entry["hide"])});
+                params.clade_styles.insert_or_assign(std::move(name), CladeStyle{
+                    .color = get_string(entry["color"]),
+                    .display_name = get_string(entry["display_name"]),
+                    .hide = get_bool(entry["hide"]),
+                    .slot = entry["slot"].is_null() ? -1 : static_cast<int>(get_double(entry["slot"], -1.0)),
+                    .label_scale = get_double(entry["label_scale"], 0.0),
+                    .rotation_degrees = static_cast<int>(get_double(entry["rotation_degrees"], 90.0)),
+                    .section_inclusion_tolerance = get_double(entry["section_inclusion_tolerance"], 0.0),
+                    .section_exclusion_tolerance = get_double(entry["section_exclusion_tolerance"], 0.0)});
         }
     }
 

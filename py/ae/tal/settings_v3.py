@@ -422,6 +422,16 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 # (color_by_continent already set) the matrix stays continent-coloured.
                 if not schema.get("color_by_continent"):
                     schema["color_by_clade"] = True
+                # slot geometry + default label scale (AD Clades::Parameters): the column lays
+                # brackets out at slot.width*(slot+1); label_size = slot.width * scale.
+                slot = cmd.get("slot")
+                if isinstance(slot, dict) and isinstance(slot.get("width"), (int, float)):
+                    clades["slot_width"] = float(slot["width"])
+                all_clades = cmd.get("all-clades")
+                if isinstance(all_clades, dict):
+                    al = all_clades.get("label")
+                    if isinstance(al, dict) and isinstance(al.get("scale"), (int, float)):
+                        clades["label_scale"] = float(al["scale"])
                 for pc in cmd.get("per-clade", []):
                     if not isinstance(pc, dict) or not pc.get("name"):
                         continue
@@ -434,6 +444,23 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                         style["display_name"] = pc["display_name"]
                     elif isinstance(pc.get("label"), dict) and "text" in pc["label"]:
                         style["display_name"] = pc["label"]["text"]  # label.text doubles as the display name
+                    # explicit slot (AD honours per-clade slot; set_slots only fills NoSlot)
+                    if isinstance(pc.get("slot"), (int, float)):
+                        style["slot"] = int(pc["slot"])
+                    # per-clade label scale + rotation (the report's `label` is an array whose
+                    # first element carries rotation_degrees/scale; tolerate the dict form too)
+                    lab = pc.get("label")
+                    lab0 = lab[0] if isinstance(lab, list) and lab and isinstance(lab[0], dict) else (lab if isinstance(lab, dict) else None)
+                    if isinstance(lab0, dict):
+                        if isinstance(lab0.get("scale"), (int, float)):
+                            style["label_scale"] = float(lab0["scale"])
+                        if isinstance(lab0.get("rotation_degrees"), (int, float)):
+                            style["rotation_degrees"] = int(lab0["rotation_degrees"])
+                    # section merge/drop tolerances (AD make_sections; in leaf-index units)
+                    if isinstance(pc.get("section-inclusion-tolerance"), (int, float)):
+                        style["section_inclusion_tolerance"] = float(pc["section-inclusion-tolerance"])
+                    if isinstance(pc.get("section-exclusion-tolerance"), (int, float)):
+                        style["section_exclusion_tolerance"] = float(pc["section-exclusion-tolerance"])
                     if len(style) > 1:  # name + at least one styling key
                         schema.setdefault("clade_styles", []).append(style)
             elif name == "time-series":

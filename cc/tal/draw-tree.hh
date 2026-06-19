@@ -38,6 +38,11 @@ namespace ae::tal
         std::string color{};
         std::string display_name{};
         bool hide{false}; // suppress this clade's bar + label from the clades column / legend (acmacs-tal per-clade show:false)
+        int slot{-1};                          // explicit horizontal slot (AD per-clade slot); -1 = compute via set_slots
+        double label_scale{0.0};               // label size = clades slot.width * this scale; 0 = column default
+        int rotation_degrees{90};              // label rotation (90 = clockwise / top-to-bottom, AD report default)
+        double section_inclusion_tolerance{0.0}; // merge sections whose gap (leaf indices) <= this (AD make_sections)
+        double section_exclusion_tolerance{0.0}; // drop sections whose size (leaves) <= this
     };
 
     // A node-select / node-apply mod — the core of the acmacs-tal settings pipeline.
@@ -132,6 +137,8 @@ namespace ae::tal
         int color_by_pos{0};         // colour leaves by amino acid at this 1-based position (0 = off)
         std::map<char, std::string> color_by_pos_colors{}; // aa char -> colour for color_by_pos; empty = colour by frequency
         bool clades{false};          // draw the clade-sections column
+        double clades_slot_width{0.0};   // clade column slot width as a fraction of height (AD clades slot.width); 0 = derived
+        double clades_label_scale{0.0};  // default per-clade label scale (AD all-clades label.scale); 0 = 1.0
         bool time_series{false};     // draw the time-series dash column
         std::string time_series_interval{"month"}; // year | month | week | day
         std::string time_series_start{};            // optional "YYYY-MM-DD" range start

@@ -192,6 +192,83 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         }
     }
 
+    // --- clade placement (port of acmacs-tal Clades::make_sections + set_slots) ---
+    // For each visible clade: merge its sections with the per-clade section-inclusion-tolerance
+    // (bridge gaps) and drop sections <= section-exclusion-tolerance (both in leaf-index units);
+    // then assign a horizontal slot — the explicit per-clade slot when given, else set_slots
+    // (smallest clade -> slot 0 nearest the matrix, larger/parent clades bumped rightward).
+    struct CladeBand { long first_v; long last_v; std::size_t size; };
+    struct CladePlan { std::size_t rank; std::vector<CladeBand> bands; int slot; long first_v; long last_v; std::size_t longest; double label_scale; int rotation; };
+    std::vector<CladePlan> clade_plan;
+    int clade_max_slot = 0;
+    {
+        for (const std::size_t k : visible_clades) {
+            const Clade& clade = clade_sections[k];
+            if (clade.sections.empty())
+                continue;
+            const auto* style = params.clade_styles.count(clade.name) ? &params.clade_styles.at(clade.name) : nullptr;
+            const double incl = style ? style->section_inclusion_tolerance : 0.0;
+            const double excl = style ? style->section_exclusion_tolerance : 0.0;
+            // merge adjacent sections whose gap <= inclusion tolerance
+            std::vector<CladeBand> bands;
+            for (const auto& section : clade.sections) {
+                const long fv = static_cast<long>(section.first_vertical), lv = static_cast<long>(section.last_vertical);
+                if (!bands.empty() && static_cast<double>(fv - bands.back().last_v) <= incl) {
+                    bands.back().last_v = lv;
+                    bands.back().size += section.size();
+                }
+                else
+                    bands.push_back({fv, lv, section.size()});
+            }
+            // drop bands whose size <= exclusion tolerance; if all drop, keep the largest
+            std::vector<CladeBand> kept;
+            for (const auto& b : bands)
+                if (static_cast<double>(b.size) > excl)
+                    kept.push_back(b);
+            if (kept.empty()) {
+                const CladeBand* big = &bands.front();
+                for (const auto& b : bands) if (b.size > big->size) big = &b;
+                kept.push_back(*big);
+            }
+            std::size_t longest = 0;
+            for (const auto& b : kept) longest = std::max(longest, b.size);
+            const int slot = style ? style->slot : -1;
+            const double lscale = (style && style->label_scale > 0.0) ? style->label_scale
+                                    : (params.clades_label_scale > 0.0 ? params.clades_label_scale : 1.0);
+            const int rot = style ? style->rotation_degrees : 90;
+            clade_plan.push_back({k, std::move(kept), slot, 0, 0, longest, lscale, rot});
+            clade_plan.back().first_v = clade_plan.back().bands.front().first_v;
+            clade_plan.back().last_v = clade_plan.back().bands.back().last_v;
+        }
+        // set_slots for clades without an explicit slot: smallest first; bump to the first slot
+        // not clashing (vertical overlap) with an already-placed clade at that slot.
+        std::vector<CladePlan*> refs;
+        for (auto& p : clade_plan) refs.push_back(&p);
+        std::sort(refs.begin(), refs.end(), [](const CladePlan* a, const CladePlan* b) {
+            return a->longest != b->longest ? a->longest < b->longest : (a->last_v - a->first_v) < (b->last_v - b->first_v);
+        });
+        std::vector<std::vector<std::pair<long, long>>> occupied;
+        const auto place = [&](CladePlan* p, int slot) {
+            if (slot >= static_cast<int>(occupied.size())) occupied.resize(slot + 1);
+            occupied[slot].emplace_back(p->first_v, p->last_v);
+            p->slot = slot;
+            clade_max_slot = std::max(clade_max_slot, slot);
+        };
+        for (auto* p : refs) if (p->slot >= 0) place(p, p->slot);     // explicit slots first
+        for (auto* p : refs) {
+            if (p->slot >= 0) continue;
+            int slot = 0;
+            for (;; ++slot) {
+                if (slot >= static_cast<int>(occupied.size())) { occupied.emplace_back(); break; }
+                bool clash = false;
+                for (const auto& sp : occupied[slot])
+                    if (p->first_v < sp.second && sp.first < p->last_v) { clash = true; break; }
+                if (!clash) break;
+            }
+            place(p, slot);
+        }
+    }
+
     // clade colour/name with optional per-clade overrides from the settings DSL
     const auto clade_color_for = [&](std::size_t rank, const std::string& name) -> Color {
         if (const auto it = params.clade_styles.find(name); it != params.clade_styles.end() && !it->second.color.empty()) {
@@ -284,7 +361,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double gap = 0.012 * width;
     const double hz_w = params.hz_sections.empty() ? 0.0 : 0.005 * drawable_w; // AD hz-section-marker reserve (no left label column)
     const double label_w = params.labels ? 0.16 * drawable_w : 0.0;
-    const double clade_w = params.clades && !visible_clades.empty() ? 0.09 * drawable_w : 0.0;
+    // AD clade column width = (max_slot + 2) * slot.width (a fraction of height). Honour it so
+    // brackets land at slot.width*(slot+1); fall back to the old fraction when no slot.width given.
+    const double clade_slot_px = params.clades_slot_width > 0.0 ? params.clades_slot_width * height : 0.0;
+    const double clade_w = (params.clades && !visible_clades.empty())
+        ? (clade_slot_px > 0.0 ? static_cast<double>(clade_max_slot + 2) * clade_slot_px : 0.09 * drawable_w)
+        : 0.0;
     // AD sizes the time-series column as n_slots * slot.width (slot.width a fraction of
     // height); honour it so the column is AD's narrow width, falling back to 0.34·drawable.
     const double ts_w = (params.time_series && !time_series.slots.empty())
@@ -457,103 +539,43 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         }
     }
 
-    // --- clades column (acmacs-tal Clades): each shown clade is a vertical double-arrow
-    //     bracket spanning its leaf run, in a slot, with a rotated name label. Nested clades
-    //     are pushed to inner slots (set_slots): the widest, outermost clade sits at the right
-    //     edge (slot 0) and sub-clades stack leftwards, giving AD's right-hand bracket staircase.
-    if (clade_w > 0.0 && !visible_clades.empty()) {
-        // ae's compute_clade_sections has no section tolerance (unlike acmacs-tal's
-        // section-inclusion/exclusion-tolerance), so a clade that is interrupted by a few
-        // interspersed leaves fragments into dozens of tiny sections. Approximate the AD
-        // tolerances at draw time: drop sections below a leaf-count floor (speckle), then
-        // merge survivors separated by a small vertical gap into one band — so each clade
-        // renders as one (or a few) clean brackets, not a cloud of one-leaf ticks.
-        const double min_section = std::max(5.0, 0.001 * height_units); // drop sections smaller than this
-        const double merge_gap = 0.04 * height_units;                   // bridge gaps up to this many leaves
-
-        struct Band { double y0; double y1; std::size_t size; }; // one merged bracket
-        struct CladeDraw { std::size_t rank; std::vector<Band> bands; double y0; double y1; int slot; };
-        std::vector<CladeDraw> draws;
-        draws.reserve(visible_clades.size());
-        for (const std::size_t k : visible_clades) {
-            const Clade& clade = clade_sections[k];
-            if (clade.sections.empty())
-                continue;
-            // keep sections above the floor; if none clear it, keep just the largest so the clade still shows
-            std::vector<const CladeSection*> kept;
-            for (const auto& section : clade.sections)
-                if (static_cast<double>(section.size()) >= min_section)
-                    kept.push_back(&section);
-            if (kept.empty()) {
-                const CladeSection* largest = &clade.sections.front();
-                for (const auto& section : clade.sections)
-                    if (section.size() > largest->size())
-                        largest = &section;
-                kept.push_back(largest);
-            }
-            // merge kept sections (already top-to-bottom) separated by <= merge_gap into bands
-            std::vector<Band> bands;
-            double cur_first_v = kept.front()->first_vertical, cur_last_v = kept.front()->last_vertical;
-            std::size_t cur_size = kept.front()->size();
-            for (std::size_t i = 1; i < kept.size(); ++i) {
-                if (static_cast<double>(kept[i]->first_vertical) - cur_last_v <= merge_gap) {
-                    cur_last_v = kept[i]->last_vertical;
-                    cur_size += kept[i]->size();
-                }
-                else {
-                    bands.push_back({dev_y(cur_first_v), dev_y(cur_last_v), cur_size});
-                    cur_first_v = kept[i]->first_vertical;
-                    cur_last_v = kept[i]->last_vertical;
-                    cur_size = kept[i]->size();
-                }
-            }
-            bands.push_back({dev_y(cur_first_v), dev_y(cur_last_v), cur_size});
-            double y0 = bands.front().y0, y1 = bands.back().y1;
-            draws.push_back({k, std::move(bands), y0, y1, 0});
-        }
-
-        // slot assignment (acmacs-tal set_slots): widest extent first -> slot 0 (the LEFT edge,
-        // nearest the matrix); a clade overlapping an already-placed one is bumped to a higher
-        // slot -> further RIGHT. So a parent sits left and its nested sub-clades step rightward,
-        // matching AD's report layout (time-series-to-the-left: deeper clades increment right).
-        std::sort(draws.begin(), draws.end(), [](const CladeDraw& a, const CladeDraw& b) { return (a.y1 - a.y0) > (b.y1 - b.y0); });
-        std::vector<std::vector<std::pair<double, double>>> occupied; // per slot: occupied [y0,y1] extents
-        for (auto& draw : draws) {
-            int slot = 0;
-            for (;; ++slot) {
-                if (slot >= static_cast<int>(occupied.size()))
-                    occupied.emplace_back();
-                bool clash = false;
-                for (const auto& span : occupied[slot])
-                    if (draw.y0 < span.second && span.first < draw.y1) { clash = true; break; }
-                if (!clash) { occupied[slot].emplace_back(draw.y0, draw.y1); draw.slot = slot; break; }
-            }
-        }
-        const int n_slots = std::max<int>(1, static_cast<int>(occupied.size()));
-        const double slot_w = clade_w / static_cast<double>(n_slots);
-        const double cap = std::clamp(slot_w * 0.16, 1.0, 4.0); // arrowhead half-width
-        // AD label_size = slot.width * label.scale (reports: ~0.007·height × 1.4 ≈ 0.0098·height).
-        const double clade_fs = std::clamp(0.0095 * height, 6.0, 14.0);
-        const double left_edge = x_clade0; // viewport.left (AD horizontal_line extends to here, matrix side)
-        for (const auto& draw : draws) {
-            const Clade& clade = clade_sections[draw.rank];
-            const double cx = x_clade0 + (static_cast<double>(draw.slot) + 0.5) * slot_w; // slot 0 = left edge
-            const Band* widest = nullptr;
-            for (const auto& band : draw.bands) {
-                pdf.line(cx, band.y0, cx, band.y1, BLACK, 0.7);             // double-arrow spine
-                pdf.line(cx - cap, band.y0 + cap, cx, band.y0, BLACK, 0.7); // top arrowhead (two strokes)
-                pdf.line(cx + cap, band.y0 + cap, cx, band.y0, BLACK, 0.7);
-                pdf.line(cx - cap, band.y1 - cap, cx, band.y1, BLACK, 0.7); // bottom arrowhead
-                pdf.line(cx + cap, band.y1 - cap, cx, band.y1, BLACK, 0.7);
-                pdf.line(left_edge, band.y0, cx, band.y0, BLACK, 0.4);      // top horizontal arm (AD horizontal_line, matrix side)
-                pdf.line(left_edge, band.y1, cx, band.y1, BLACK, 0.4);      // bottom horizontal arm
+    // --- clades column (port of acmacs-tal Clades::draw): each shown clade's bands are vertical
+    //     double-arrow brackets at slot.width*(slot+1) from the matrix edge (slot 0 nearest the
+    //     matrix, deeper clades stepping right), with horizontal arms to the matrix side and a
+    //     name label rotated clockwise (top-to-bottom), sized slot.width * per-clade scale. ---
+    if (clade_w > 0.0 && !clade_plan.empty()) {
+        const double slot_px = clade_slot_px > 0.0 ? clade_slot_px : clade_w / static_cast<double>(clade_max_slot + 2);
+        const double cap = std::clamp(slot_px * 0.32, 1.0, 4.0); // arrowhead half-width
+        const double left_edge = x_clade0;                       // viewport.left (matrix side)
+        for (const auto& plan : clade_plan) {
+            const Clade& clade = clade_sections[plan.rank];
+            const double cx = x_clade0 + slot_px * (static_cast<double>(plan.slot) + 1.0); // AD pos_x
+            // label size = slot.width * scale (AD); fall back to a fraction of height if no slot.width
+            const double clade_fs = clade_slot_px > 0.0 ? std::clamp(clade_slot_px * plan.label_scale, 4.0, 20.0)
+                                                        : std::clamp(0.0095 * height, 6.0, 14.0);
+            const CladeBand* widest = nullptr;
+            for (const auto& band : plan.bands) {
+                const double y0 = dev_y(static_cast<double>(band.first_v)), y1 = dev_y(static_cast<double>(band.last_v));
+                pdf.line(cx, y0, cx, y1, BLACK, 0.7);             // double-arrow spine
+                pdf.line(cx - cap, y0 + cap, cx, y0, BLACK, 0.7); // top arrowhead (two strokes)
+                pdf.line(cx + cap, y0 + cap, cx, y0, BLACK, 0.7);
+                pdf.line(cx - cap, y1 - cap, cx, y1, BLACK, 0.7); // bottom arrowhead
+                pdf.line(cx + cap, y1 - cap, cx, y1, BLACK, 0.7);
+                pdf.line(left_edge, y0, cx, y0, BLACK, 0.4);      // top horizontal arm (AD horizontal_line)
+                pdf.line(left_edge, y1, cx, y1, BLACK, 0.4);      // bottom horizontal arm
                 if (widest == nullptr || band.size > widest->size)
                     widest = &band;
             }
-            if (widest != nullptr) { // name label, rotated to read upward, just right of the spine
+            if (widest != nullptr) {
                 const std::string name = clade_display_for(clade.name);
-                const double ym = (widest->y0 + widest->y1) / 2.0;
-                pdf.text_rotated(cx + cap + clade_fs * 0.9, ym + name.size() * clade_fs * 0.28, name, clade_fs, BLACK, -90.0);
+                const double y0 = dev_y(static_cast<double>(widest->first_v)), y1 = dev_y(static_cast<double>(widest->last_v));
+                // clockwise (top-to-bottom): anchor near the band top, just right of the spine, text reads down
+                const bool clockwise = plan.rotation == 90;
+                const double angle = clockwise ? 90.0 : -90.0;
+                const double tx = cx + cap + clade_fs * 0.35;
+                const double ty = clockwise ? std::min(y0, y1) + clade_fs * 0.2
+                                            : (y0 + y1) / 2.0 + name.size() * clade_fs * 0.28;
+                pdf.text_rotated(tx, ty, name, clade_fs, BLACK, angle);
             }
         }
     }
