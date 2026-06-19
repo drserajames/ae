@@ -231,22 +231,26 @@
 
   // ---- F2: bold black outline on tips that are "new" (since report / VCM) ----
   // Antigen semantic `new` = 1 (since previous report) → width 3, 2 (since previous
-  // VCM) → width 6, raised to front — matching the map (chart_modifier.py:127).
-  // Driven by Agent-SELECT's Overlays "new since" toggle; the flag's final name isn't
-  // landed yet, so read it defensively (any of these truthy ⇒ on). Inert until both
-  // the toggle and Agent-EXP's antigen `new` field exist (newLevel stays 0).
-  function newHighlightOn() {
-    return !!(State.showNew || State.newSince || State.highlightNew);
+  // VCM) → width 6, raised to front — matching the map (chart_modifier.py:127). Driven
+  // by Agent-SELECT's Overlays toggles. Same gating as map.js (newOutlineWidth): the
+  // showNewReport toggle covers new>=1 (so new=2 shows at width 6 under it too), and
+  // showNewVCM covers new==2. Inert until Agent-EXP's antigen `new` field lands.
+  function newOutlineWidth(nw) {
+    let w = 0;
+    if (State.showNewReport && nw >= 1) w = nw === 2 ? 6 : 3;
+    if (State.showNewVCM && nw === 2) w = 6;
+    return w;
   }
-  let _newApplied = null;   // memo: last applied on/off, so we only restyle on a flip
+  let _newApplied = null;   // memo of last applied flags, so we only restyle on a change
   function applyNewHighlight(force) {
-    const on = newHighlightOn();
-    if (!force && _newApplied === on) return;
-    _newApplied = on;
+    const key = (State.showNewReport ? 1 : 0) + "|" + (State.showNewVCM ? 1 : 0);
+    if (!force && _newApplied === key) return;
+    _newApplied = key;
     for (const t of tipEntries) {
-      if (on && t.newLevel) {
+      const w = newOutlineWidth(t.newLevel);
+      if (w) {
         t.el.setAttribute("stroke", "#000");
-        t.el.setAttribute("stroke-width", t.newLevel >= 2 ? 6 : 3);
+        t.el.setAttribute("stroke-width", w);
         if (t.el.parentNode) t.el.parentNode.appendChild(t.el);   // raise to front
       } else {
         t.el.setAttribute("stroke", tipStrokeFor(t.vac));
