@@ -33,7 +33,9 @@
   let maxX = 0;              // max cumulative branch length (tree-space x extent)
   let tipNodes = {};         // norm -> [circle elements]
   let tipEntries = [];       // [{node, circle, label}] for fast reposition on zoom/pan
-  let edgesG = null;         // transformed <g> holding the edge path + branch hit paths
+  let edgePath = null;       // visible edge <path>, drawn in SCREEN space, rebuilt in apply()
+  let hitG = null;           // transformed <g> of (invisible) branch-click hit paths
+  let edgeSegs = [];         // tree-space edge segments {kind:'v'|'h',...}, projected each apply()
   let infoOpen = false;      // is the T4 AA panel showing?
 
   // viewport: X is always fit (screen_x = pad + kx*tx). Y zooms/pans:
@@ -97,7 +99,7 @@
     s.id = "treeStyle";
     s.textContent = `
       #treeScroll { overflow:hidden; position:relative; }
-      .edge { stroke:#999; stroke-width:1; fill:none; vector-effect:non-scaling-stroke; }
+      .edge { stroke:#999; stroke-width:1; fill:none; }
       .ehit { stroke:transparent; stroke-width:8; fill:none; vector-effect:non-scaling-stroke; cursor:pointer; }
       .tipLabel { font-size:9px; fill:#333; pointer-events:none; }
       .cladeLabel { font-size:11px; font-weight:700; pointer-events:none;
@@ -302,18 +304,22 @@
     svg.setAttribute("width", fit.W);
     svg.setAttribute("height", fit.H);   // no viewBox: 1 user unit == 1 px (S1 box-select)
 
-    // edges in tree-space inside one transformed group (T1 clean elbows; T3 pan/zoom)
-    edgesG = el("g", { id: "treeEdges" });
-    svg.appendChild(edgesG);
-    let dAll = "";
-    const hitG = el("g");
+    // Edges: the VISIBLE edge is one <path> drawn in SCREEN space (rebuilt in apply,
+    // like the tips) — an anisotropic group transform (x≈×15000, y≈×0.36) plus
+    // non-scaling-stroke defers rasterisation until a reflow, so the lines were
+    // invisible until the first view change. Building screen-space d guarantees they
+    // paint whenever the tips do. The (invisible) branch-click hit paths stay in a
+    // transformed group: hit-testing doesn't depend on paint, so this is cheap and the
+    // anisotropy is harmless for them. Both use the same matrix, so they stay aligned.
+    edgeSegs = [];
+    hitG = el("g", { id: "treeEdges" });
     (function edges(n) {
       const kids = n.children || [];
       if (!kids.length) return;
       const ys = kids.map(c => c._y);
-      dAll += `M${n.x} ${Math.min(...ys)}V${Math.max(...ys)}`;   // one riser, no gaps
+      edgeSegs.push({ kind: "v", x: n.x, y0: Math.min(...ys), y1: Math.max(...ys) }); // riser, no gaps
       kids.forEach(c => {
-        dAll += `M${n.x} ${c._y}H${c.x}`;                        // horizontal into child
+        edgeSegs.push({ kind: "h", x: n.x, x1: c.x, y: c._y });                       // branch into child
         const hit = el("path", { class: "ehit", d: `M${n.x} ${c._y}H${c.x}` });
         // keep S1's box-select from starting on a branch press; act on click
         hit.addEventListener("mousedown", ev => ev.stopPropagation());
@@ -322,8 +328,9 @@
         edges(c);
       });
     })(IV.DATA.tree);
-    edgesG.appendChild(el("path", { class: "edge", d: dAll || "M0 0" }));
-    edgesG.appendChild(hitG);
+    edgePath = el("path", { class: "edge" });   // screen-space; d set in apply()
+    svg.appendChild(edgePath);
+    svg.appendChild(hitG);
 
     // tips + labels in screen space (positioned in apply())
     const tipsG = el("g", { id: "treeTips" });
@@ -382,13 +389,22 @@
   // ---- viewport apply (positions everything from view state) ----
   function apply() {
     pendingApply = false;
-    if (!edgesG) return;
+    if (!edgePath) return;
     if (svgEl) {   // keep the SVG sized to the (possibly re-measured) pane — #1
       svgEl.setAttribute("width", fit.W);
       svgEl.setAttribute("height", fit.H);
     }
     const m = mat();
-    edgesG.setAttribute("transform", `matrix(${m.a},0,0,${m.d},${m.e},${m.f})`);
+    const SX = x => m.a * x + m.e, SY = y => m.d * y + m.f;
+    // rebuild the visible edge path in screen space (paints whenever tips do)
+    let d = "";
+    for (const s of edgeSegs) {
+      if (s.kind === "v") d += `M${SX(s.x)} ${SY(s.y0)}V${SY(s.y1)}`;
+      else d += `M${SX(s.x)} ${SY(s.y)}H${SX(s.x1)}`;
+    }
+    edgePath.setAttribute("d", d || "M0 0");
+    // hit paths stay in tree space; one matrix keeps them aligned with the screen edges
+    hitG.setAttribute("transform", `matrix(${m.a},0,0,${m.d},${m.e},${m.f})`);
     const showLabels = (view.z * fit.ky) >= 9;   // only label when rows are legible
     for (const t of tipEntries) {
       const cx = m.a * t.node.x + m.e, cy = m.d * t.node._y + m.f;
