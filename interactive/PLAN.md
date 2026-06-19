@@ -238,3 +238,40 @@ Verify/commit/WHO/rAF rules as in v3.
 Placement: F2 highlight = Overlays toggles + bold outline (not colour menu); F3 circles =
 Overlays (all / on-select), serum-coverage point colouring = Colour menu. Dependencies:
 all viewer F-tasks need Agent-EXP's new fields first. Verify/commit/WHO/rAF rules as in v3.
+
+---
+
+# v7 — fifth feedback wave (4 refinements)
+
+Theme: new-since and serum-coverage should both use the **dim-the-others emphasis**
+(like clade-select "select" mode), not bold outlines / pale tints.
+
+## Diagnoses (investigated)
+- **#1 double-click isolate fails on the MAP:** two dblclick listeners on the *same*
+  `#mapSvg` node — `state.js` isolate (capture, `stopPropagation`) + `map.js` `resetView`
+  (bubble, ~line 370). `stopPropagation` does NOT block a same-node listener, so a point
+  dblclick both isolates AND resets zoom. (Tree works: its resetView is on the container.)
+- **#2 clade labels K/J.2.5 too low:** anchored at the clade's **median tip row**; for
+  nested/spread clades the median lands below the branch. Anchor at the clade's MRCA node y.
+
+## Tasks
+- **#1** Agent-MAP: in `map.js` dblclick, `return` (skip resetView) when
+  `e.target.closest("[data-norm]")`; Agent-SELECT: isolate handler uses
+  `stopImmediatePropagation()` for belt-and-braces. Verify a map point dblclick isolates
+  (and shows only that point's lines) without resetting zoom.
+- **#2** Agent-TREE: anchor each clade label at the clade's representative internal node
+  (MRCA of its tips) y, not the median tip row. Verify K and J.2.5 sit on their branch.
+- **#3** new-since = emphasis, not outline. Agent-SELECT: fold the new-since set
+  (`new`=1 for showNewReport, `new`>=1 for showNewVCM) into `emphasis()` so non-matching
+  antigens DIM (like clade-select); Agent-MAP + Agent-TREE: remove the width-3/6 black
+  outline render. (Toggles stay in Overlays.)
+- **#4** serum-coverage rework (single serum selected only):
+  - untitrated antigens → DIM/transparent (like clade-select), not pale-lightened.
+  - titrated ≤4-fold of homologous (`log2(titer/10) >= log2(hom/10) − 2`) → **pink** outline;
+    >4-fold → **black** outline **thicker than pink** (e.g. pink 3, black 4–5).
+  - gate on EXACTLY one serum selected.
+  - **NEW: apply the same coverage treatment on the tree tips.**
+  Agent-COLOUR (outline widths + untitrated→dim) + Agent-MAP (apply) + Agent-TREE (coverage
+  on tips) + Agent-SELECT (single-serum gating + emphasis integration).
+
+Verify/commit/WHO/rAF rules as in v3.
