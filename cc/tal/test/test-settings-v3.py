@@ -52,15 +52,31 @@ def check_dash_bar_colors() -> dict:
     """dash-bar-aa-at `colors` (aa->colour object, "transparent" = don't draw) must pass
     through to the schema as a [{aa,color}] array so the bar shows AD's exact variant colours."""
     tal = {"tal": [
-        {"N": "dash-bar-aa-at", "pos": 135, "colors": {"T": "transparent", "K": "#07e8c4", "A": "#00939f"}},
+        {"N": "dash-bar-aa-at", "pos": 135, "colors": {"T": "transparent", "K": "#07e8c4", "A": "#00939f"},
+         "labels": {"K": {"text": "135K", "color": "#07e8c4"}, "A": {"text": "135A", "color": "#00939f"},
+                    "X": {"text": "."}}},
+        # a select-based dash-bar (h1-style) must be skipped over ?-disabled stubs and extracted
+        {"?N": "dash-bar-aa-at", "id": "disabled", "pos": 999},
+        {"N": "dash-bar", "id": "bar-155-156", "nodes": [
+            {"select": {"aa": ["156N", "155G"]}, "color": "#03569b"},
+            {"select": {"aa": ["155E"]}, "color": "#ffc808"}],
+         "labels": [{"text": "156N", "color": "#03569b"}, {"text": "155E", "color": "#ffc808"}]},
     ]}
     schema, _ = translate(tal)
-    bar = schema.get("dash_bars", [{}])[0]
+    bars = schema.get("dash_bars", [])
+    bar = bars[0] if bars else {}
     cols = {c["aa"]: c["color"] for c in bar.get("colors", [])}
+    leg = {l["text"]: l for l in bar.get("legend", [])}
+    sel_bar = next((b for b in bars if b.get("selects")), {})
     return {
         "dash-bar pos passed": bar.get("pos") == 135,
         "dash-bar colors -> [{aa,color}]": cols.get("K") == "#07e8c4" and cols.get("A") == "#00939f",
         "dash-bar transparent preserved": cols.get("T") == "transparent",
+        "legend carries aa key (for actual-colour swatch)": leg.get("135K", {}).get("aa") == "K",
+        "legend skips '.' placeholders": "." not in leg,
+        "?N-disabled dash bar skipped, active ones kept": len(bars) == 2 and all("pos" not in b or b["pos"] != 999 for b in bars),
+        "select-based dash-bar extracted": len(sel_bar.get("selects", [])) == 2,
+        "select conditions parsed": sel_bar.get("selects", [{}])[0].get("aa") == ["156N", "155G"],
     }
 
 
