@@ -202,3 +202,39 @@ timing), squishing the phylogram into a ~156px band that reads as "no lines."
 Dependencies: glyph shape fixes land with map+tree shape adoption; #2 needs Agent-EXP
 `clade_short` before Agent-TREE; F2 = Agent-SELECT (store) + Agent-COLOUR (legend) together.
 Verify/commit/WHO/rAF rules as in v3.
+
+---
+
+# v6 — fourth feedback wave (6 fixes + 3 features)
+
+## Canonical references (investigated; use verbatim)
+
+- **Time-since-collection gradient (F1):** viridis 3-point Bézier — `#440154` (oldest) →
+  `#40ffff` → `#fde725` (newest), quadratic Bernstein per channel, `t = i/(n−1)` linear
+  over the date window. Anchor newest = page-generation date; span back to oldest antigen
+  date. (from acmacs-tal `color-gradient.cc`.)
+- **New since report/VCM (F2):** antigen semantic `T.new` = 1 (since previous **report**) or
+  2 (since previous **VCM**). Style = bold **black outline**, width **3** for new=1, **6**
+  for new=2, raised to front (`chart_modifier.py:127`). Export `new` per antigen.
+- **Serum circles (F3):** `proj.serum_circles(fold=2.0)` → per-serum `.theoretical()` /
+  `.empirical()` (floored 2.0; report shows **empirical**). Theoretical = `2.0 + column_basis
+  − log2(homologous/10)`. Coverage colouring: `threshold = log2(homologous/10) − 2`; titrated
+  ≥threshold → **pink** 3px outline, <threshold → **black** 3px outline, both bright fill;
+  **untitrated → pale**. Circle centred on serum, radius in map units; outline by serum
+  passage (egg=red/cell=blue/reassortant=orange), translucent `#18RRGGBB` fill.
+- Serum API: `serum.passage()`, `serum.serum_id()`, `serum.serum_species()` (for #6).
+
+## Tasks by agent
+
+| Agent | Items | Files |
+|-------|-------|-------|
+| Agent-EXP | #1 uppercase chart `label`; #6 serum `passage`/`serum_id`(/species); F1 `meta.generated`; F2 antigen `new` (1/2); F3 per-serum `{cb,theoretical,empirical}` via `serum_circles(2.0)` | `export_interactive.py`, `CONTRACT.md` |
+| Agent-MAP | #5 all-centres **3×2** + fix off-page points + **narrower tree pane** (single & grid); #6 serum tooltip passage+id; F2 bold-outline (w3/w6) on new antigens; F3 draw serum circles (with LINES) | `map.js`, `grid.js`, template |
+| Agent-TREE | #3 keep J.2.4/K clade labels anchored near their clade (placement/de-overlap); F2 bold outline on new tips | `tree.js` |
+| Agent-COLOUR | #4 legend marker key via `IV.Glyph` (reassortant=tilted egg, vaccine=bigger shape, not triangle/star); F1 colour-by-time gradient mode + gradient legend + show generation date; F3 serum-coverage colour mode (pale untitrated, pink/black borders) | `colour.js`, `ui.js` |
+| Agent-LINES | #2 error/connection lines for selected **sera** (serum titer row); F2 "new since report/VCM" toggles in Overlays; F3 serum circles in Overlays (show-all + show-on-select), passage-coloured | `lines.js` |
+| Agent-SELECT | #2 **double-click-to-isolate** (hovered point only, bypass homolog expansion); F2 State flags for the new-since toggles | `state.js` |
+
+Placement: F2 highlight = Overlays toggles + bold outline (not colour menu); F3 circles =
+Overlays (all / on-select), serum-coverage point colouring = Colour menu. Dependencies:
+all viewer F-tasks need Agent-EXP's new fields first. Verify/commit/WHO/rAF rules as in v3.
