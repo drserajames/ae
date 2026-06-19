@@ -212,6 +212,15 @@ contracts that feature modules build on (rather than re-deriving) are:
   `State.expandNorms(norms)` adds each serum's homologous-antigen norm so a serum
   click lights the serum + its homologous antigen + the matching tree tip
   (installSelect already routes clicks/box through `expandNorms`).
+  **#2 double-click isolate (v6):** installSelect also handles a point dblclick —
+  it isolates that one strain (`setSelection([norm])`, **no** homolog expansion) so
+  a serum's lines/coverage apply to just that serum, and `stopPropagation`s (capture
+  phase) so it doesn't trigger the panel's zoom-reset; an empty-space dblclick falls
+  through and still resets the view. No panel change needed.
+  **F2 new-since toggles (v6):** `State.showNewReport` / `State.showNewVCM` booleans
+  with `setShowNewReport(on)` / `setShowNewVCM(on)` (both notify). Agent-LINES wires
+  the Overlays checkboxes to the setters; map/tree render read the flags to bold-
+  outline antigens/tips whose semantic `new` is `1` (since report) / `2` (since VCM).
   **F2 legend cycle (per-attribute z-order tri-state):** generalises the v3 clade
   cycle to whichever attribute colorBy selects — `clade`, `continent`, or `aa`
   value. The legend (Agent-COLOUR) calls `State.cycleActive(value)` on the active
