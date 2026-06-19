@@ -212,15 +212,26 @@ contracts that feature modules build on (rather than re-deriving) are:
   `State.expandNorms(norms)` adds each serum's homologous-antigen norm so a serum
   click lights the serum + its homologous antigen + the matching tree tip
   (installSelect already routes clicks/box through `expandNorms`).
-  **#2 double-click isolate (v6):** installSelect also handles a point dblclick —
-  it isolates that one strain (`setSelection([norm])`, **no** homolog expansion) so
-  a serum's lines/coverage apply to just that serum, and `stopPropagation`s (capture
-  phase) so it doesn't trigger the panel's zoom-reset; an empty-space dblclick falls
-  through and still resets the view. No panel change needed.
-  **F2 new-since toggles (v6):** `State.showNewReport` / `State.showNewVCM` booleans
-  with `setShowNewReport(on)` / `setShowNewVCM(on)` (both notify). Agent-LINES wires
-  the Overlays checkboxes to the setters; map/tree render read the flags to bold-
-  outline antigens/tips whose semantic `new` is `1` (since report) / `2` (since VCM).
+  **#2 double-click isolate (v6/v7):** installSelect handles a point dblclick — it
+  isolates that one strain (`setSelection([norm])`, **no** homolog expansion) so a
+  serum's lines/coverage apply to just that serum, and `stopImmediatePropagation`s
+  (capture phase) so it doesn't trigger the panel's zoom-reset **even when that
+  resetView listener is on the same SVG node** (#1 v7); an empty-space dblclick
+  falls through and still resets the view. No panel change needed.
+  **new-since toggles (v6/v7 #3):** `State.showNewReport` / `State.showNewVCM`
+  booleans with `setShowNewReport/setShowNewVCM(on)` (both notify); Agent-LINES
+  wires the Overlays checkboxes. These are now **emphasis keep-layers, not bold
+  outlines**: `emphasis()` keeps antigens/tips whose semantic `new` matches
+  (`showNewReport`→`new==1`, `showNewVCM`→`new>=1`) and dims the rest, so map/tree
+  get it via their existing refresh — drop the width-3/6 outline render.
+  **serum-coverage (v7 #4) — single source of truth:** `State.coverageActive()` /
+  `State.coverageSerum() → {i,norm}|null` / `State.coverageTitrated(norm)`. Coverage
+  is active only when the Colour menu is in `"coverage"` mode AND **exactly one
+  serum is selected** (typically via dbl-click isolate). `emphasis()` then keeps
+  norms titrated against that serum and dims untitrated ones (norm-level, on both
+  panels); panels read `coverageSerum()`/`coverageTitrated()` to draw the pink
+  (≤4-fold) / thicker-black (>4-fold) outlines on the titrated points — drop the
+  pale-untitrated tint.
   **F2 legend cycle (per-attribute z-order tri-state):** generalises the v3 clade
   cycle to whichever attribute colorBy selects — `clade`, `continent`, or `aa`
   value. The legend (Agent-COLOUR) calls `State.cycleActive(value)` on the active
@@ -248,14 +259,11 @@ contracts that feature modules build on (rather than re-deriving) are:
   **colorBy modes** add `clade` / `continent` / `aa` / `stress` / `time` / `coverage`.
   `time` (v6 F1): viridis over [oldest antigen date … `meta.generated`]; gated on
   `Colour.hasTime()`, window via `Colour.timeWindow()`, ramp `Colour.timeStops(n)`.
-  `coverage` (v6 F3 / v7): active when EXACTLY ONE serum is selected
-  (`Colour.coverageSerum()`, gated by distinct serum norm). `Colour.antigen(a)` is the
-  bright clade colour for all; untitrated antigens RECEDE by dimming — `emphasis()` must
-  fold in `Colour.coverageDim(norm)` (true when no antigen of that norm was titrated by
-  the serum). **Map should call `Colour.coverageOutline(a)` → `{stroke,width}|null`** for
-  the titrated outline: pink (`Colour.coveragePink()`) width 3 when ≤4-fold of homologous
-  (`log2 titer ≥ homologous−2`), else black width 4.5 (thicker, flags poorly-covered).
-  Gated on `Colour.hasCoverage()`; widths via `Colour.coverageWidths()`.
+  `coverage` (v6 F3): active when a serum is selected (`Colour.coverageSerum()`);
+  `Colour.antigen(a)` returns the clade colour, paled (HSV) when the selected serum
+  did not titrate that antigen. **Map should call `Colour.coverageOutline(a)` →
+  `{stroke,width}|null`** to draw the titrated outline (pink ≥ homologous−2 log2,
+  else black, 3px); gated on `Colour.hasCoverage()`.
 
 Two more APIs feature modules build on rather than re-deriving:
 
