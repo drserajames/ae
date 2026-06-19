@@ -5,11 +5,19 @@
 // current selection (or the hovered strain) so the map stays legible:
 //
 //   N2 connection lines — antigen→serum segment for every measured titer
-//      (titer != "*") of a selected antigen. Shows which sera titrate it.
+//      (titer != "*"). Drawn for selected ANTIGENS (their serum row) and, since
+//      v6 #2, selected SERA (their antigen column); pairs are de-duped.
 //   N1 error lines      — per titer, a short segment at the antigen and at the
 //      serum showing the table-vs-map discrepancy. Red = points too close on
 //      the map (should be further apart); blue = too far (should be closer).
 //      Threshold titers use the acmacs sigmoid (see formulas below).
+//
+// The Overlays control box (top-right of the map) also hosts, since v6:
+//   F2 "new since report/VCM" toggles — flip shared State.showNew[1]/[2] flags
+//      that map.js/tree.js read to bold-outline new antigens/tips (no overlay of
+//      our own; we just own the toggles + flag contract).
+//   F3 serum circles (off / selected / all) — translucent passage-coloured
+//      coverage circles (empirical radius) drawn in our overlay layer.
 //
 // Geometry comes from IV.Map (project / scale) so the overlay tracks the map
 // exactly — including any future M1 zoom/pan — with a fallback that mirrors
@@ -37,14 +45,25 @@
   const BLUE = "#1f77b4";   // too far  — should move together
   const CONN = "#8a8a8a";   // connection line
 
-  const show = { error: false, conn: false };
+  // overlay feature state: error/conn line layers + serum-circle mode
+  const show = { error: false, conn: false, circ: "off" };  // circ: off|selected|all
   let ctlBuilt = false;
 
-  // Cap how many strains the overlay draws at once. paint() is selection×sera, so
-  // a T4 branch-click (which can select a whole subtree — ~1500 norms in the H3
+  // v6 F2: the "new since report/VCM" toggles drive shared State flags that
+  // map.js / tree.js read to bold-outline new antigens/tips. The flags + setters
+  // (State.showNewReport / showNewVCM, setShowNewReport / setShowNewVCM) live in
+  // state.js (Agent-SELECT); we just own the Overlays checkboxes that flip them.
+
+  // Cap how many strains the line overlay draws at once. paint() is selection×sera,
+  // so a T4 branch-click (which can select a whole subtree — ~1500 norms in the H3
   // data) with both layers on would emit thousands of <line>s and jank the map.
   // Above the cap we draw nothing (or just the hovered strain) and hint instead.
   const MAX_LINE_NORMS = 40;
+  // A second, finer cap on the number of antigen–serum PAIRS drawn. The norm cap
+  // is not enough now that #2 draws a serum's whole column: a single serum can be
+  // titrated against ~every antigen (~2900), so one serum norm alone could emit
+  // thousands of <line>s. We draw up to this many pairs and hint that it's capped.
+  const MAX_PAIRS = 1500;
 
   const sigmoid = z => 1 / (1 + Math.exp(-z));
   const activeChart = () => IV.DATA && IV.DATA.charts[State.chartIdx];
@@ -55,6 +74,26 @@
     if (State.selected && State.selected.size) return State.selected;
     if (State.active) return new Set([State.active]);
     return new Set();
+  }
+
+  // ---- serum passage → colour (for F3 circles) ------------------------------
+  // Prefer the serum's own raw passage; fall back to its homologous antigen's
+  // classified `pt`. Same regexes map.js uses, kept in sync.
+  function serumPassageType(ch, s) {
+    const p = (s.passage || "").toUpperCase();
+    if (p) {
+      if (/(REASSORTANT|RESORTANT|\bNYMC\b|\bIVR-?\d|\bNIB-?\d|\bBX-?\d)/.test(p)) return "reassortant";
+      if (/(^|[ _/-])E\d|\bEGG\b/.test(p)) return "egg";
+      if (/(MDCK|SIAT|QMC|HCK|\bMK\d|\bC\d|CELL)/.test(p)) return "cell";
+    }
+    const ag = (s.homologous != null && ch.antigens[s.homologous]) ? ch.antigens[s.homologous] : null;
+    return ag && ag.pt ? ag.pt : null;
+  }
+  // "#rrggbb" → translucent rgba string (kateri serum-circle fill ≈ alpha 0x18).
+  function fillFor(hex) {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
+    if (!m) return "rgba(120,120,120,0.09)";
+    return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},0.09)`;
   }
 
   // Map projection: prefer the map's own (tracks zoom/pan); fall back to a copy
@@ -111,81 +150,140 @@
     if (!svg) return;
     clearLayer(svg);
     const ch = activeChart();
-    let drawn = 0, hint = "";
+    const wantLines = show.error || show.conn;
+    const wantCirc = show.circ !== "off";
+    if ((!wantLines && !wantCirc) || !ch) { updateHint(0, "", 0); return; }
 
-    if ((show.error || show.conn)) {
+    const proj = getProj(ch);
+    if (!proj) { updateHint(0, "", 0); return; }
+    // single overlay group, behind the points, never intercepting pointer events.
+    const g = IV.el("g", { class: "linesLayer", "pointer-events": "none" });
+    svg.insertBefore(g, svg.firstChild);
+
+    let circDrawn = 0;
+    if (wantCirc) circDrawn = paintCircles(g, ch, proj);
+
+    let drawn = 0, hint = "";
+    if (wantLines) {
       if (!hasE2(ch)) {
-        hint = "titer data not exported (E2) — overlay unavailable";
+        hint = "titer data not exported (E2) — lines unavailable";
       } else {
         const norms = targetNorms();
         if (!norms.size) {
-          hint = "hover a point or drag-box to select strains";
+          hint = "hover a point or drag-box to select strains/sera";
         } else if (norms.size > MAX_LINE_NORMS) {
           // Selection too large to draw. Keep a single hovered strain live so
           // hover still works even with a big subtree selected.
           if (State.active) {
-            const proj = getProj(ch);
-            if (proj) drawn = paint(svg, ch, proj, new Set([State.active]));
-            hint = `selection of ${norms.size} too large — showing hovered strain only`;
+            const r = paintLines(g, ch, proj, new Set([State.active]));
+            drawn = r.n;
+            hint = `selection of ${norms.size} too large — showing hovered strain only` +
+                   (r.trunc ? ` (first ${drawn} pairs)` : "");
           } else {
-            hint = `selection too large for lines (${norms.size} strains) — narrow the selection or hover a single strain`;
+            hint = `selection too large for lines (${norms.size}) — narrow it or hover a single strain`;
           }
         } else {
-          const proj = getProj(ch);
-          if (proj) drawn = paint(svg, ch, proj, norms);
+          const r = paintLines(g, ch, proj, norms);
+          drawn = r.n;
+          if (r.trunc) hint = `showing first ${drawn} titer pairs — narrow the selection for the rest`;
         }
       }
     }
-    updateHint(drawn, hint);
+    if (!g.childNodes.length) g.remove();
+    updateHint(drawn, hint, circDrawn);
   }
 
-  function paint(svg, ch, proj, norms) {
-    // pointer-events:none so the overlay never intercepts hover / drag-select.
-    const g = IV.el("g", { class: "linesLayer", "pointer-events": "none" });
-    svg.insertBefore(g, svg.firstChild);   // behind the points
-    let n = 0;
-
-    for (const a of ch.antigens) {
-      if (!norms.has(a.norm) || a.x == null || a.y == null) continue;
-      const A = proj.project(a.x, a.y);
+  // Draw error/connection lines for the selected ANTIGENS (their serum row) and the
+  // selected SERA (their antigen column). #2: a serum's titers are drawn too. Pairs
+  // are de-duped so a selected antigen + its selected serum don't double-draw.
+  // Returns { n: pairs drawn, trunc: hit the MAX_PAIRS budget }.
+  function paintLines(g, ch, proj, norms) {
+    const seen = new Set();
+    let n = 0, trunc = false;
+    const selAg = ch.antigens.filter(a => norms.has(a.norm) && a.x != null && a.y != null);
+    const selSr = ch.sera.filter(s => norms.has(s.norm) && s.x != null && s.y != null);
+    // selected antigen × every serum, then selected serum × every antigen
+    outer:
+    for (const a of selAg)
       for (const s of ch.sera) {
-        if (s.x == null || s.y == null) continue;
-        const te = titerError(ch, a.i, s.i);
-        if (!te) continue;                          // unmeasured / missing
-        const S = proj.project(s.x, s.y);
-        const sdx = S[0] - A[0], sdy = S[1] - A[1];
-        const screenDist = Math.hypot(sdx, sdy);
-
-        if (show.conn) {
-          g.appendChild(IV.el("line", {
-            x1: A[0], y1: A[1], x2: S[0], y2: S[1],
-            stroke: CONN, "stroke-width": 0.8, "stroke-opacity": 0.45,
-          }));
-          n++;
+        if (n >= MAX_PAIRS) { trunc = true; break outer; }
+        n += pair(g, ch, proj, a, s, seen);
+      }
+    if (!trunc) outer2:
+      for (const s of selSr)
+        for (const a of ch.antigens) {
+          if (n >= MAX_PAIRS) { trunc = true; break outer2; }
+          n += pair(g, ch, proj, a, s, seen);
         }
+    return { n, trunc };
+  }
 
-        if (show.error && screenDist > 0) {
-          // map_dist in antigenic units = screen distance / scale.
-          const err = errorFromDist(te.tableDist, screenDist / proj.scale, te.raw);
-          const L = Math.abs(err) * proj.scale;       // error length in px
-          if (L < 0.5) continue;                       // negligible
-          const ux = sdx / screenDist, uy = sdy / screenDist;
-          const col = err > 0 ? RED : BLUE;
-          const sign = err > 0 ? 1 : -1;               // push apart vs pull together
-          // antigen end moves -sign*u (away when too close); serum end +sign*u.
-          line(g, A[0], A[1], A[0] - sign * ux * L, A[1] - sign * uy * L, col);
-          line(g, S[0], S[1], S[0] + sign * ux * L, S[1] + sign * uy * L, col);
-          n++;
-        }
+  // Draw the one antigen–serum relationship (conn + error) once. Returns 1 if drawn.
+  function pair(g, ch, proj, a, s, seen) {
+    if (a.x == null || a.y == null || s.x == null || s.y == null) return 0;
+    const key = a.i + ":" + s.i;
+    if (seen.has(key)) return 0;
+    const te = titerError(ch, a.i, s.i);
+    if (!te) return 0;                              // unmeasured / missing
+    seen.add(key);
+    const A = proj.project(a.x, a.y), S = proj.project(s.x, s.y);
+    const sdx = S[0] - A[0], sdy = S[1] - A[1];
+    const screenDist = Math.hypot(sdx, sdy);
+    let drew = 0;
+
+    if (show.conn) {
+      g.appendChild(IV.el("line", {
+        x1: A[0], y1: A[1], x2: S[0], y2: S[1],
+        stroke: CONN, "stroke-width": 0.8, "stroke-opacity": 0.45,
+      }));
+      drew = 1;
+    }
+    if (show.error && screenDist > 0) {
+      const err = errorFromDist(te.tableDist, screenDist / proj.scale, te.raw);
+      const L = Math.abs(err) * proj.scale;          // error length in px
+      if (L >= 0.5) {
+        const ux = sdx / screenDist, uy = sdy / screenDist;
+        const col = err > 0 ? RED : BLUE;
+        const sign = err > 0 ? 1 : -1;               // push apart vs pull together
+        line(g, A[0], A[1], A[0] - sign * ux * L, A[1] - sign * uy * L, col);
+        line(g, S[0], S[1], S[0] + sign * ux * L, S[1] + sign * uy * L, col);
+        drew = 1;
       }
     }
-    return n;
+    return drew;
   }
 
   function line(g, x1, y1, x2, y2, col) {
     g.appendChild(IV.el("line", {
       x1, y1, x2, y2, stroke: col, "stroke-width": 1.6, "stroke-opacity": 0.9,
     }));
+  }
+
+  // ---- F3: serum coverage circles -------------------------------------------
+  // One translucent circle per shown serum, radius = empirical (report) radius in
+  // antigenic units → px, outline coloured by serum passage. "selected" shows only
+  // sera in the selection/hover; "all" shows every positioned serum with a circle.
+  function paintCircles(g, ch, proj) {
+    if (proj.scale == null) return 0;
+    const sel = show.circ === "all" ? null : targetNorms();   // null = all sera
+    let n = 0;
+    for (const s of ch.sera) {
+      if (s.x == null || s.y == null) continue;
+      if (sel && !sel.has(s.norm)) continue;
+      const c = s.circle;
+      if (!c) continue;
+      const r = c.empirical != null ? c.empirical : c.theoretical;   // report = empirical
+      if (r == null || !(r > 0)) continue;
+      const [cx, cy] = proj.project(s.x, s.y);
+      const ptype = serumPassageType(ch, s);
+      const stroke = (ptype && IV.Colour.passageColor(ptype)) || "#555";
+      g.appendChild(IV.Glyph.circle(cx, cy, r * proj.scale, {
+        fill: fillFor(stroke), stroke,
+        strokeWidth: 2.4, class: "serumCircle",
+      }));
+      n++;
+    }
+    return n;
   }
 
   // ---- control box (lives in #mapWrap; survives map re-renders) --------------
@@ -200,27 +298,48 @@
       "position:absolute;top:8px;right:8px;z-index:5;background:rgba(255,255,255,.92);" +
       "border:1px solid #ccc;border-radius:5px;padding:6px 8px;font-size:11px;" +
       "line-height:1.5;box-shadow:0 1px 3px rgba(0,0,0,.12);user-select:none;";
+    const div = "border-top:1px solid #e2e2e2;margin:5px 0 3px";
     box.innerHTML =
       '<div style="font-weight:600;margin-bottom:2px">Overlays</div>' +
       '<label style="display:block;cursor:pointer"><input type="checkbox" id="lnConn"> connection lines</label>' +
       '<label style="display:block;cursor:pointer"><input type="checkbox" id="lnErr"> error lines</label>' +
-      '<div id="lnKey" style="margin-top:4px;color:#777"></div>';
+      '<div id="lnKey" style="margin:2px 0 0;color:#777"></div>' +
+      `<div style="${div}"></div>` +
+      '<label style="display:block;cursor:pointer"><input type="checkbox" id="lnNewR"> new since report</label>' +
+      '<label style="display:block;cursor:pointer"><input type="checkbox" id="lnNewV"> new since VCM</label>' +
+      `<div style="${div}"></div>` +
+      '<label style="display:block">serum circles ' +
+      '<select id="lnCirc"><option value="off">off</option>' +
+      '<option value="selected">selected</option>' +
+      '<option value="all">all</option></select></label>' +
+      '<div id="lnCircKey" style="margin-top:2px;color:#777"></div>';
     wrap.appendChild(box);
     box.querySelector("#lnConn").onchange = e => { show.conn = e.target.checked; draw(); };
     box.querySelector("#lnErr").onchange = e => { show.error = e.target.checked; draw(); };
+    box.querySelector("#lnNewR").onchange = e => State.setShowNewReport(e.target.checked);
+    box.querySelector("#lnNewV").onchange = e => State.setShowNewVCM(e.target.checked);
+    box.querySelector("#lnCirc").onchange = e => { show.circ = e.target.value; draw(); };
   }
 
   // hint text is static + numeric (no user input), so innerHTML is safe here.
-  function updateHint(drawn, hint) {
+  function updateHint(drawn, hint, circDrawn) {
     const key = document.getElementById("lnKey");
-    if (!key) return;
-    if (!show.error && !show.conn) { key.textContent = ""; return; }
-    let h = "";
-    if (show.error && drawn > 0)
-      h += '<span style="color:' + RED + '">▬</span> too close ' +
-           '<span style="color:' + BLUE + '">▬</span> too far<br>';
-    h += hint ? hint : (drawn + " line(s) · selected strains only");
-    key.innerHTML = h;
+    if (key) {
+      if (!show.error && !show.conn) key.textContent = "";
+      else {
+        let h = "";
+        if (show.error && drawn > 0)
+          h += '<span style="color:' + RED + '">▬</span> too close ' +
+               '<span style="color:' + BLUE + '">▬</span> too far<br>';
+        h += hint ? hint : (drawn + " line(s) · selected strains/sera");
+        key.innerHTML = h;
+      }
+    }
+    const ck = document.getElementById("lnCircKey");
+    if (ck) ck.textContent = show.circ === "off" ? ""
+      : (circDrawn ? `${circDrawn} circle(s) · outline = passage`
+                   : (show.circ === "selected" ? "select a serum to show its circle"
+                                               : "no serum-circle data"));
   }
 
   const Lines = {
