@@ -159,24 +159,36 @@
       };
     },
 
-    // ---- F3: serum-coverage colouring ---------------------------------------
-    // The mode needs the chart's logged titers + ≥1 serum; it only *shows* once a
-    // serum is selected (coverageSerum()). Fill = the antigen's clade colour, pale
-    // (HSV desaturate/lighten) when untitrated by the selected serum, bright when
-    // titrated. The titrated outline (pink ≥ homologous−2, else black, 3px) is
-    // returned by coverageOutline(a) for the map to apply per point.
+    // ---- F3: serum-coverage colouring (v7) ----------------------------------
+    // Needs the chart's logged titers + EXACTLY ONE serum selected; it only shows
+    // then (coverageSerum()). v7: fill stays the antigen's bright clade colour for
+    // all; untitrated antigens RECEDE by dimming (like clade-select), folded into
+    // State.emphasis() via coverageDim(norm) — not a pale fill. The titrated outline
+    // (coverageOutline) marks coverage: pink ≤4-fold of homologous (thin), black
+    // >4-fold (thicker, to flag the poorly-covered ones).
     hasCoverage() { const ch = IV.DATA && IV.DATA.charts[State.chartIdx]; return !!(ch && ch.logged && ch.sera && ch.sera.length); },
     coverageSerum() { ensureCoverage(); return covSerum; },
+    coverageWidths() { return { pink: 3, black: 4.5 }; },
     coverageOutline(a) {
       if (State.colorBy !== "coverage") return null;
       ensureCoverage();
       if (!covSerum) return null;
+      const titer = titerOf(a.i);
+      if (titer == null) return null;             // untitrated → no outline (it dims)
+      const pink = covThreshold != null && titer >= covThreshold;   // ≤4-fold of homologous
+      return pink ? { stroke: COV_PINK, width: 3 } : { stroke: "#000", width: 4.5 };
+    },
+    // true when coverage mode is showing and `norm`'s antigen was NOT titrated by the
+    // selected serum — State.emphasis() folds this in so untitrated points dim (v7).
+    coverageDim(norm) {
+      if (State.colorBy !== "coverage") return false;
+      ensureCoverage();
+      if (!covSerum || norm === covSerum.norm) return false;   // never dim the serum itself
       const ch = IV.DATA.charts[State.chartIdx];
-      const lr = ch.logged && ch.logged[a.i];
-      const titer = lr ? lr[covSerum.i] : null;
-      if (titer == null) return null;             // untitrated → no special outline
-      const pink = covThreshold != null && titer >= covThreshold;
-      return { stroke: pink ? COV_PINK : "#000", width: 3 };
+      const idxs = ch.norm_to_ag && ch.norm_to_ag[norm];
+      if (!idxs || !idxs.length) return false;
+      for (const ai of idxs) if (titerOf(ai) != null) return false;   // any titrated → covered
+      return true;                                 // all of this norm's antigens untitrated → dim
     },
     coveragePink() { return COV_PINK; },
 
@@ -187,13 +199,8 @@
         case "aa": { const v = aaValueOf(lf.norm); return v ? (aaValueColor[v] || UNMATCHED) : UNMATCHED; }
         case "stress": { ensureStress(); const s = stressByNorm[lf.norm]; return s == null ? UNMATCHED : Colour.stressColor(s); }
         case "time": { ensureTime(); return timeColorOf(lf.date); }
-        case "coverage": {
-          ensureCoverage();
-          if (!covSerum) return UNMATCHED;
-          const ch = IV.DATA.charts[State.chartIdx];
-          const idxs = ch.norm_to_ag && ch.norm_to_ag[lf.norm];
-          return (idxs && idxs.length) ? coverageFill(idxs[0]) : UNMATCHED;
-        }
+        // v7: bright clade colour for all; untitrated tips recede via emphasis dim
+        case "coverage": { ensureCoverage(); return covSerum ? (lf.clade ? (cladeColor[lf.clade] || UNMATCHED) : UNMATCHED) : UNMATCHED; }
         default: return lf.clade ? (cladeColor[lf.clade] || UNMATCHED) : UNMATCHED;
       }
     },
@@ -204,7 +211,7 @@
         case "aa": { const v = aaValueOf(a.norm); return v ? (aaValueColor[v] || UNMATCHED) : UNMATCHED; }
         case "stress": { ensureStress(); const s = stressByAg[a.i]; return s == null ? UNMATCHED : Colour.stressColor(s); }
         case "time": { ensureTime(); return timeColorOf(a.date); }
-        case "coverage": { ensureCoverage(); return covSerum ? coverageFill(a.i) : UNMATCHED; }
+        case "coverage": { ensureCoverage(); return covSerum ? (a.clade ? (cladeColor[a.clade] || UNMATCHED) : UNMATCHED) : UNMATCHED; }
         default: return a.clade ? (cladeColor[a.clade] || UNMATCHED) : UNMATCHED;
       }
     },
@@ -311,14 +318,20 @@
     try { return new Date(ms).toISOString().slice(0, 10); } catch (_) { return null; }
   }
 
-  // F3: resolve the selected serum (first selected serum in the active chart) and
-  // its coverage threshold = log2(homologous/10) − 2 (logged units). Cached by a
-  // (chart|serum) signature so it only recomputes when the selected serum changes.
+  // F3 (v7): resolve the selected serum — gated on EXACTLY ONE serum selected in
+  // the active chart — and its coverage threshold = log2(homologous/10) − 2 (logged
+  // units). Cached by a (chart|serum) signature so it only recomputes on change.
   function ensureCoverage() {
     const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
     let serum = null;
     if (ch && ch.sera) {
-      for (const s of ch.sera) { if (s.norm && State.selected.has(s.norm)) { serum = s; break; } }
+      // gate: exactly one serum selected — counted by distinct serum NORM, since a
+      // strain's egg+cell sera share a norm (selecting one square selects both).
+      const norms = new Set(); let first = null;
+      for (const s of ch.sera) {
+        if (s.norm && State.selected.has(s.norm)) { norms.add(s.norm); if (!first) first = s; }
+      }
+      if (norms.size === 1) serum = first;
     }
     const sig = State.chartIdx + "|" + (serum ? serum.i : "none");
     if (sig === covSig) return;
@@ -329,50 +342,11 @@
       covThreshold = (ht == null) ? null : ht - 2;
     }
   }
-  // fill for antigen index `ai` vs the selected serum: clade colour, pale if the
-  // serum did not titrate it, bright if it did.
-  function coverageFill(ai) {
+  // logged titer of antigen index `ai` against the selected serum (null = untitrated)
+  function titerOf(ai) {
     const ch = IV.DATA.charts[State.chartIdx];
-    const ag = ch.antigens[ai];
-    const base = (ag && ag.clade) ? (cladeColor[ag.clade] || UNMATCHED) : UNMATCHED;
     const lr = ch.logged && ch.logged[ai];
-    const titer = lr ? lr[covSerum.i] : null;
-    return titer == null ? pale(base) : base;
-  }
-  // HSV desaturate + lighten by ~0.4 (a solid pale tint, NOT alpha).
-  function pale(col) {
-    const rgb = toRgb(col);
-    if (!rgb) return col;
-    let [h, s, v] = rgb2hsv(rgb[0], rgb[1], rgb[2]);
-    s *= 0.4; v = v + (1 - v) * 0.4;
-    const o = hsv2rgb(h, s, v);
-    return `rgb(${o[0]},${o[1]},${o[2]})`;
-  }
-  function toRgb(col) {
-    if (typeof col !== "string") return null;
-    if (col[0] === "#" && col.length >= 7) return hex2rgb(col);
-    const m = col.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-    return m ? [+m[1], +m[2], +m[3]] : null;
-  }
-  function rgb2hsv(r, g, b) {
-    r /= 255; g /= 255; b /= 255;
-    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
-    let h = 0;
-    if (d) {
-      if (mx === r) h = ((g - b) / d) % 6;
-      else if (mx === g) h = (b - r) / d + 2;
-      else h = (r - g) / d + 4;
-      h *= 60; if (h < 0) h += 360;
-    }
-    return [h, mx ? d / mx : 0, mx];
-  }
-  function hsv2rgb(h, s, v) {
-    const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
-    let r = 0, g = 0, b = 0;
-    if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0];
-    else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c];
-    else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
-    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+    return lr ? lr[covSerum.i] : null;
   }
 
   // interpolate the SEQ stops at t in [0,1] -> "#rrggbb"

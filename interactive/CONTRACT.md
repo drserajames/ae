@@ -248,11 +248,14 @@ contracts that feature modules build on (rather than re-deriving) are:
   **colorBy modes** add `clade` / `continent` / `aa` / `stress` / `time` / `coverage`.
   `time` (v6 F1): viridis over [oldest antigen date … `meta.generated`]; gated on
   `Colour.hasTime()`, window via `Colour.timeWindow()`, ramp `Colour.timeStops(n)`.
-  `coverage` (v6 F3): active when a serum is selected (`Colour.coverageSerum()`);
-  `Colour.antigen(a)` returns the clade colour, paled (HSV) when the selected serum
-  did not titrate that antigen. **Map should call `Colour.coverageOutline(a)` →
-  `{stroke,width}|null`** to draw the titrated outline (pink ≥ homologous−2 log2,
-  else black, 3px); gated on `Colour.hasCoverage()`.
+  `coverage` (v6 F3 / v7): active when EXACTLY ONE serum is selected
+  (`Colour.coverageSerum()`, gated by distinct serum norm). `Colour.antigen(a)` is the
+  bright clade colour for all; untitrated antigens RECEDE by dimming — `emphasis()` must
+  fold in `Colour.coverageDim(norm)` (true when no antigen of that norm was titrated by
+  the serum). **Map should call `Colour.coverageOutline(a)` → `{stroke,width}|null`** for
+  the titrated outline: pink (`Colour.coveragePink()`) width 3 when ≤4-fold of homologous
+  (`log2 titer ≥ homologous−2`), else black width 4.5 (thicker, flags poorly-covered).
+  Gated on `Colour.hasCoverage()`; widths via `Colour.coverageWidths()`.
 
 Two more APIs feature modules build on rather than re-deriving:
 

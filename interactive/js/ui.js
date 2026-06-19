@@ -173,18 +173,18 @@
     }
     const s = Colour.coverageSerum();
     if (!s) {
-      footnoteInto(colKey, "select a serum (click its square on the map) to show its coverage"); return;
+      footnoteInto(colKey, "select exactly one serum (click its square) to show its coverage"); return;
     }
-    const pink = Colour.coveragePink();
+    const pink = Colour.coveragePink(), w = Colour.coverageWidths();
     const row = (swStyle, label) => {
       const d = document.createElement("div"); d.className = "lg";
       d.innerHTML = `<span class="sw" style="${swStyle}"></span>${label}`;
       colKey.appendChild(d);
     };
-    row("background:#888", "titrated (bright)");
-    row("background:#d8d8d8", "untitrated (pale)");
-    row(`background:#fff;border:2px solid ${pink}`, "titrated ≥ homologous−2");
-    row("background:#fff;border:2px solid #000", "titrated < homologous−2");
+    // v7: untitrated dim (not pale); pink ≤4-fold (thin), black >4-fold (thicker)
+    row(`background:${Colour.unmatched()};opacity:0.3`, "untitrated (dimmed)");
+    row(`background:#fff;border:${w.pink}px solid ${pink}`, "titrated, ≤4-fold of homologous");
+    row(`background:#fff;border:${w.black}px solid #000`, "titrated, &gt;4-fold (further)");
     footnoteInto(colKey, `serum: ${s.name}`);
   }
 
