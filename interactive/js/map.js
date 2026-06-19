@@ -90,12 +90,31 @@
       (a.ref ? "<br><i>reference antigen</i>" : "") + (a.vac ? "<br><b>vaccine</b>" : "") + inTree;
   }
 
+  // #6: serum tooltip — name + passage, then serum-id (+ species if present).
+  function serumHtml(s) {
+    let h = `<b>${s.name}</b>` + (s.passage ? ` <span style="opacity:.7">${s.passage}</span>` : "");
+    h += "<br><i>serum</i>";
+    const meta = [];
+    if (s.serum_id) meta.push(`id <b>${s.serum_id}</b>`);
+    if (s.serum_species) meta.push(s.serum_species);
+    if (meta.length) h += " · " + meta.join(" · ");
+    return h;
+  }
+
   // ---- projection ------------------------------------------------------------
-  function computeBase(all, W, H) {
+  function computeBase(all, W, H, r0) {
     const xs = all.map(p => p.x), ys = all.map(p => p.y);
     const xmin = Math.min(...xs), xmax = Math.max(...xs);
     const ymin = Math.min(...ys), ymax = Math.max(...ys);
-    const pad = 30;
+    // pad by the largest rendered point radius so edge points (vaccines) aren't
+    // drawn past the pane edge (#5).
+    const R = r0 || 3.5;
+    let maxR = R;
+    for (const p of all) {
+      const r = p.vac ? R * 2.2 : p.ref ? R * 1.43 : (p.serum_id != null) ? R * 1.7 : R;
+      if (r > maxR) maxR = r;
+    }
+    const pad = 20 + maxR + 3;
     const spanX = xmax - xmin || 1, spanY = ymax - ymin || 1;
     const bScale = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
     const ox = (W - spanX * bScale) / 2, oy = (H - spanY * bScale) / 2;
@@ -204,7 +223,7 @@
       const node = G.make(ss.shape, X, Y, r, o);
       node.addEventListener("mouseenter", e => {
         if (s.norm) State.setActive(s.norm);
-        IV.UI.showTip(e, `<b>${s.name}</b><br><i>serum${ss.label ? " · " + ss.label : ""}</i>`);
+        IV.UI.showTip(e, serumHtml(s));
       });
       node.addEventListener("mousemove", IV.UI.moveTip);
       node.addEventListener("mouseleave", () => { if (s.norm) State.setActive(null); IV.UI.hideTip(); });
@@ -227,10 +246,11 @@
       node.setAttribute("fill", Colour.antigen(a));
       node.setAttribute("fill-opacity", a.ref ? 0.55 : 0.85);
       // #10: passage is shown by shape — no passage ring. Vaccine/ref get a black
-      // outline; everything else a thin neutral edge.
-      if (a.vac) { node.setAttribute("stroke", "#000"); node.setAttribute("stroke-width", 1.6); }
-      else if (a.ref) { node.setAttribute("stroke", "#000"); node.setAttribute("stroke-width", 1.3); }
-      else { node.setAttribute("stroke", "rgba(0,0,0,.35)"); node.setAttribute("stroke-width", 0.6); }
+      // outline; everything else a thin neutral edge. Remember the base stroke so F2
+      // can restore it when the new-since highlight turns off.
+      const baseStroke = a.vac ? "#000" : a.ref ? "#000" : "rgba(0,0,0,.35)";
+      const baseSW = a.vac ? 1.6 : a.ref ? 1.3 : 0.6;
+      node.setAttribute("stroke", baseStroke); node.setAttribute("stroke-width", baseSW);
       node.setAttribute("data-norm", a.norm);
       node.addEventListener("mouseenter", e => { State.setActive(a.norm); IV.UI.showTip(e, agHtml(a)); });
       node.addEventListener("mousemove", IV.UI.moveTip);
@@ -238,7 +258,7 @@
       svg.appendChild(node);
       (nodes[a.norm] = nodes[a.norm] || []).push(node);
       plc.push({ el: node, shape: sh.shape, rot: sh.rot || 0, x: a.x, y: a.y, r });
-      hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false });
+      hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false, nw: a.new || 0, baseStroke, baseSW });
     }
 
     const vacs = [];
@@ -262,7 +282,7 @@
     const W = wrap.clientWidth || 600, H = wrap.clientHeight || 600;
     svg.setAttribute("width", W); svg.setAttribute("height", H);
 
-    base = computeBase(all, W, H);
+    base = computeBase(all, W, H, 3.5);
     view = { k: 1, tx: 0, ty: 0 };   // new chart / re-render fits the whole map
     recomputeGeom();
 
@@ -272,6 +292,7 @@
 
     const out = paintChart(svg, chart, geom, { r0: 3.5 });
     hiList = out.hi; placed = out.placed;
+    applyNewHighlight();     // F2: re-apply new-since highlight to the fresh nodes
 
     bindViewHandlers(svg);
     IV.installSelect(svg);   // S1: click / drag-box selection (shared, idempotent)
@@ -398,10 +419,41 @@
       n.el.classList.toggle("lift", e.lift);
       n.el.classList.toggle("sel", e.sel);
     }
+    if (_f2r !== State.showNewReport || _f2v !== State.showNewVCM) {
+      _f2r = State.showNewReport; _f2v = State.showNewVCM; applyNewHighlight();
+    }
   }
+
+  // F2 (v6): bold BLACK outline on "new since report/VCM" antigens, raised to front.
+  // Driven by Agent-SELECT's State.showNewReport (new>=1) / showNewVCM (new==2);
+  // width 3 for new=1, 6 for new=2 (chart_modifier). Restores the base stroke when off.
+  let _f2r = false, _f2v = false;
+  // Outline width for an antigen given its `new` value and the active toggles, or 0.
+  // Shared with IV.Grid so the small multiples highlight identically.
+  function newOutlineWidth(nw) {
+    if (!nw) return 0;
+    let w = 0;
+    if (State.showNewReport && nw >= 1) w = nw === 2 ? 6 : 3;
+    if (State.showNewVCM && nw === 2) w = 6;
+    return w;
+  }
+  // Apply the new-since highlight to a hi-list of {el, serum, nw, baseStroke, baseSW}
+  // within `svg`, restoring base strokes when off and raising highlighted to front.
+  function applyNewTo(list, svg) {
+    const front = [];
+    for (const n of list) {
+      if (n.serum || !n.nw) continue;
+      const w = newOutlineWidth(n.nw);
+      if (w) { n.el.setAttribute("stroke", "#000"); n.el.setAttribute("stroke-width", w); front.push(n.el); }
+      else { n.el.setAttribute("stroke", n.baseStroke); n.el.setAttribute("stroke-width", n.baseSW); }
+    }
+    if (svg) for (const el of front) svg.appendChild(el);   // raise to front
+  }
+  function applyNewHighlight() { applyNewTo(hiList, document.getElementById("mapSvg")); }
 
   IV.Map = {
     render, refresh, paintChart, gridLineEls,
+    applyNewHighlight: applyNewTo,   // F2: shared with IV.Grid for the small multiples
     get agByIdx() { return agByIdx; },
     zoomIn() { const w = (document.getElementById("mapWrap") || {}); zoomAt((w.clientWidth || 600) / 2, (w.clientHeight || 600) / 2, 1.4); },
     zoomOut() { const w = (document.getElementById("mapWrap") || {}); zoomAt((w.clientWidth || 600) / 2, (w.clientHeight || 600) / 2, 1 / 1.4); },

@@ -19,8 +19,10 @@
   const State = IV.State, el = IV.el;
 
   // fixed small-multiple size — deterministic (no layout measurement needed, so it
-  // renders identically headless); the grid container scrolls / wraps.
-  const PW = 340, PH = 300, PAD = 18;
+  // renders identically headless). PW matches the template's 3-column min track so
+  // the svg never overflows its panel (#5). R0 = the per-point radius passed to
+  // paintChart; the fit is padded by the largest rendered radius below.
+  const PW = 300, PH = 260, PAD_BASE = 12, R0 = 2.2;
 
   let panels = [];          // [{ chart, svg, nodes }]  (svg nodes are stable)
   let structureBuilt = false;
@@ -36,7 +38,15 @@
     const xmin = Math.min(...xs), xmax = Math.max(...xs);
     const ymin = Math.min(...ys), ymax = Math.max(...ys);
     const spanX = xmax - xmin || 1, spanY = ymax - ymin || 1;
-    const scale = Math.min((PW - 2 * PAD) / spanX, (PH - 2 * PAD) / spanY);
+    // pad by the largest rendered point radius so edge points (vaccines) stay
+    // fully on-panel instead of being clipped at the border (#5).
+    let maxR = R0;
+    for (const p of all) {
+      const r = p.vac ? R0 * 2.2 : p.ref ? R0 * 1.43 : (p.serum_id != null) ? R0 * 1.7 : R0;
+      if (r > maxR) maxR = r;
+    }
+    const pad = PAD_BASE + maxR + 2;
+    const scale = Math.min((PW - 2 * pad) / spanX, (PH - 2 * pad) / spanY);
     const ox = (PW - spanX * scale) / 2, oy = (PH - spanY * scale) / 2;
     return { SX: x => ox + (x - xmin) * scale, SY: y => oy + (ymax - y) * scale, scale, xmin, ymax };
   }
@@ -77,7 +87,7 @@
         for (const ln of IV.Map.gridLineEls(proj.SX, proj.SY, proj.scale, proj.xmin, proj.ymax, PW, PH))
           g.appendChild(ln);
         p.svg.appendChild(g);
-        p.hi = IV.Map.paintChart(p.svg, p.chart, proj, { r0: 2.2 }).hi;
+        p.hi = IV.Map.paintChart(p.svg, p.chart, proj, { r0: R0 }).hi;
       } else {
         p.hi = [];
         const t = el("text", { x: PW / 2, y: PH / 2, "text-anchor": "middle", fill: "#999", "font-size": 12 });
@@ -96,6 +106,8 @@
         n.el.classList.toggle("lift", e.lift);
         n.el.classList.toggle("sel", e.sel);
       });
+      // F2: new-since bold outline, identical to the main map (shared from IV.Map).
+      IV.Map.applyNewHighlight(p.hi || [], p.svg);
     });
   }
 

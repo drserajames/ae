@@ -16,8 +16,10 @@
   header label { font-size:12px; color:var(--muted); }
   select, input[type=search] { font-size:12px; padding:3px 6px; border:1px solid var(--line); border-radius:4px; }
   #main { display:flex; flex:1; min-height:0; }
-  #treePane, #mapPane { flex:1; min-width:0; display:flex; flex-direction:column; }
-  #treePane { border-right:1px solid var(--line); }
+  #treePane, #mapPane { min-width:0; display:flex; flex-direction:column; }
+  /* #5: give the map(s) more room — tree pane ~39%, map pane the rest (single & grid). */
+  #treePane { flex:0 0 39%; border-right:1px solid var(--line); }
+  #mapPane { flex:1 1 0; }
   .paneTitle { font-size:12px; font-weight:600; padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--line); color:var(--muted); }
   .paneTitle.row { display:flex; align-items:center; gap:10px; }
   .paneTitle .paneCtl { margin-left:auto; font-weight:400; display:flex; align-items:center; gap:5px; }
@@ -29,7 +31,10 @@
   .mapCtl button { width:26px; height:26px; font-size:15px; line-height:1; border:1px solid var(--line); background:rgba(255,255,255,.92); border-radius:5px; cursor:pointer; color:var(--fg); padding:0; }
   .mapCtl button:hover { background:#fff; border-color:#999; }
   /* G1: all-centres grid of small multiples */
-  #gridWrap { flex:1; padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:12px; align-content:start; }
+  /* #5: 3×2 grid for the 5 WHO CCs. minmax(300px,…) keeps each column at least as
+     wide as the 300px panel svg so points never spill off the panel; the wrap scrolls
+     if the pane is too narrow for three. */
+  #gridWrap { flex:1; padding:10px; display:grid; grid-template-columns:repeat(3, minmax(300px, 1fr)); gap:12px; align-content:start; }
   .gridPanel { border:1px solid var(--line); border-radius:5px; overflow:hidden; background:var(--bg); }
   .gridPanelTitle { font-size:11px; font-weight:600; color:var(--muted); padding:4px 8px; background:var(--panel); border-bottom:1px solid var(--line); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .gridPanelMap { display:flex; justify-content:center; }
