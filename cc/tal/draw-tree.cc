@@ -539,9 +539,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const Clade& clade = clade_sections[plan.rank];
             const double cx = x_clade0 + slot_px * (static_cast<double>(plan.slot) + 1.0); // AD pos_x
             const double clade_fs = std::clamp(slot_px * plan.label_scale, 3.0, 20.0);      // label_size = slot.width * scale (AD)
-            const CladeBand* widest = nullptr;
-            for (const auto& band : plan.bands) {
-                const double y0 = dev_y(static_cast<double>(band.first_v)), y1 = dev_y(static_cast<double>(band.last_v));
+            // ONE arrow per clade spanning its whole extent (the AD reference shows a single
+            // bracket per clade, not one per fragment) — collapses the tiny-section clutter.
+            {
+                const double y0 = dev_y(static_cast<double>(plan.first_v)), y1 = dev_y(static_cast<double>(plan.last_v));
                 // two faint GREY horizontal lines at the clade's top & bottom, from the matrix
                 // start across to the bracket arrow (AD horizontal_line, terminates at pos_x).
                 pdf.line(line_to, y0, cx, y0, GREY, 0.4);
@@ -550,10 +551,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 pdf.line(cx, y0, cx, y1, BLACK, 0.6);
                 pdf.filled_triangle(cx, y0, cx - ahw, y0 + ahl, cx + ahw, y0 + ahl, BLACK); // top head (up)
                 pdf.filled_triangle(cx, y1, cx - ahw, y1 - ahl, cx + ahw, y1 - ahl, BLACK); // bottom head (down)
-                if (widest == nullptr || band.size > widest->size)
-                    widest = &band;
             }
-            if (widest != nullptr) {
+            {
                 const std::string name = clade_display_for(clade.name);
                 // label centred on the clade's whole vertical extent (AD vpos=middle), shifted by
                 // the per-clade offset (fractions of height); rotation 90 = clockwise (top->bottom),
