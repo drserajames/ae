@@ -160,13 +160,23 @@
     const g = IV.el("g", { class: "linesLayer", "pointer-events": "none" });
     svg.insertBefore(g, svg.firstChild);
 
+    // v8: a single isolated serum (double-click) scopes serum-only features to that
+    // exact serum, NOT its norm — so its same-name antigen's lines don't also show.
+    const isoSerum = (State.isolatedSerum && State.isolatedSerum()) || null;
+
     let circDrawn = 0;
-    if (wantCirc) circDrawn = paintCircles(g, ch, proj);
+    if (wantCirc) circDrawn = paintCircles(g, ch, proj, isoSerum);
 
     let drawn = 0, hint = "";
     if (wantLines) {
       if (!hasE2(ch)) {
         hint = "titer data not exported (E2) — lines unavailable";
+      } else if (isoSerum) {
+        // isolated serum: draw only that serum's titer column (no antigen-side row).
+        const r = paintSerumLines(g, ch, proj, isoSerum);
+        drawn = r.n;
+        hint = r.trunc ? `showing first ${drawn} of the serum's titer pairs`
+                       : `${drawn} line(s) · isolated serum`;
       } else {
         const norms = targetNorms();
         if (!norms.size) {
@@ -218,6 +228,18 @@
     return { n, trunc };
   }
 
+  // v8: lines for ONE isolated serum only — its titer column across antigens.
+  function paintSerumLines(g, ch, proj, s) {
+    if (s.x == null || s.y == null) return { n: 0, trunc: false };
+    const seen = new Set();
+    let n = 0, trunc = false;
+    for (const a of ch.antigens) {
+      if (n >= MAX_PAIRS) { trunc = true; break; }
+      n += pair(g, ch, proj, a, s, seen);
+    }
+    return { n, trunc };
+  }
+
   // Draw the one antigen–serum relationship (conn + error) once. Returns 1 if drawn.
   function pair(g, ch, proj, a, s, seen) {
     if (a.x == null || a.y == null || s.x == null || s.y == null) return 0;
@@ -263,13 +285,16 @@
   // One translucent circle per shown serum, radius = empirical (report) radius in
   // antigenic units → px, outline coloured by serum passage. "selected" shows only
   // sera in the selection/hover; "all" shows every positioned serum with a circle.
-  function paintCircles(g, ch, proj) {
+  // v8: when a serum is isolated, "selected" mode scopes to that exact serum (by
+  // index), not its norm — so its same-name antigen's other serum isn't included.
+  function paintCircles(g, ch, proj, isoSerum) {
     if (proj.scale == null) return 0;
     const sel = show.circ === "all" ? null : targetNorms();   // null = all sera
     let n = 0;
     for (const s of ch.sera) {
       if (s.x == null || s.y == null) continue;
-      if (sel && !sel.has(s.norm)) continue;
+      if (isoSerum && show.circ === "selected") { if (s.i !== isoSerum.i) continue; }
+      else if (sel && !sel.has(s.norm)) continue;
       const c = s.circle;
       if (!c) continue;
       const r = c.empirical != null ? c.empirical : c.theoretical;   // report = empirical
