@@ -108,6 +108,17 @@ namespace ae::draw
         cairo_stroke(context_);
     }
 
+    void CairoPdf::filled_triangle(double x0, double y0, double x1, double y1, double x2, double y2, Color fill)
+    {
+        cairo_new_path(context_);
+        cairo_move_to(context_, x0, y0);
+        cairo_line_to(context_, x1, y1);
+        cairo_line_to(context_, x2, y2);
+        cairo_close_path(context_);
+        set_source(context_, fill);
+        cairo_fill(context_);
+    }
+
     void CairoPdf::line(double x1, double y1, double x2, double y2, Color color, double width)
     {
         cairo_new_path(context_);

@@ -448,6 +448,8 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 slot = cmd.get("slot")
                 if isinstance(slot, dict) and isinstance(slot.get("width"), (int, float)):
                     clades["slot_width"] = float(slot["width"])
+                if isinstance(cmd.get("width-to-height-ratio"), (int, float)):
+                    clades["width_ratio"] = float(cmd["width-to-height-ratio"])
                 all_clades = cmd.get("all-clades")
                 if isinstance(all_clades, dict):
                     al = all_clades.get("label")
@@ -477,6 +479,9 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                             style["label_scale"] = float(lab0["scale"])
                         if isinstance(lab0.get("rotation_degrees"), (int, float)):
                             style["rotation_degrees"] = int(lab0["rotation_degrees"])
+                        off = lab0.get("offset")  # [dx, dy] fractions of height (AD label.offset)
+                        if isinstance(off, list) and len(off) == 2 and all(isinstance(v, (int, float)) for v in off):
+                            style["label_offset"] = [float(off[0]), float(off[1])]
                     # section merge/drop tolerances (AD make_sections; in leaf-index units)
                     if isinstance(pc.get("section-inclusion-tolerance"), (int, float)):
                         style["section_inclusion_tolerance"] = float(pc["section-inclusion-tolerance"])

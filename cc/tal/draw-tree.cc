@@ -198,7 +198,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // then assign a horizontal slot — the explicit per-clade slot when given, else set_slots
     // (smallest clade -> slot 0 nearest the matrix, larger/parent clades bumped rightward).
     struct CladeBand { long first_v; long last_v; std::size_t size; };
-    struct CladePlan { std::size_t rank; std::vector<CladeBand> bands; int slot; long first_v; long last_v; std::size_t longest; double label_scale; int rotation; };
+    struct CladePlan { std::size_t rank; std::vector<CladeBand> bands; int slot; long first_v; long last_v; std::size_t longest; double label_scale; int rotation; double offset_x; double offset_y; };
     std::vector<CladePlan> clade_plan;
     int clade_max_slot = 0;
     {
@@ -236,7 +236,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const double lscale = (style && style->label_scale > 0.0) ? style->label_scale
                                     : (params.clades_label_scale > 0.0 ? params.clades_label_scale : 1.0);
             const int rot = style ? style->rotation_degrees : 90;
-            clade_plan.push_back({k, std::move(kept), slot, 0, 0, longest, lscale, rot});
+            const double offx = style ? style->label_offset_x : 0.004;
+            const double offy = style ? style->label_offset_y : 0.0;
+            clade_plan.push_back({k, std::move(kept), slot, 0, 0, longest, lscale, rot, offx, offy});
             clade_plan.back().first_v = clade_plan.back().bands.front().first_v;
             clade_plan.back().last_v = clade_plan.back().bands.back().last_v;
         }
@@ -365,7 +367,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // brackets land at slot.width*(slot+1); fall back to the old fraction when no slot.width given.
     const double clade_slot_px = params.clades_slot_width > 0.0 ? params.clades_slot_width * height : 0.0;
     const double clade_w = (params.clades && !visible_clades.empty())
-        ? (clade_slot_px > 0.0 ? static_cast<double>(clade_max_slot + 2) * clade_slot_px : 0.09 * drawable_w)
+        ? (clade_slot_px > 0.0 ? static_cast<double>(clade_max_slot + 2) * clade_slot_px
+           : (params.clades_width_ratio > 0.0 ? params.clades_width_ratio * height : 0.09 * drawable_w))
         : 0.0;
     // AD sizes the time-series column as n_slots * slot.width (slot.width a fraction of
     // height); honour it so the column is AD's narrow width, falling back to 0.34·drawable.
@@ -446,27 +449,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         pdf.text(margin, title_fs * 0.95, params.title, title_fs, BLACK, /*center=*/false); // near the very top (AD offset [5,5])
     }
 
-    // --- hz-sections: faint horizontal separator across the figure at each section's top
-    //     boundary (acmacs-tal HzSections). AD draws NO left bracket/label column — the clade
-    //     names live solely in the right-hand Clades column — so ae only draws the separators
-    //     here (the clade labels are rendered by the clades column below). ---
-    if (hz_w > 0.0) {
-        std::unordered_map<std::string, double> name_y; // leaf seq_id -> vertical offset
-        name_y.reserve(layout.leaves.size());
-        for (const auto& leaf_node : layout.leaves)
-            name_y.emplace(leaf_node.name, leaf_node.y);
-        // AD draws the separators across the MATRIX only and STOPS them at the clade bracket
-        // column — never across the tree/left margin nor into the clades/dash-bars. Span from
-        // the matrix start to the clade column's left edge (else the dash bars / right edge).
-        const double sep_x0 = ts_w > 0.0 ? x_ts0 : margin + hz_w + tree_w;
-        const double sep_x_end = clade_w > 0.0 ? x_clade0 : (dash_w > 0.0 ? x_dash0 : width - margin);
-        for (const auto& section : params.hz_sections) {
-            const auto first_it = name_y.find(section.first);
-            if (first_it == name_y.end())
-                continue; // unknown seq_id — skip the section
-            pdf.line(sep_x0, dev_y(first_it->second - 0.5), sep_x_end, dev_y(first_it->second - 0.5), GREY, 0.3);
-        }
-    }
+    // hz-section separators are no longer drawn here: AD draws the faint grey top/bottom rules
+    // per *clade* (from the matrix start to the bracket arrow), rendered with the clades column
+    // below — so a separate hz-section separator would duplicate / over-draw them.
 
     // --- tree: leaf tip segments (coloured) + optional labels ---
     // Leaf labels share the fixed column at x_label0, so collisions are purely vertical:
@@ -546,37 +531,42 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     //     name label rotated clockwise (top-to-bottom), sized slot.width * per-clade scale. ---
     if (clade_w > 0.0 && !clade_plan.empty()) {
         const double slot_px = clade_slot_px > 0.0 ? clade_slot_px : clade_w / static_cast<double>(clade_max_slot + 2);
-        const double cap = std::clamp(slot_px * 0.32, 1.0, 4.0); // arrowhead half-width
-        const double left_edge = x_clade0;                       // viewport.left (matrix side)
+        // AD arrowhead: filled triangle, base width 3px, length = width*2 (sharp). Scale gently.
+        const double ahw = std::clamp(slot_px * 0.22, 1.3, 3.0);  // arrowhead half-width
+        const double ahl = ahw * 4.0;                            // arrowhead length (sharp)
+        const double line_to = ts_w > 0.0 ? x_ts0 : x_clade0;    // grey lines start at the matrix (AD horizontal_line)
         for (const auto& plan : clade_plan) {
             const Clade& clade = clade_sections[plan.rank];
             const double cx = x_clade0 + slot_px * (static_cast<double>(plan.slot) + 1.0); // AD pos_x
-            // label size = slot.width * scale (AD); fall back to a fraction of height if no slot.width
-            const double clade_fs = clade_slot_px > 0.0 ? std::clamp(clade_slot_px * plan.label_scale, 4.0, 20.0)
-                                                        : std::clamp(0.0095 * height, 6.0, 14.0);
+            const double clade_fs = std::clamp(slot_px * plan.label_scale, 3.0, 20.0);      // label_size = slot.width * scale (AD)
             const CladeBand* widest = nullptr;
             for (const auto& band : plan.bands) {
                 const double y0 = dev_y(static_cast<double>(band.first_v)), y1 = dev_y(static_cast<double>(band.last_v));
-                pdf.line(cx, y0, cx, y1, BLACK, 0.7);             // double-arrow spine
-                pdf.line(cx - cap, y0 + cap, cx, y0, BLACK, 0.7); // top arrowhead (two strokes)
-                pdf.line(cx + cap, y0 + cap, cx, y0, BLACK, 0.7);
-                pdf.line(cx - cap, y1 - cap, cx, y1, BLACK, 0.7); // bottom arrowhead
-                pdf.line(cx + cap, y1 - cap, cx, y1, BLACK, 0.7);
-                pdf.line(left_edge, y0, cx, y0, BLACK, 0.4);      // top horizontal arm (AD horizontal_line)
-                pdf.line(left_edge, y1, cx, y1, BLACK, 0.4);      // bottom horizontal arm
+                // two faint GREY horizontal lines at the clade's top & bottom, from the matrix
+                // start across to the bracket arrow (AD horizontal_line, terminates at pos_x).
+                pdf.line(line_to, y0, cx, y0, GREY, 0.4);
+                pdf.line(line_to, y1, cx, y1, GREY, 0.4);
+                // vertical double-arrow spine with FILLED triangular heads (AD double_arrow)
+                pdf.line(cx, y0, cx, y1, BLACK, 0.6);
+                pdf.filled_triangle(cx, y0, cx - ahw, y0 + ahl, cx + ahw, y0 + ahl, BLACK); // top head (up)
+                pdf.filled_triangle(cx, y1, cx - ahw, y1 - ahl, cx + ahw, y1 - ahl, BLACK); // bottom head (down)
                 if (widest == nullptr || band.size > widest->size)
                     widest = &band;
             }
             if (widest != nullptr) {
                 const std::string name = clade_display_for(clade.name);
-                const double y0 = dev_y(static_cast<double>(widest->first_v)), y1 = dev_y(static_cast<double>(widest->last_v));
-                // clockwise (top-to-bottom): anchor near the band top, just right of the spine, text reads down
-                const bool clockwise = plan.rotation == 90;
-                const double angle = clockwise ? 90.0 : -90.0;
-                const double tx = cx + cap + clade_fs * 0.35;
-                const double ty = clockwise ? std::min(y0, y1) + clade_fs * 0.2
-                                            : (y0 + y1) / 2.0 + name.size() * clade_fs * 0.28;
-                pdf.text_rotated(tx, ty, name, clade_fs, BLACK, angle);
+                // label centred on the clade's whole vertical extent (AD vpos=middle), shifted by
+                // the per-clade offset (fractions of height); rotation 90 = clockwise (top->bottom),
+                // 0 = horizontal. Placed just right of the arrow.
+                const double center_y = dev_y(static_cast<double>(plan.first_v + plan.last_v) / 2.0) + plan.offset_y * height;
+                const double tx = cx + ahw + clade_fs * 0.45 + plan.offset_x * height;
+                if (plan.rotation == 0) {
+                    pdf.text(tx, center_y + clade_fs * 0.32, name, clade_fs, BLACK, /*center=*/false); // horizontal
+                }
+                else {
+                    const double tw = pdf.text_size(name, clade_fs).first;
+                    pdf.text_rotated(tx, center_y - tw / 2.0, name, clade_fs, BLACK, 90.0); // clockwise, vertically centred
+                }
             }
         }
     }

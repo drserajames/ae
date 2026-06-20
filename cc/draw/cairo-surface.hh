@@ -40,6 +40,7 @@ namespace ae::draw
         void sector(double cx, double cy, double radius, double start_angle, double end_angle, Color outline, double outline_width, Color fill);
         void square(double cx, double cy, double side, Color outline, double outline_width, Color fill);
         void triangle(double cx, double cy, double radius, Color outline, double outline_width, Color fill); // equilateral, point up
+        void filled_triangle(double x0, double y0, double x1, double y1, double x2, double y2, Color fill); // arbitrary filled triangle
         // Axis-aligned rectangle with its top-left corner at (x, y). Transparent fill = outline only.
         void rectangle(double x, double y, double width, double height, Color outline, double outline_width, Color fill);
         void line(double x1, double y1, double x2, double y2, Color color, double width);
