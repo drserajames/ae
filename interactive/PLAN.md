@@ -275,3 +275,43 @@ Theme: new-since and serum-coverage should both use the **dim-the-others emphasi
   on tips) + Agent-SELECT (single-serum gating + emphasis integration).
 
 Verify/commit/WHO/rAF rules as in v3.
+
+---
+
+# v8 — point-identity selection + map-coverage fix
+
+## Problem
+Selection is keyed by **normalised strain name** (`norm`). A serum and its same-name
+antigen share that key, so you can't select only the serum — selecting the strain
+highlights both, and double-click-isolate (which only drops homolog expansion) can't
+separate them. Sera-specific features (error/connection lines, serum circle, coverage)
+need to scope to ONE serum, not a strain.
+
+## Tasks
+- **Point-identity selection (Agent-SELECT, `state.js`):** add an "isolated point"
+  selection distinct from the norm set — `State.isolated = {kind:'serum'|'antigen', i}`
+  (i = index in the active chart), with setter + clear. **Double-click a point sets it to
+  that exact point** (replacing the old dblclick-isolate-by-norm); single click stays
+  norm-based (with homolog expansion). Expose `isIsolated()`, `isolatedSerum()` (the serum
+  object when `kind==='serum'`), and a predicate the panels use, e.g.
+  `pointEmphasis(kind, i, norm, clade)` → {dim,sel}: when a point is isolated, ONLY that
+  exact element is `sel`; everything else dims (so a serum isolates without lighting its
+  same-name antigen). Empty-space click / Esc clears isolation.
+- **Map (Agent-MAP, `map.js`/`grid.js`):** mark each glyph with its identity (e.g.
+  `data-kind`+`data-i`, or carry kind/i in hiList — antigen entries already have `a.i`,
+  sera need `i`). In refresh, when isolated, set `sel` only on the exact element, dim the
+  rest. **Also fix #4 map-coverage:** `applyCoverageTo` currently doesn't apply (rendered
+  antigens keep base stroke `#000/1.3` though `Colour.coverageOutline` returns valid data
+  and the tree applies it) — drive coverage off the **isolated serum** (`isolatedSerum()`)
+  and ensure the pink(≤4-fold,w3)/black(>4-fold,w4.5) outlines actually get written
+  (check the `ck!==_covKey` gate / timing).
+- **Lines (Agent-LINES, `lines.js`):** when a serum is isolated, draw its error/connection
+  lines for that one serum only (key off `isolatedSerum()`), not the strain.
+- **Tree (Agent-TREE, `tree.js`):** isolating a serum highlights no tip (sera aren't on the
+  tree) but the **serum-coverage tip outlines** should scope to the isolated serum (already
+  works via coverageSerum — point it at `isolatedSerum()`).
+
+Coordination: Agent-SELECT defines `isolated` + `isolatedSerum()` first; map/tree/lines
+consume it (coverage `singleSelectedSerum` → `isolatedSerum`). Verify: double-click a serum
+→ only that serum highlighted (same-name antigen NOT), its lines/circle/coverage show; map
+coverage outlines render (pink + thicker black). Verify/commit/WHO/rAF rules as in v3.
