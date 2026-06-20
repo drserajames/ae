@@ -318,15 +318,16 @@
     try { return new Date(ms).toISOString().slice(0, 10); } catch (_) { return null; }
   }
 
-  // F3 (v7): resolve the selected serum — gated on EXACTLY ONE serum selected in
-  // the active chart — and its coverage threshold = log2(homologous/10) − 2 (logged
+  // F3 (v7/v8): resolve the coverage serum — the double-click-ISOLATED serum
+  // (`State.isolatedSerum()`, the v8 way to pick one exact serum), else the fallback
+  // of a single selected serum norm. Threshold = log2(homologous/10) − 2 (logged
   // units). Cached by a (chart|serum) signature so it only recomputes on change.
   function ensureCoverage() {
     const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
-    let serum = null;
-    if (ch && ch.sera) {
-      // gate: exactly one serum selected — counted by distinct serum NORM, since a
-      // strain's egg+cell sera share a norm (selecting one square selects both).
+    let serum = (State.isolatedSerum && State.isolatedSerum()) || null;
+    if (!serum && ch && ch.sera) {
+      // fallback: exactly one serum selected — counted by distinct serum NORM, since
+      // a strain's egg+cell sera share a norm (selecting one square selects both).
       const norms = new Set(); let first = null;
       for (const s of ch.sera) {
         if (s.norm && State.selected.has(s.norm)) { norms.add(s.norm); if (!first) first = s; }
