@@ -28,14 +28,16 @@ window.IV = window.IV || {};
     offClades: new Set(), // clade labels toggled off in the legend
     active: null,         // transient hovered strain norm
     selected: new Set(),  // persistent selection (S1 populates this; empty in F1)
+    isolated: null,       // v8: {kind:'serum'|'antigen', i} point-identity isolation (active chart) | null
 
     subscribe(fn) { listeners.push(fn); },
     notify() { for (const fn of listeners) fn(State); },
 
     setActive(norm) { State.active = norm; State.notify(); },
 
-    // chart change re-renders the map (caller's job), so no implicit notify here
-    setChart(i) { State.chartIdx = i; },
+    // chart change re-renders the map (caller's job), so no implicit notify here.
+    // isolation indexes the active chart, so it can't carry across charts — clear it.
+    setChart(i) { State.chartIdx = i; State.isolated = null; },
 
     setColorBy(mode) { State.colorBy = mode; },
     setOnlyMatched(on) { State.onlyMatched = on; State.notify(); },
@@ -215,23 +217,52 @@ window.IV = window.IV || {};
       return (State.showNewReport && n === 1) || (State.showNewVCM && n >= 1);
     },
 
-    // ---- #4 (v7): serum-coverage — single source of truth ------------------
-    // Coverage is active when the Colour menu is in "coverage" mode AND EXACTLY
-    // one serum is selected (typically via double-click-isolate). Then antigens
-    // titrated against that serum are kept and untitrated ones dim (folded into
-    // emphasis()); panels draw the pink/black outlines on the titrated ones.
-    // map and tree both read coverageSerum()/coverageTitrated() so they agree.
+    // ---- v8: point-identity isolation --------------------------------------
+    // A double-click isolates ONE exact point (a serum or antigen, by index in the
+    // active chart) — distinct from the norm selection, so a serum can be isolated
+    // WITHOUT lighting its same-name antigen (which shares the norm). The panels
+    // read this via pointEmphasis(kind,i,...) (map/grid) and isolatedSerum() (lines,
+    // tree coverage). Sera-only features (error lines, serum circle, coverage)
+    // scope to isolatedSerum().
+    setIsolated(kind, i) {
+      if (kind == null || i == null) { State.clearIsolated(); return; }
+      State.isolated = { kind, i: +i };
+      State.notify();
+    },
+    clearIsolated() { if (State.isolated) { State.isolated = null; State.notify(); } },
+    isIsolated() { return !!State.isolated; },
+    isolatedSerum() {
+      const iso = State.isolated;
+      if (!iso || iso.kind !== "serum") return null;
+      const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
+      if (!ch || !ch.sera) return null;
+      return ch.sera.find(s => s.i === iso.i) || ch.sera[iso.i] || null;
+    },
+    // the norm an isolated ANTIGEN lights on norm-based panels (the tree); a serum
+    // lights no tip (it isn't on the tree), so this is null for a serum isolation.
+    _isolatedKeptNorm() {
+      const iso = State.isolated;
+      if (!iso || iso.kind !== "antigen") return null;
+      const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
+      const a = ch && ch.antigens && (ch.antigens.find(x => x.i === iso.i) || ch.antigens[iso.i]);
+      return a ? a.norm : null;
+    },
+
+    // ---- #4 serum-coverage (v7/v8): single source of truth ------------------
+    // Coverage is active when the Colour menu is in "coverage" mode AND a serum is
+    // ISOLATED (v8 — was "exactly one serum selected"). Antigens titrated against
+    // that serum are kept and untitrated ones dim (folded into emphasis() and
+    // pointEmphasis()); panels draw the pink/black outlines on the titrated ones.
     _covCache: null,
     _coverage() {
-      const active = State.colorBy === "coverage" && State.selected.size === 1;
-      if (!active) { State._covCache = null; return null; }
-      const norm = State.selected.values().next().value;
-      const key = State.chartIdx + "\x00" + norm;
+      if (State.colorBy !== "coverage") { State._covCache = null; return null; }
+      const s = State.isolatedSerum();
+      if (!s) { State._covCache = null; return null; }
+      const key = State.chartIdx + "\x00s" + s.i;
       if (State._covCache && State._covCache.key === key) return State._covCache.val;
       const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
       let val = null;
-      const s = ch && (ch.sera || []).find(sr => sr.norm === norm);
-      if (s && ch.logged) {                      // need E2 titers to judge titration
+      if (ch && ch.logged) {                     // need E2 titers to judge titration
         const titrated = new Set();
         (ch.antigens || []).forEach(a => {
           const row = ch.logged[a.i];
@@ -264,6 +295,17 @@ window.IV = window.IV || {};
     //   z     — F2 draw-order rank (-1 back, 0 normal, 1 front); panels may reorder.
     emphasis(norm, clade, extraHidden = false) {
       const hidden = extraHidden || State.isCladeHidden(clade);
+
+      // v8: point isolation dominates — norm-based panels (the tree) keep only the
+      // isolated antigen's tip (a serum lights no tip) plus coverage-titrated tips.
+      if (State.isolated) {
+        const keptNorm = State._isolatedKeptNorm();
+        const isKept = keptNorm != null && norm === keptNorm;
+        const cov = State._coverage();
+        const covKeep = !!cov && cov.titrated.has(norm);
+        return { dim: hidden || (!isKept && !covKeep), lift: false, sel: isKept, z: isKept ? 1 : 0 };
+      }
+
       const isActive = !!State.active && norm === State.active;
       const isSel = State.selected.has(norm);
 
@@ -274,19 +316,32 @@ window.IV = window.IV || {};
       const isFront = mode === "select", isBack = mode === "back";
       const hasFront = attr ? State._anyFront(attr) : false;
 
-      // #3 new-since + #4 coverage: additional "keep" layers that dim non-members
+      // #3 new-since: a "keep" layer that dims non-members (coverage needs isolation)
       const newActive = State._newActive();
       const newKeep = newActive && State._newMatch(norm);
-      const cov = State._coverage();
-      const covKeep = !!cov && cov.titrated.has(norm);
 
       // any active keep-layer dims everything not in one of the active keep-sets
-      const hasEmph = State.selected.size > 0 || hasFront || newActive || !!cov;
-      const isEmph = isSel || isFront || newKeep || covKeep;
+      const hasEmph = State.selected.size > 0 || hasFront || newActive;
+      const isEmph = isSel || isFront || newKeep;
       const dim = hidden || isBack ||
         (!!State.active && !isActive) ||
         (hasEmph && !isEmph && !isActive);
       return { dim, lift: isActive, sel: isSel, z: attr ? State.attrZRank(attr, val) : 0 };
+    },
+
+    // v8: point-identity emphasis for panels whose glyphs carry (kind,i) — map/grid.
+    // When a point is isolated, ONLY the exact (kind,i) is `sel`; everything else
+    // dims (so a serum isolates without lighting its same-name antigen). In coverage
+    // mode the titrated antigens stay visible (kept) for their pink/black outlines.
+    // With nothing isolated it defers to the norm-based emphasis() above.
+    pointEmphasis(kind, i, norm, clade) {
+      const iso = State.isolated;
+      if (!iso) return State.emphasis(norm, clade);
+      const isThis = kind === iso.kind && +i === iso.i;
+      const cov = State._coverage();
+      const covKeep = !isThis && kind === "antigen" && !!cov && cov.titrated.has(norm);
+      const hidden = State.isCladeHidden(clade);
+      return { dim: hidden || (!isThis && !covKeep), lift: false, sel: isThis, z: isThis ? 1 : 0 };
     },
   };
 
@@ -344,6 +399,8 @@ window.IV = window.IV || {};
       if (d.rect) d.rect.remove();
 
       if (!d.moved) {             // a click, not a drag
+        const hadIso = !!State.isolated;
+        State.isolated = null;    // any single click supersedes point isolation (v8)
         if (d.point) {
           // F1: a serum click also pulls its homologous antigen (+ its tree tip).
           const norms = State.expandNorms([d.point]);
@@ -351,10 +408,13 @@ window.IV = window.IV || {};
             if (State.isSelected(d.point)) State.deselect(norms);
             else State.select(norms, { additive: true });
           } else {
-            State.setSelection(norms);
+            State.setSelection(norms);   // always notifies → reflects the cleared isolation
           }
-        } else if (!d.additive) {
-          State.clearSelection();   // click on empty space clears
+        } else if (!d.additive) {        // empty space → clear selection + isolation
+          if (State.selected.size) State.clearSelection();
+          else if (hadIso) State.notify();
+        } else if (hadIso) {
+          State.notify();                // additive empty click just cleared isolation
         }
         return;
       }
@@ -370,23 +430,46 @@ window.IV = window.IV || {};
         if (cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2)
           hits.add(el.getAttribute("data-norm"));
       });
+      State.isolated = null;             // box-select supersedes isolation
       State.select(State.expandNorms(hits), { additive: d.additive });
     });
 
-    // #2 (v6): double-click a point to ISOLATE it — select only that one strain,
-    // bypassing the F1 homolog expansion, so a serum's lines/coverage apply to just
-    // that serum. Capture phase + stopImmediatePropagation so a point dblclick beats
-    // the panel's zoom-reset dblclick even when it is registered on the SAME node
-    // (#1 v7: map.js binds resetView on #mapSvg too — plain stopPropagation does not
-    // block a same-node listener). A dblclick on empty space falls through untouched
-    // and still resets the view.
+    // v8: double-click a point to ISOLATE that EXACT point (a serum or antigen, by
+    // identity — not the norm), so a serum isolates without lighting its same-name
+    // antigen and its lines/circle/coverage scope to it alone. Map/grid glyphs carry
+    // data-kind + data-i (index in the active chart); a tree tip carries only
+    // data-norm, so we resolve it to the matching antigen. Capture phase +
+    // stopImmediatePropagation so a point dblclick beats the panel's zoom-reset
+    // dblclick even when that listener is on the SAME SVG node (#1 v7); a dblclick
+    // on empty space falls through untouched and still resets the view.
     svg.addEventListener("dblclick", e => {
       const hit = e.target.closest("[data-norm]");
       if (!hit) return;            // empty space → let the panel zoom-reset handle it
       e.preventDefault();
       e.stopImmediatePropagation();
-      State.setSelection([hit.getAttribute("data-norm")]);
+      const kind = hit.getAttribute("data-kind");
+      const iAttr = hit.getAttribute("data-i");
+      if (kind && iAttr != null && iAttr !== "") {
+        State.setIsolated(kind, +iAttr);          // identity-carrying glyph (map/grid)
+      } else {
+        // tree tip (norm only): isolate the matching antigen in the active chart
+        const norm = hit.getAttribute("data-norm");
+        const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
+        const a = ch && ch.antigens && ch.antigens.find(x => x.norm === norm);
+        if (a) State.setIsolated("antigen", a.i); else State.clearIsolated();
+      }
     }, true);
+
+    // Esc clears isolation (and selection). Bound once globally.
+    if (!window.__ivEscBound) {
+      window.__ivEscBound = true;
+      window.addEventListener("keydown", e => {
+        if (e.key !== "Escape") return;
+        const had = State.isolated || State.selected.size;
+        State.isolated = null; State.selected.clear();
+        if (had) State.notify();
+      });
+    }
   };
 
   IV.State = State;
