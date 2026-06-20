@@ -229,27 +229,48 @@
 
   // ---- tip outlines: base, or the F3 serum-coverage outline when active ----
   // #3 dropped the new-since bold outline (the new-since highlight is now the shared
-  // dim-others emphasis, via State.emphasis — no per-tip outline here). #4: when a
-  // single serum is selected (coverage mode), a tip whose antigen the serum titrated
-  // gets the pink (≤4-fold) / thicker-black (>4-fold) outline from Colour.coverageOutline,
-  // resolved per tip via norm→antigen on the active chart; untitrated tips dim via
-  // emphasis. Memoised on a coverage key so we only restyle when it actually changes.
+  // dim-others emphasis via State.emphasis — no per-tip outline here). F3/#4: in the
+  // "coverage" colour mode a tip whose antigen the active serum titrated gets the pink
+  // (≤4-fold of homologous) / thicker-black (>4-fold) outline; untitrated tips dim via
+  // emphasis. v8: the serum is the ISOLATED serum (a serum isolated on the map) —
+  // sera aren't on the tree, but the tip outlines reflect that serum's coverage. We
+  // resolve the serum ourselves (isolatedSerum, falling back to the single-selected
+  // serum) and compute from the chart titers, reusing Colour's widths/pink so the map
+  // and tree agree. Colour.coverageOutline is selected-based, so it can't see an
+  // isolated-but-unselected serum — hence the local computation here.
   let _outlineKey = null;
-  function outlineKey() {
-    const s = (Colour.coverageSerum && Colour.coverageSerum()) || null;
-    return State.colorBy + ":" + State.chartIdx + ":" + (s ? s.i : "-");
+  function coverageContext() {
+    if (State.colorBy !== "coverage") return null;
+    const ch = IV.DATA.charts[State.chartIdx];
+    if (!ch || !ch.logged) return null;
+    const ref = (State.isolatedSerum && State.isolatedSerum()) ||
+                (Colour.coverageSerum && Colour.coverageSerum()) || null;
+    if (!ref) return null;
+    const serum = (ch.sera || []).find(s => s.i === ref.i) || ref;   // canonical serum (has homologous)
+    let threshold = null;                                            // log2(homologous/10) − 2 (logged)
+    const hom = serum.homologous;
+    if (hom != null && ch.logged[hom] && ch.logged[hom][serum.i] != null) threshold = ch.logged[hom][serum.i] - 2;
+    const w = (Colour.coverageWidths && Colour.coverageWidths()) || { pink: 3, black: 4.5 };
+    const pink = (Colour.coveragePink && Colour.coveragePink()) || "#ff1493";
+    return { ch, serum, threshold, w, pink };
+  }
+  function coverageOutlineFor(ctx, norm) {
+    const idxs = ctx.ch.norm_to_ag && ctx.ch.norm_to_ag[norm];
+    if (!idxs || !idxs.length) return null;
+    const row = ctx.ch.logged[idxs[0]];
+    const titer = row ? row[ctx.serum.i] : null;
+    if (titer == null) return null;                                  // untitrated → no outline (dims)
+    return (ctx.threshold != null && titer >= ctx.threshold)
+      ? { stroke: ctx.pink, width: ctx.w.pink }                      // ≤4-fold of homologous
+      : { stroke: "#000", width: ctx.w.black };                      // >4-fold (thicker)
   }
   function applyTipOutlines(force) {
-    const key = outlineKey();
+    const ctx = coverageContext();
+    const key = ctx ? "cov:" + State.chartIdx + ":" + ctx.serum.i : "base";
     if (!force && key === _outlineKey) return;
     _outlineKey = key;
-    const ch = IV.DATA.charts[State.chartIdx];
     for (const t of tipEntries) {
-      let out = null;
-      if (Colour.coverageOutline) {
-        const idxs = ch.norm_to_ag && ch.norm_to_ag[t.node.norm];
-        if (idxs && idxs.length) out = Colour.coverageOutline(ch.antigens[idxs[0]]);
-      }
+      const out = ctx ? coverageOutlineFor(ctx, t.node.norm) : null;
       if (out) {
         t.el.setAttribute("stroke", out.stroke);
         t.el.setAttribute("stroke-width", out.width);
