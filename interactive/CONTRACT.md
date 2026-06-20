@@ -24,7 +24,7 @@ Legend for field status:
   "meta":  { ... },              // [live] document-level metadata
   "tree":  { ...node... },       // [live] pruned tree, nested; root node
   "charts": [ { ...chart... } ], // [live] one entry per --chart (centre)
-  "clade_color":   { "<clade>": "#rrggbb" },   // [v3] clade -> colour, from the report style R["-clades-v10"]
+  "clade_color":   { "<clade>": "#rrggbb" },   // [v3] clade -> colour, from the chart's report clade style (per subtype, see below)
   "clade_legend":  { "<clade>": "<label>" },   // [v3] clade -> legend text, from the same rule's L.t
   "clade_priority":{ "<clade>": <int|null> },  // [v3] rule legend priority (L.p) for ordering the legend like the report
   "clade_short":   { "<clade>": "<pango>|null" }, // [v4] Pango short name parsed from the legend (null if it's an AA motif)
@@ -38,12 +38,16 @@ Legend for field status:
 ```
 
 > **Clade / continent colours [v3]** come straight from each chart's own report
-> plot-spec (`R["-clades-v10"]` and `R["-continent"]`, readable with
-> `decat <styled.ace>`), so the viewer matches the report PDFs exactly. A chart with
-> no `-clades-v10` style falls back to the `semantic_clades` palette (then a generated
-> one). Each antigen's `clade` is the rule applied **last** among its clade labels (the
-> report layers rules, so the most specific clade wins); clades with no rule are greyed
-> and logged.
+> plot-spec (the clade style + `R["-continent"]`, readable with `decat <styled.ace>`),
+> so the viewer matches the report PDFs exactly. The clade style key is chosen **per
+> subtype** (first present wins): `-clades-v10` (H3) → `-clades` (H1) → `-clades-v2`
+> (B/Vic — the current Pango "C" clades; `-clades-v1` is the older scheme, selectable
+> via `--clade-style`) → `-clades-v1`. `--clade-style <key>` (with or without the leading
+> `-`) forces one; pass it without the dash (`--clade-style clades-v1`) so argparse
+> doesn't treat the value as a flag. A chart with no clade style falls back to the
+> `semantic_clades` palette (then a generated one). Each antigen's `clade` is the rule
+> applied **last** among its clade labels (the report layers rules, so the most specific
+> clade wins); clades with no rule are greyed and logged.
 >
 > **`clade_short` [v4]** maps each clade to its Pango short name or `null`: the
 > parenthesised Pango in the legend (`"135K 189R (J.2.4)"` → `J.2.4`), or the legend
@@ -57,7 +61,10 @@ as clade names and tree-node `A` transitions. A string (not a `{pos: aa}` dict)
 keeps the table ~4× smaller and lets C1 read any position the user asks for.
 
 `norm` is the normalised strain key `LOCATION/ID/YEAR` (uppercase) used to link
-tree tips to chart antigens. It is the join key throughout the bundle.
+tree tips to chart antigens. It is the join key throughout the bundle. The leading
+subtype prefix is stripped from chart names — `A(...)/`, `B(...)/`, or a bare `A/`/`B/`
+(so `B/HONG KONG/269/2017` → `HONG KONG/269/2017`), while a name with no such prefix
+(`BHUTAN/212/2019`) is left untouched — so B/Vic names match the bare tree tips.
 
 ---
 

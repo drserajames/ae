@@ -84,13 +84,30 @@ UNMATCHED_COLOR = "#d9d9d9"
 PASSAGE_COLOR = {"egg": "#FF0000", "cell": "#0000FF", "reassortant": "#FFA500"}
 
 
+def semantic_clades_token(subtype: str) -> str:
+    """Map a display subtype to the key semantic_clades.sData expects
+    (A(H3N2) / A(H1N1) / BV / BY). The exporter's --subtype is free-form ("B",
+    "B/Victoria", …); semantic_clades keys on BV/BY, so translate (it KeyErrors on "B")."""
+    s = (subtype or "").upper()
+    if "H3" in s:
+        return "A(H3N2)"
+    if "H1" in s:
+        return "A(H1N1)"
+    if "YAM" in s or s == "BY":
+        return "BY"
+    if "VIC" in s or s in ("B", "BV"):
+        return "BV"
+    return subtype
+
+
 def clade_palette(subtype: str):
     """Return (name->color, name->legend, name->priority) from the canonical report
     palette (semantic_clades). Priority = position in the concatenated plot-spec lists
-    (later = more specific = wins). Returns ({},{},{}) if the module is unavailable."""
+    (later = more specific = wins). Returns ({},{},{}) if the module is unavailable.
+    Only a fallback now — clades normally come from the chart's own R style (v3)."""
     try:
         import semantic_clades as SC
-        spec = SC.semantic_plot_spec_data_for_subtype(subtype)
+        spec = SC.semantic_plot_spec_data_for_subtype(semantic_clades_token(subtype))
     except Exception as e:
         print(f"[clade] WARNING: semantic_clades unavailable ({e!r}); "
               f"falling back to generated palette", file=sys.stderr)
@@ -123,12 +140,32 @@ def read_chart_json(path):
         return {}
 
 
-def clade_rules_from_R(R):
-    """Ordered clade rules from the report style R['-clades-v10']['A'], as
+# Per-subtype clade-style auto-detection order. The report names its primary clade
+# style differently per subtype: H3 = -clades-v10, H1 = -clades, B/Vic = -clades-v2
+# (the current Pango "C" clades — C.5.6/C.5.7 etc. — which -clades-v1 lacks; both v1 and
+# v2 PDFs are published but v2 is the detailed/current scheme). First key present wins.
+CLADE_STYLE_ORDER = ["-clades-v10", "-clades", "-clades-v2", "-clades-v1"]
+
+
+def pick_clade_style(R, override=None):
+    """Choose the report clade-style key in R. `override` (from --clade-style) forces a
+    key (with or without the leading '-'); 'auto'/None uses CLADE_STYLE_ORDER. Returns
+    the key, or None if no clade style is present."""
+    if override and override != "auto":
+        key = override if override.startswith("-") else "-" + override
+        return key if key in (R or {}) else None
+    for key in CLADE_STYLE_ORDER:
+        if key in (R or {}):
+            return key
+    return None
+
+
+def clade_rules_from_R(R, key):
+    """Ordered clade rules from the report style R[key]['A'], as
     [(clade, fill, legend, legend_priority), ...] in list order. The report applies
     these in order and the LAST matching rule wins a point's colour (so the most
     specific clade combination shows), which `primary_clade` mirrors. Empty if absent."""
-    spec = (R or {}).get("-clades-v10") or {}
+    spec = (R or {}).get(key) or {}
     rules = []
     for r in spec.get("A", []):
         c = (r.get("T") or {}).get("C")
@@ -218,8 +255,11 @@ def norm_tree_name(s: str) -> str:
 
 
 def norm_chart_name(s: str) -> str:
-    """A(H3N2)/THAILAND/8/2022 -> THAILAND/8/2022 (strip subtype prefix, upper)."""
-    return re.sub(r"^[AB]\([^)]*\)/", "", s).upper()
+    """Strip the leading subtype prefix and uppercase, so chart names match tree tips:
+    A(H3N2)/THAILAND/8/2022 -> THAILAND/8/2022; B/HONG KONG/269/2017 -> HONG KONG/269/2017.
+    Handles A(...)/, B(...)/ and a bare A/ or B/; a name with no such prefix (e.g.
+    BHUTAN/212/2019 — country starting with B, no slash) is left untouched."""
+    return re.sub(r"^([AB]\([^)]*\)|[AB])/", "", s).upper()
 
 
 def antigen_clades(ag) -> list:
@@ -308,12 +348,13 @@ def select_new_indices(cur, prev_path, label, kind):
         return None
 
 
-def load_chart(label, path, fallback, clade_acc, cont_acc, stats):
+def load_chart(label, path, fallback, clade_acc, cont_acc, stats, clade_style="auto"):
     """Load one chart and emit its viewer entry. v3: clade colours/legend/priority,
     continent, passage and the vac/serology flags all come from the chart's OWN report
     styles (R) and per-point semantic attributes (T), so the viewer matches the report.
+    The clade style key is chosen per subtype (pick_clade_style; --clade-style overrides).
     `fallback` = (name2col, name2leg, prio) from semantic_clades, used only when a chart
-    has no `-clades-v10` style. `clade_acc`/`cont_acc` accumulate the shared palettes."""
+    has no clade style at all. `clade_acc`/`cont_acc` accumulate the shared palettes."""
     ch = ae_backend.chart_v3.Chart(path)
     na, ns = ch.number_of_antigens(), ch.number_of_sera()
     proj = ch.projection(0)
@@ -322,16 +363,19 @@ def load_chart(label, path, fallback, clade_acc, cont_acc, stats):
 
     cj = read_chart_json(path)                  # report styles (R) + semantics (T)
     aj, sj = cj.get("a", []), cj.get("s", [])
-    rules = clade_rules_from_R(cj.get("R", {}))
+    style_key = pick_clade_style(cj.get("R", {}), clade_style)
+    rules = clade_rules_from_R(cj.get("R", {}), style_key) if style_key else []
     if rules:
         eff = rules                             # report rules, in list order (last wins)
-        print(f"[clade] {label}: using report -clades-v10 ({len(rules)} rules)",
+        print(f"[clade] {label}: using report {style_key} ({len(rules)} rules)",
               file=sys.stderr)
     else:                                       # fallback: semantic_clades, ordered so
         name2col, name2leg, prio = fallback     # the last match is the most specific
         eff = sorted(((n, name2col[n], name2leg.get(n, n), prio.get(n, 0)) for n in name2col),
                      key=lambda r: r[3])
-        print(f"[clade] {label}: no -clades-v10; semantic_clades fallback "
+        miss = f"--clade-style {clade_style!r} not in chart" if clade_style != "auto" \
+            else "no clade style in chart R"
+        print(f"[clade] {label}: {miss}; semantic_clades fallback "
               f"({len(eff)} entries)", file=sys.stderr)
     for c, f, l, p in eff:                       # accumulate the shared clade palette
         clade_acc["color"][c] = f
@@ -579,13 +623,16 @@ def main():
                     help="LABEL=PATH (repeatable)")
     ap.add_argument("--subtype", default="")
     ap.add_argument("--assay", default="")
+    ap.add_argument("--clade-style", default="auto",
+                    help="report clade style key in R (e.g. -clades-v10, -clades, "
+                         "-clades-v2); 'auto' picks per subtype (default)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--template",
                     default=str(Path(__file__).with_name("viewer_template.html")))
     args = ap.parse_args()
 
     # clade/continent palettes are read from each chart's own report styles (v3); the
-    # semantic_clades palette is only a fallback for charts lacking a -clades-v10 style.
+    # semantic_clades palette is only a fallback for charts lacking any clade style.
     fallback = clade_palette(args.subtype)
     clade_acc = {"color": {}, "legend": {}, "prio": {}}   # shared clade palette (merged)
     cont_acc = {}                                          # shared continent palette
@@ -598,7 +645,8 @@ def main():
             ap.error(f"--chart must be LABEL=PATH, got {spec!r}")
         label, path = spec.split("=", 1)
         print(f"[chart] {label}: {path}", file=sys.stderr)
-        charts.append(load_chart(label, path, fallback, clade_acc, cont_acc, stats))
+        charts.append(load_chart(label, path, fallback, clade_acc, cont_acc, stats,
+                                 clade_style=args.clade_style))
 
     # per-norm canonical clade + passage type (first non-null wins across charts)
     norm_clade, norm_pt = {}, {}
