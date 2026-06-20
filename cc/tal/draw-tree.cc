@@ -798,7 +798,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         };
         // AD draws these small, grey (all-nodes label colour grey30) and MONOSPACE, with a
         // tether (leader line) to the branch. Slightly smaller than before to match AD.
-        const double mrca_fs = 0.0068 * height;
+        const double mrca_fs = 0.0095 * height; // AD draw-aa-transitions default label scale ~0.01
         struct Placed { double nx, ny, tx, ty, fs, x0, x1, y0, y1; std::string text; Color color; };
         std::vector<Placed> placed;
         for (const auto& label : params.mrca_labels) {
