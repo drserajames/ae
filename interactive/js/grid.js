@@ -103,20 +103,31 @@
     // F3: re-paint coverage fill+outline only when the selected serum changes.
     const ck = IV.Map.coverageKey ? IV.Map.coverageKey() : "";
     const covChanged = ck !== _covKey; _covKey = ck;
-    const activeChart = IV.DATA.charts[State.chartIdx];   // coverage is per the active chart
+    const activeChart = IV.DATA.charts[State.chartIdx];   // coverage/identity are per the active chart
+    const hasPE = typeof State.pointEmphasis === "function";
+    const iso = State.isolated;   // v8 {kind,i} (index in the ACTIVE chart) | null
     panels.forEach(p => {
+      const isActive = p.chart === activeChart;
       (p.hi || []).forEach(n => {
         const extraHidden = !n.serum && State.onlyMatched && !IV.Tree.normToLeaves[n.norm];
-        const e = State.emphasis(n.norm, n.clade, extraHidden);
-        n.el.classList.toggle("dim", e.dim);
-        n.el.classList.toggle("lift", e.lift);
-        n.el.classList.toggle("sel", e.sel);
+        let e;
+        if (isActive && hasPE) {
+          // active panel: same point-identity / coverage / new-since logic as the map
+          e = State.pointEmphasis(n.kind, n.i, n.norm, n.clade);
+          if (extraHidden) e = { dim: true, lift: e.lift, sel: e.sel };
+        } else if (iso) {
+          // isolation indexes the active chart, so other panels can't hold it → dim them
+          e = { dim: true, lift: false, sel: false };
+        } else {
+          e = State.emphasis(n.norm, n.clade, extraHidden);
+        }
+        n.el.classList.toggle("dim", !!e.dim);
+        n.el.classList.toggle("lift", !!e.lift);
+        n.el.classList.toggle("sel", !!e.sel);
       });
-      // v7 #3: new-since is a dim-the-others emphasis now (handled by the loop above
-      // via State.emphasis()), no bold outline. F3 coverage applies only to the active
-      // chart's panel — covSerum/titers come from chartIdx, so other panels would get
-      // a meaningless index-mapped outline.
-      if (covChanged && p.chart === activeChart) IV.Map.applyCoverage(p.hi || []);
+      // F3 coverage applies only to the active chart's panel — covSerum/titers come
+      // from chartIdx, so other panels would get a meaningless index-mapped outline.
+      if (covChanged && isActive) IV.Map.applyCoverage(p.hi || []);
     });
   }
 

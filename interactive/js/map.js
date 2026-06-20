@@ -221,6 +221,10 @@
       if (s.norm) o.dataNorm = s.norm;
       if (ss.rot) o.rot = ss.rot;
       const node = G.make(ss.shape, X, Y, r, o);
+      // v8: point identity so the exact glyph can be matched (a serum and its same-name
+      // antigen share `norm`; kind+i disambiguates). data-kind/data-i let S1's dblclick
+      // read the isolated point; hiList carries them for refresh's isolation highlight.
+      node.setAttribute("data-kind", "serum"); node.setAttribute("data-i", s.i);
       node.addEventListener("mouseenter", e => {
         if (s.norm) State.setActive(s.norm);
         IV.UI.showTip(e, serumHtml(s));
@@ -229,10 +233,8 @@
       node.addEventListener("mouseleave", () => { if (s.norm) State.setActive(null); IV.UI.hideTip(); });
       svg.appendChild(node);
       plc.push({ el: node, shape: ss.shape, rot: ss.rot || 0, x: s.x, y: s.y, r });
-      if (s.norm) {
-        (nodes[s.norm] = nodes[s.norm] || []).push(node);
-        hi.push({ el: node, norm: s.norm, clade: null, serum: true });
-      }
+      hi.push({ el: node, norm: s.norm || null, clade: null, serum: true, kind: "serum", i: s.i });
+      if (s.norm) (nodes[s.norm] = nodes[s.norm] || []).push(node);
     });
 
     function drawAntigen(a) {
@@ -252,13 +254,14 @@
       const baseSW = a.vac ? 1.6 : a.ref ? 1.3 : 0.6;
       node.setAttribute("stroke", baseStroke); node.setAttribute("stroke-width", baseSW);
       node.setAttribute("data-norm", a.norm);
+      node.setAttribute("data-kind", "antigen"); node.setAttribute("data-i", a.i);   // v8 point identity
       node.addEventListener("mouseenter", e => { State.setActive(a.norm); IV.UI.showTip(e, agHtml(a)); });
       node.addEventListener("mousemove", IV.UI.moveTip);
       node.addEventListener("mouseleave", () => { State.setActive(null); IV.UI.hideTip(); });
       svg.appendChild(node);
       (nodes[a.norm] = nodes[a.norm] || []).push(node);
       plc.push({ el: node, shape: sh.shape, rot: sh.rot || 0, x: a.x, y: a.y, r });
-      hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false, a: a, baseStroke, baseSW });
+      hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false, kind: "antigen", i: a.i, a: a, baseStroke, baseSW });
     }
 
     const vacs = [];
@@ -416,49 +419,43 @@
   }
 
   function refresh() {
+    // v8 point-identity: when a single point is isolated, ONLY that exact element is
+    // `sel`, everything else dims (a serum isolates without lighting its same-name
+    // antigen). State.pointEmphasis(kind,i,norm,clade) encapsulates that (and the
+    // coverage / new-since dimming); fall back to the norm-based emphasis() pre-v8.
+    const hasPE = typeof State.pointEmphasis === "function";
     for (const n of hiList) {
-      // sera are never in the tree, so only-matched dimming applies to antigens
       const extraHidden = !n.serum && State.onlyMatched && !IV.Tree.normToLeaves[n.norm];
-      const e = State.emphasis(n.norm, n.clade, extraHidden);
-      n.el.classList.toggle("dim", e.dim);
-      n.el.classList.toggle("lift", e.lift);
-      n.el.classList.toggle("sel", e.sel);
+      const e = hasPE ? State.pointEmphasis(n.kind, n.i, n.norm, n.clade)
+                      : State.emphasis(n.norm, n.clade, extraHidden);
+      n.el.classList.toggle("dim", !!e.dim || (hasPE && extraHidden));
+      n.el.classList.toggle("lift", !!e.lift);
+      n.el.classList.toggle("sel", !!e.sel);
     }
-    // v7 #3: new-since is now a dim-the-others emphasis folded into State.emphasis()
-    // by Agent-SELECT — no special outline here, the loop above already dims.
-    // F3 serum-coverage: always (re)apply in coverage mode. An earlier ck!=_covKey
-    // gate could go stale and skip the re-apply (e.g. a selection set via the
-    // double-click-isolate path), leaving antigens with their base stroke — so the
-    // pink/black outlines never rendered. applyCoverageTo() no-ops when not in
-    // coverage mode, so this costs nothing otherwise.
+    // F3 serum-coverage: always (re)apply in coverage mode (no stale gate). The fill
+    // and pink/black outline come from Colour, which resolves the active serum
+    // (Colour.coverageSerum → the isolated serum in v8); applyCoverageTo no-ops
+    // otherwise so this is free outside coverage mode.
     applyCoverageTo(hiList);
   }
 
-  // ---- F3: serum-coverage colour mode (v7) ---------------------------------
-  // Active only when EXACTLY one serum is selected (v7 #4). Colour.antigen() gives
-  // the fill (untitrated points are dimmed via emphasis(), not pale-tinted) and
-  // Colour.coverageOutline() the pink/black outline (widths owned by colour.js).
-  function singleSelectedSerum() {
-    const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
-    if (!ch || !ch.sera) return null;
-    let found = null, n = 0;
-    for (const s of ch.sera) {
-      if (s.norm && State.selected.has(s.norm)) { if (++n > 1) return null; found = s; }
-    }
-    return n === 1 ? found : null;
-  }
+  // ---- F3: serum-coverage colour mode --------------------------------------
+  // Driven entirely by Colour: coverageSerum() resolves the subject serum (the
+  // ISOLATED serum in v8 — NOT the norm selection, so we must not gate on
+  // State.selected), coverageOutline() returns the pink(≤4-fold,w3)/black(>4-fold,
+  // w4.5) outline (null = untitrated → base stroke; it dims via emphasis), and
+  // antigen() the fill. We just write what Colour says, on every refresh.
   function coverageKey() {
     if (State.colorBy !== "coverage") return "";
-    const s = singleSelectedSerum();
+    const s = Colour.coverageSerum && Colour.coverageSerum();
     return "cov:" + (s ? s.i : "none");
   }
   function applyCoverageTo(list) {
     if (State.colorBy !== "coverage") return;
-    const one = singleSelectedSerum();
     for (const n of list) {
       if (n.serum || !n.a) continue;
       n.el.setAttribute("fill", Colour.antigen(n.a));
-      const o = one ? Colour.coverageOutline(n.a) : null;
+      const o = Colour.coverageOutline(n.a);
       if (o) { n.el.setAttribute("stroke", o.stroke); n.el.setAttribute("stroke-width", o.width); }
       else { n.el.setAttribute("stroke", n.baseStroke); n.el.setAttribute("stroke-width", n.baseSW); }
     }
