@@ -247,11 +247,21 @@
                 (Colour.coverageSerum && Colour.coverageSerum()) || null;
     if (!ref) return null;
     const serum = (ch.sera || []).find(s => s.i === ref.i) || ref;   // canonical serum (has homologous)
-    let threshold = null;                                            // log2(homologous/10) − 2 (logged)
-    const hom = serum.homologous;
-    if (hom != null && ch.logged[hom] && ch.logged[hom][serum.i] != null) threshold = ch.logged[hom][serum.i] - 2;
+    // v9 #4: serum.homologous is a LIST (egg+cell of the strain). Fold over all of them
+    // using the MAX homologous logged titre (= the circle's min radius); threshold =
+    // maxHom − 2 (log2 ≈ 4-fold). Indexing ch.logged with the raw list would coerce the
+    // array to a string key → undefined → threshold null → every tip wrongly black.
+    let threshold = null;
+    const homs = Array.isArray(serum.homologous) ? serum.homologous
+               : (serum.homologous != null ? [serum.homologous] : []);
+    let ht = null;
+    for (const h of homs) {
+      const v = ch.logged[h] && ch.logged[h][serum.i];
+      if (v != null && (ht == null || v > ht)) ht = v;
+    }
+    if (ht != null) threshold = ht - 2;
     const w = (Colour.coverageWidths && Colour.coverageWidths()) || { pink: 3, black: 4.5 };
-    const pink = (Colour.coveragePink && Colour.coveragePink()) || "#ff1493";
+    const pink = (Colour.coveragePink && Colour.coveragePink()) || "#FFC0CB";
     return { ch, serum, threshold, w, pink };
   }
   function coverageOutlineFor(ctx, norm) {
