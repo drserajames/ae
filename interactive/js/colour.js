@@ -61,6 +61,8 @@
   let stressCap = 0;        // robust colour-scale top (p95 of nonzero stresses)
   let stressMax = 0;        // true max (legend label)
   let stressChart = -1;     // chart index stress is cached for
+  // F5: per-point stress ÷ that point's titre count (stress per titre)
+  let stressPerByAg = {}, stressPerByNorm = {}, stressPerCap = 0, stressPerMax = 0;
 
   // ---- F1: colour by time since collection -----------------------------------
   let metaGenerated = null; // bundle.meta.generated (page-generation date) or null
@@ -145,6 +147,9 @@
     stressOfNorm(n) { ensureStress(); return stressByNorm[n]; },
     stressColor(s) { return s == null ? UNMATCHED : seqColor(stressCap > 0 ? Math.min(1, s / stressCap) : 0); },
     stressScale() { ensureStress(); return { cap: stressCap, max: stressMax, stops: SEQ.slice() }; },
+    // F5: per-titre stress (per-point stress ÷ titre count), its own colour scale
+    stressPerColor(s) { return s == null ? UNMATCHED : seqColor(stressPerCap > 0 ? Math.min(1, s / stressPerCap) : 0); },
+    stressPerScale() { ensureStress(); return { cap: stressPerCap, max: stressPerMax, stops: SEQ.slice() }; },
 
     // ---- F1: colour by collection date (viridis over [oldest … generated]) ----
     hasTime() { ensureTime(); return timeOldest != null; },
@@ -169,8 +174,12 @@
     hasCoverage() { const ch = IV.DATA && IV.DATA.charts[State.chartIdx]; return !!(ch && ch.logged && ch.sera && ch.sera.length); },
     coverageSerum() { ensureCoverage(); return covSerum; },
     coverageWidths() { return { pink: 3, black: 4.5 }; },
+    // #7 (v9): returns the pink/black coverage outline for a titrated antigen
+    // whenever a coverage serum is resolved (the isolated serum). NO colorBy gate —
+    // the caller (map.js) applies it both in the `coverage` colour mode AND whenever
+    // that serum's circle is shown. Threshold is vs the homologous titre (#4: max
+    // over the serum's homologous antigens, matching the circle's min-radius rule).
     coverageOutline(a) {
-      if (State.colorBy !== "coverage") return null;
       ensureCoverage();
       if (!covSerum) return null;
       const titer = titerOf(a.i);
@@ -198,6 +207,7 @@
         case "continent": return contColor[(lf.continent || "").toUpperCase()] || UNMATCHED;
         case "aa": { const v = aaValueOf(lf.norm); return v ? (aaValueColor[v] || UNMATCHED) : UNMATCHED; }
         case "stress": { ensureStress(); const s = stressByNorm[lf.norm]; return s == null ? UNMATCHED : Colour.stressColor(s); }
+        case "stressn": { ensureStress(); const s = stressPerByNorm[lf.norm]; return s == null ? UNMATCHED : Colour.stressPerColor(s); }
         case "time": { ensureTime(); return timeColorOf(lf.date); }
         // v7: bright clade colour for all; untitrated tips recede via emphasis dim
         case "coverage": { ensureCoverage(); return covSerum ? (lf.clade ? (cladeColor[lf.clade] || UNMATCHED) : UNMATCHED) : UNMATCHED; }
@@ -210,6 +220,7 @@
         case "continent": return contColor[(a.continent || "").toUpperCase()] || UNMATCHED; // #6
         case "aa": { const v = aaValueOf(a.norm); return v ? (aaValueColor[v] || UNMATCHED) : UNMATCHED; }
         case "stress": { ensureStress(); const s = stressByAg[a.i]; return s == null ? UNMATCHED : Colour.stressColor(s); }
+        case "stressn": { ensureStress(); const s = stressPerByAg[a.i]; return s == null ? UNMATCHED : Colour.stressPerColor(s); }
         case "time": { ensureTime(); return timeColorOf(a.date); }
         case "coverage": { ensureCoverage(); return covSerum ? (a.clade ? (cladeColor[a.clade] || UNMATCHED) : UNMATCHED) : UNMATCHED; }
         default: return a.clade ? (cladeColor[a.clade] || UNMATCHED) : UNMATCHED;
@@ -241,17 +252,18 @@
     if (stressChart === idx) return;
     stressChart = idx;
     stressByAg = {}; stressByNorm = {}; stressCap = 0; stressMax = 0;
+    stressPerByAg = {}; stressPerByNorm = {}; stressPerCap = 0; stressPerMax = 0;
     const ch = IV.DATA && IV.DATA.charts[idx];
     if (!ch || !ch.logged || !ch.column_bases) return;
     const errFn = (IV.Lines && IV.Lines._errorFromDist) || ((td, md) => td - md);
     const positioned = ch.sera.filter(s => s.x != null && s.y != null);
-    const all = [];
+    const all = [], allPer = [];
     for (const a of ch.antigens) {
       if (a.x == null || a.y == null) continue;
       const lr = ch.logged[a.i];
       if (!lr) continue;
       const tr = ch.titers && ch.titers[a.i];
-      let s = 0;
+      let s = 0, n = 0;
       for (const sr of positioned) {
         const lg = lr[sr.i];
         if (lg == null) continue;
@@ -260,18 +272,28 @@
         let td = cb - lg; if (td < 0) td = 0;
         const md = Math.hypot(a.x - sr.x, a.y - sr.y);
         const e = errFn(td, md, tr ? tr[sr.i] : null);
-        s += e * e;
+        s += e * e; n++;
       }
       stressByAg[a.i] = s;
       all.push(s);
       if (s > stressMax) stressMax = s;
       if (stressByNorm[a.norm] == null || s > stressByNorm[a.norm]) stressByNorm[a.norm] = s;
+      // F5: stress per titre (mean error² over the point's measured titres)
+      const sp = n > 0 ? s / n : 0;
+      stressPerByAg[a.i] = sp;
+      allPer.push(sp);
+      if (sp > stressPerMax) stressPerMax = sp;
+      if (stressPerByNorm[a.norm] == null || sp > stressPerByNorm[a.norm]) stressPerByNorm[a.norm] = sp;
     }
-    // robust colour-scale top: 95th percentile of nonzero stresses (so a few
-    // extreme outliers saturate rather than flattening the rest to one colour).
-    const nz = all.filter(v => v > 0).sort((p, q) => p - q);
-    stressCap = nz.length ? nz[Math.min(nz.length - 1, Math.floor(nz.length * 0.95))] : stressMax;
-    if (!(stressCap > 0)) stressCap = stressMax || 1;
+    // robust colour-scale top: 95th percentile of nonzero values (so a few extreme
+    // outliers saturate rather than flattening the rest to one colour).
+    stressCap = p95(all) || stressMax || 1;
+    stressPerCap = p95(allPer) || stressPerMax || 1;
+  }
+  // 95th percentile of the nonzero values (0 if none)
+  function p95(arr) {
+    const nz = arr.filter(v => v > 0).sort((a, b) => a - b);
+    return nz.length ? nz[Math.min(nz.length - 1, Math.floor(nz.length * 0.95))] : 0;
   }
 
   // F1: date-window for the active chart (oldest..newest antigen date; newest
@@ -338,8 +360,16 @@
     if (sig === covSig) return;
     covSig = sig; covSerum = serum; covThreshold = null;
     if (serum && ch.logged && serum.homologous != null) {
-      const hom = ch.logged[serum.homologous];
-      const ht = hom ? hom[serum.i] : null;
+      // #4: `homologous` is now a list of antigen indices (a serum may have several
+      // reference strains, e.g. egg+cell). Threshold uses the MAX homologous titre
+      // — matching the serum circle, which takes the min radius over them.
+      const homs = Array.isArray(serum.homologous) ? serum.homologous : [serum.homologous];
+      let ht = null;
+      for (const h of homs) {
+        const row = ch.logged[h];
+        const v = row ? row[serum.i] : null;
+        if (v != null && (ht == null || v > ht)) ht = v;
+      }
       covThreshold = (ht == null) ? null : ht - 2;
     }
   }

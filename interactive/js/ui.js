@@ -129,21 +129,31 @@
     colKey.appendChild(u);
   }
 
-  // C2 colour key: a sequential gradient bar for per-point stress (Σ error²).
-  function stressLegend(colKey) {
-    if (!Colour.hasStress()) {
-      footnoteInto(colKey, "titer data not exported (E2) — stress unavailable"); return;
-    }
-    const sc = Colour.stressScale();
+  // #10: a sequential gradient bar labelled with numeric values, starting at 0.
+  // Shared by colour-by-stress (C2) and colour-by-stress-per-titre (F5).
+  const fmtStress = v => (v < 1 ? v.toFixed(2) : v.toFixed(1));
+  function stressBar(colKey, sc, what) {
+    const mid = sc.cap / 2;
     const bar = document.createElement("div"); bar.className = "lg";
     bar.innerHTML =
-      'low <span style="display:inline-block;width:120px;height:11px;border:1px solid rgba(0,0,0,.25);' +
-      `border-radius:2px;vertical-align:-1px;background:linear-gradient(to right,${sc.stops.join(",")})"></span> high`;
+      '0 <span style="position:relative;display:inline-block;width:130px;height:11px;border:1px solid rgba(0,0,0,.25);' +
+      `border-radius:2px;vertical-align:-1px;background:linear-gradient(to right,${sc.stops.join(",")})">` +
+      `<span style="position:absolute;left:50%;top:11px;transform:translateX(-50%);font-size:9px;color:var(--muted)">${fmtStress(mid)}</span>` +
+      `</span> ${fmtStress(sc.cap)}`;
     colKey.appendChild(bar);
     const g = document.createElement("div"); g.className = "lg";
-    g.innerHTML = `<span class="sw" style="background:${Colour.unmatched()}"></span>no titer`;
+    g.innerHTML = `<span class="sw" style="background:${Colour.unmatched()}"></span>no titre`;
     colKey.appendChild(g);
-    footnoteInto(colKey, `Σ error² per point · scale top p95≈${sc.cap.toFixed(1)} (max ${sc.max.toFixed(1)})`);
+    footnoteInto(colKey, `${what} · 0 → p95≈${fmtStress(sc.cap)} (max ${fmtStress(sc.max)})`);
+  }
+  function stressLegend(colKey) {
+    if (!Colour.hasStress()) { footnoteInto(colKey, "titer data not exported (E2) — stress unavailable"); return; }
+    stressBar(colKey, Colour.stressScale(), "Σ error² per point");
+  }
+  // F5 colour key: per-point stress ÷ that point's titre count.
+  function stressnLegend(colKey) {
+    if (!Colour.hasStress()) { footnoteInto(colKey, "titer data not exported (E2) — stress unavailable"); return; }
+    stressBar(colKey, Colour.stressPerScale(), "Σ error² ÷ titre count");
   }
 
   // F1 colour key: viridis gradient over the collection-date window, oldest →
@@ -196,7 +206,7 @@
     const titleByMode = {
       clade: "Clade", continent: "Continent",
       aa: "AA " + (Colour.aaPositions().join("+") || "position?"),
-      stress: "Stress", time: "Collection date", coverage: "Serum coverage",
+      stress: "Stress", stressn: "Stress / titre", time: "Collection date", coverage: "Serum coverage",
     };
     const colKey = section(titleByMode[State.colorBy] || "Colour");
 
@@ -204,6 +214,8 @@
       aaLegend(colKey);
     } else if (State.colorBy === "stress") {
       stressLegend(colKey);
+    } else if (State.colorBy === "stressn") {
+      stressnLegend(colKey);
     } else if (State.colorBy === "time") {
       timeLegend(colKey);
     } else if (State.colorBy === "coverage") {
@@ -253,17 +265,29 @@
     lg.appendChild(colKey);
 
     // ---- marker key (persistent) ----
+    // F3 (v9): each category (reference/vaccine/serum/egg/reassortant) is clickable
+    // and drives State's marker cycle (front → back → normal), like clade swatches —
+    // emphasis()/pointEmphasis() fold the marker modes in. Always active (independent
+    // of colorBy).
     const mk = section("Markers");
-    const item = (html) => { const d = document.createElement("div"); d.className = "lg"; d.innerHTML = html; mk.appendChild(d); };
-    item(`${glyph("ref")}reference`);
-    item(`${glyph("vac", "#888")}vaccine`);
-    item(`${glyph("serum")}serum`);
+    const markerItem = (cat, html) => {
+      const d = document.createElement("div"); d.className = "lg"; d.innerHTML = html;
+      const mode = State.markerMode(cat);
+      d.insertAdjacentHTML("beforeend", cycleBadge(mode));
+      styleCycleRow(d, mode);
+      d.title = "click to cycle: bring to front → send to back → normal";
+      d.onclick = () => { State.cycleMarker(cat); renderLegend(); };
+      mk.appendChild(d);
+    };
+    markerItem("reference", `${glyph("ref")}reference`);
+    markerItem("vaccine", `${glyph("vac", "#888")}vaccine`);
+    markerItem("serum", `${glyph("serum")}serum`);
     if (Colour.hasPassageMarkers()) {
-      // Only egg + reassortant get a distinct glyph on the map/tree (F7); cell is
-      // the default circle, so it's omitted from the key (#3). Glyphs are filled
-      // with passage_color (#4) and shaped via IV.Glyph to match the points.
+      // egg + reassortant get a distinct glyph on the map/tree (F7); cell is the
+      // default circle, so it's omitted from the key (#3). Glyphs are filled with
+      // passage_color (#4) and shaped via IV.Glyph to match the points.
       Colour.passages().filter(p => p !== "cell").forEach(p => {
-        item(`${glyph(p, Colour.passageColor(p))}${Colour.passageLabel(p)}`);
+        markerItem(p, `${glyph(p, Colour.passageColor(p))}${Colour.passageLabel(p)}`);
       });
     }
     lg.appendChild(mk);
@@ -280,8 +304,8 @@
     chartSel.onchange = () => {
       State.setChart(+chartSel.value);
       IV.Map.render();
-      // stress + time are per-chart, so their tip colours change with the chart
-      if (State.colorBy === "stress" || State.colorBy === "time") IV.Tree.render();
+      // stress(/per-titre) + time are per-chart, so tip colours change with the chart
+      if (/^(stress|stressn|time)$/.test(State.colorBy)) IV.Tree.render();
       renderLegend(); State.notify(); updateTitles();
     };
 
@@ -291,6 +315,7 @@
     const colorBy = document.getElementById("colorBy");
     if (IV.Colour.hasAA()) addOption(colorBy, "aa", "amino acid");
     if (IV.Colour.hasStress()) addOption(colorBy, "stress", "stress");
+    if (IV.Colour.hasStress()) addOption(colorBy, "stressn", "stress / titre");   // F5
     if (IV.Colour.hasTime()) addOption(colorBy, "time", "collection date");
     if (IV.Colour.hasCoverage()) addOption(colorBy, "coverage", "serum coverage");
     const aaPos = makeAAInput(colorBy);
