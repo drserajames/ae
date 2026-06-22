@@ -324,31 +324,36 @@ window.IV = window.IV || {};
       return a ? a.norm : null;
     },
 
-    // ---- #4 serum-coverage (v7/v8): single source of truth ------------------
-    // Coverage is active when the Colour menu is in "coverage" mode AND a serum is
-    // ISOLATED (v8 — was "exactly one serum selected"). Antigens titrated against
-    // that serum are kept and untitrated ones dim (folded into emphasis() and
-    // pointEmphasis()); panels draw the pink/black outlines on the titrated ones.
-    _covCache: null,
-    _coverage() {
-      if (State.colorBy !== "coverage") { State._covCache = null; return null; }
+    // ---- serum-scoped titration (v7/v8 coverage + v10 titre) ----------------
+    // The serum-scoped colour modes — "coverage" and "titre" — are driven by the
+    // ISOLATED serum (isolatedSerum()). When one is active, point opacity follows
+    // TITRATION to that serum, not isolation: antigens with a titre are foreground,
+    // untitrated ones dim (folded into emphasis()/pointEmphasis()). `_serumScope()`
+    // returns { serum:{i,norm}, titrated:Set<norm> } for both modes; `_coverage()`
+    // is the coverage-only view used by the pink/black-outline consumers.
+    _scopeCache: null,
+    _serumScope() {
+      const m = State.colorBy;
+      if (m !== "coverage" && m !== "titre") { State._scopeCache = null; return null; }
       const s = State.isolatedSerum();
-      if (!s) { State._covCache = null; return null; }
+      if (!s) { State._scopeCache = null; return null; }
       const key = State.chartIdx + "\x00s" + s.i;
-      if (State._covCache && State._covCache.key === key) return State._covCache.val;
+      if (State._scopeCache && State._scopeCache.key === key) return State._scopeCache.val;
       const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
       let val = null;
       if (ch && ch.logged) {                     // need E2 titers to judge titration
-        const titrated = new Set();
+        const titrated = new Set();    // by norm (the tree has no per-antigen index)
+        const titratedAg = new Set();  // by antigen index (the map dims per-antigen)
         (ch.antigens || []).forEach(a => {
           const row = ch.logged[a.i];
-          if (row && row[s.i] != null) titrated.add(a.norm);
+          if (row && row[s.i] != null) { titrated.add(a.norm); titratedAg.add(a.i); }  // logged[ag.i][serum.i] != null
         });
-        val = { serum: { i: s.i, norm: s.norm }, titrated };
+        val = { serum: { i: s.i, norm: s.norm }, titrated, titratedAg };
       }
-      State._covCache = { key, val };
+      State._scopeCache = { key, val };
       return val;
     },
+    _coverage() { return State.colorBy === "coverage" ? State._serumScope() : null; },
     coverageActive() { return !!State._coverage(); },
     coverageSerum() { const c = State._coverage(); return c ? c.serum : null; },
     coverageTitrated(norm) { const c = State._coverage(); return !!(c && c.titrated.has(norm)); },
@@ -372,14 +377,16 @@ window.IV = window.IV || {};
     emphasis(norm, clade, extraHidden = false) {
       const hidden = extraHidden || State.isCladeHidden(clade);
 
-      // v8: point isolation dominates — norm-based panels (the tree) keep only the
-      // isolated antigen's tip (a serum lights no tip) plus coverage-titrated tips.
+      // v8/v10: point isolation dominates — norm-based panels (the tree) keep only
+      // the isolated antigen's tip (a serum lights no tip). EXCEPT in the serum-scoped
+      // colour modes (coverage/titre), where opacity follows TITRATION to the isolated
+      // serum, not isolation: titrated tips stay foreground, untitrated dim.
       if (State.isolated) {
         const keptNorm = State._isolatedKeptNorm();
         const isKept = keptNorm != null && norm === keptNorm;
-        const cov = State._coverage();
-        const covKeep = !!cov && cov.titrated.has(norm);
-        return { dim: hidden || (!isKept && !covKeep), lift: false, sel: isKept, z: isKept ? 1 : 0 };
+        const sc = State._serumScope();
+        const titKeep = !!sc && sc.titrated.has(norm);
+        return { dim: hidden || (!isKept && !titKeep), lift: false, sel: isKept, z: isKept ? 1 : 0 };
       }
 
       return State._coreEmphasis(norm, clade, hidden, State._markersOfNorm(norm));
@@ -419,19 +426,23 @@ window.IV = window.IV || {};
 
     // v8: point-identity emphasis for panels whose glyphs carry (kind,i) — map/grid.
     // When a point is isolated, ONLY the exact (kind,i) is `sel`; everything else
-    // dims (so a serum isolates without lighting its same-name antigen). In coverage
-    // mode the titrated antigens stay visible (kept) for their pink/black outlines.
-    // With nothing isolated it runs the shared core, resolving "serum" markers by kind.
+    // dims (so a serum isolates without lighting its same-name antigen). EXCEPT the
+    // serum-scoped colour modes (coverage/titre), where titrated antigens stay
+    // foreground (their titre colour / coverage outline) and untitrated ones dim.
+    // With nothing isolated it runs the shared core; markers are resolved STRICTLY
+    // from the EXACT antigen index (#4) so a cell antigen never inherits an egg
+    // same-name sibling's category.
     pointEmphasis(kind, i, norm, clade) {
       const iso = State.isolated;
       if (iso) {
         const isThis = kind === iso.kind && +i === iso.i;
-        const cov = State._coverage();
-        const covKeep = !isThis && kind === "antigen" && !!cov && cov.titrated.has(norm);
+        const sc = State._serumScope();
+        // per-antigen titration on the map (#task: dim = !logged[antigen.i][serum.i])
+        const titKeep = !isThis && kind === "antigen" && !!sc && sc.titratedAg.has(+i);
         const hidden = State.isCladeHidden(clade);
-        return { dim: hidden || (!isThis && !covKeep), lift: false, sel: isThis, z: isThis ? 1 : 0 };
+        return { dim: hidden || (!isThis && !titKeep), lift: false, sel: isThis, z: isThis ? 1 : 0 };
       }
-      const cats = kind === "serum" ? SERUM_CATS : State._markersOfNorm(norm);
+      const cats = kind === "serum" ? SERUM_CATS : State._markersOfAntigen(i);
       return State._coreEmphasis(norm, clade, State.isCladeHidden(clade), cats);
     },
   };
