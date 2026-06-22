@@ -20,7 +20,7 @@ Multiple charts are supported so the map panel can switch between centres
 (the all-centres option). The tree is shared across charts.
 """
 
-import argparse, json, os, re, shutil, subprocess, sys, tempfile
+import argparse, json, math, os, re, shutil, subprocess, sys, tempfile
 from datetime import date
 from pathlib import Path
 
@@ -435,14 +435,15 @@ def load_chart(label, path, fallback, clade_acc, cont_acc, stats, clade_style="a
     new_report = select_new_indices(ch, prev_report, label, "report")
     new_vcm = select_new_indices(ch, prev_vcm, label, "VCM")
     if new_report is not None or new_vcm is not None:
+        # if EITHER comparison resolved we own every antigen's value: default all to 0,
+        # then set 2 (VCM), then 1 (report overrides — the tighter, more recent subset).
         for ag in antigens:
             i = ag["i"]
+            ag["new"] = 0
+            if new_vcm is not None and i in new_vcm:
+                ag["new"] = 2
             if new_report is not None and i in new_report:
                 ag["new"] = 1
-            elif new_vcm is not None and i in new_vcm:
-                ag["new"] = 2
-            elif new_report is not None and new_vcm is not None:
-                ag["new"] = 0          # both comparisons present and antigen in neither
         nr = sum(1 for a in antigens if a["new"] == 1)
         nv = sum(1 for a in antigens if a["new"] == 2)
         print(f"[new] {label}: new=1 (vs report) {nr}, new=2 (vs VCM) {nv}", file=sys.stderr)
@@ -457,10 +458,16 @@ def load_chart(label, path, fallback, clade_acc, cont_acc, stats, clade_style="a
         x, y = xy(lay[na + j])
         snorm = norm_chart_name(sr.name())
         homs = norm_to_ags.get(snorm, [])            # #4: all homologous (egg+cell of strain)
+        # scalar alias: the homolog whose passage matches the serum's (egg serum -> egg
+        # antigen), so consumers on the alias don't get the wrong passage; else first.
+        spt = passage_type(sr)
+        hom0 = next((i for i in homs if antigens[i].get("pt") == spt), None)
+        if hom0 is None and homs:
+            hom0 = homs[0]
         sera.append({"i": j, "name": sr.name(), "x": x, "y": y,
                      "norm": snorm,
                      "homologous": homs,                         # #4 all ag indices sharing norm
-                     "homologous0": homs[0] if homs else None,   # scalar alias (back-compat; first)
+                     "homologous0": hom0,                        # scalar alias (passage-matched, else first)
                      "passage": str(sr.passage()),               # #6
                      "serum_id": sr.serum_id(),                  # #6
                      "serum_species": sr.serum_species(),        # #6
@@ -617,6 +624,21 @@ def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
     return node
 
 
+def sanitise(obj):
+    """Recursively replace any non-finite float (NaN, ±Infinity) with None so the bundle
+    serialises to valid, finite JSON (BUG 3). The per-site `v != v` guards catch NaN but
+    not ±Infinity, which a degenerate projection can still emit; left unsanitised, Python's
+    default json.dumps writes bare NaN/Infinity — legal JS that parses into wrong values
+    with no error. Returns a sanitised copy."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: sanitise(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [sanitise(v) for v in obj]
+    return obj
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -760,7 +782,16 @@ def main():
         "aa": aa_table,
     }
 
-    payload = json.dumps(bundle, separators=(",", ":"))
+    # BUG 3: sanitise non-finite floats to None; allow_nan=False then asserts none slip
+    # through (would raise rather than emit bare NaN/Infinity into the page).
+    payload = json.dumps(sanitise(bundle), separators=(",", ":"), allow_nan=False)
+    # BUG 4: the bundle is injected as a raw JS literal at `window.IV.__DATA__ = …;`, so a
+    # data value containing "</script", "<!--" or "<script" would end the <script> element
+    # and break/inject the page. Escape <,>,& — in JSON these appear only inside string
+    # values, so the \uXXXX form is safe and round-trips on parse.
+    payload = (payload.replace("<", "\\u003c")
+                      .replace(">", "\\u003e")
+                      .replace("&", "\\u0026"))
     tpl = open(args.template).read()
     for placeholder in ("/*__DATA__*/", "/*__MODULES__*/"):
         if placeholder not in tpl:
