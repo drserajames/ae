@@ -339,3 +339,28 @@ slightly thicker outline — pink ≤4-fold of homologous, black >4-fold (report
 reconcile with the existing `coverage` colorBy so it's driven by the shown circle, not only
 the colour mode. Coordination: #2/F2/F3/#5 span SELECT + LINES/COLOUR; #7 spans MAP+LINES
 +COLOUR; #4 (EXP) feeds #7. Verify/commit/WHO/rAF rules as in v3.
+
+---
+
+# v10 — seventh feedback wave (5 fixes + 1 feature)
+
+- **#1** Agent-COLOUR: serum-coverage outlines too thick — reduce widths (pink/black are
+  currently 3/4.5; the addendum uses thin outlines).
+- **#3** Agent-COLOUR: pink too bright — `COV_PINK` is `#ff1493` (deeppink); use the report
+  addendum's lighter **`#FFC0CB`** ("pink").
+- **#2** Agent-MAP: untitrated antigens show a thick outline though `coverageOutline` correctly
+  returns null for them (colour.js:186). Fix map-side: `applyCoverageTo` must restore the
+  BASE (thin) stroke for untitrated points; confirm reference antigens' own black outline
+  isn't being mistaken for coverage (e.g. A9910).
+- **#4** Agent-SELECT/MAP: selecting "egg" in the legend also selects cell antigens (and
+  "reassortant" selects egg+cell). `state.js` membership looks strict (`a.pt === 'egg'`), so
+  the bug is likely the map resolving marker membership via its `passageType` regex fallback —
+  match marker categories strictly on `a.pt` (no regex), so egg=only pt egg etc.
+- **#5** Agent-EXP/LINES: H3 VIDRL serum A9933 has no circle. Data shows theoretical/empirical
+  null — one copy `homologous:[]`, the other `homologous:[4]` with a non-regular homolog titre
+  → legitimately circle-less per the acmacs algorithm. Confirm no homolog is being missed
+  (ties to v9 multi-homologous); optionally show a "no valid homologous titre — no circle" note.
+- **F1** Agent-COLOUR: new colorBy option **`titre`** = `log2(titre/10)` vs the selected serum,
+  same colour range as elsewhere; shown only when a single serum is selected.
+
+Verify/commit/WHO/rAF rules as in v3.
