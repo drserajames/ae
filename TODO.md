@@ -438,7 +438,27 @@ C++ renderer; TAL composes them with the tree.
 - [x] **Finer signature-page layout** — `compose_grid` (pdflatex) lays the tree + an R×C grid of
       **captioned** maps with an optional page title/tree caption (`--caption` / `--page-title` /
       `--tree-caption` / `--columns`); falls back to the `pdfjam` stack without pdflatex.
-      `sh cc/tal/test/test-signature-page-grid.sh`.
+      `sh cc/tal/test/test-signature-page-grid.sh`. (Cells now sized by min(width,height) so the
+      whole figure stays on one page.)
+- [x] **Section↔map coupling — AD-faithful signature pages (2026-06-22).** The real
+      distinguishing feature of a sigp: each antigenic map = one **shown hz-section**, highlighting
+      that section's antigens (coloured by date) + sera over a greyed base, titled
+      `"{prefix}. {label} {aa}"`, in AD's 3-row grid. Ported AD `AntigenicMaps`/`hz-sections` into the
+      orchestration layer ([`py/ae/tal/section_maps.py`](py/ae/tal/section_maps.py) +
+      `make_section_signature_page` in [`py/ae/tal/signature_page.py`](py/ae/tal/signature_page.py)):
+      parse shown hz-sections + time-series window from the `.tal`; **draw-order leaf names from
+      `tal-draw … .names`** (correct order + avoids the py3.14 libc++-hardening trap of Python tree-leaf
+      iteration on non-UTF-8 names); match leaves→chart antigens/sera by strain; per-section antigen
+      range (AD `chart_antigens_in_section`) + serum front()-node dedup; **viridis bezier date gradient
+      ported bit-for-bit** from `acmacs::color::bezier_gradient`; per-section semantic styles selected
+      via kateri-supported boolean attr (`sg{i}`, nesting-safe) + `!D` month range (kateri's `!i` is
+      single-index only); one kateri session renders all section maps. CLI: `tal-signature-page --tal …
+      --chart … <tree> <out.pdf>`. **Report driver** [`py/ae/report/signature_page.py`](py/ae/report/signature_page.py)
+      (`ssm_report/signature_page.py` analog) loops per lab-subtype → `sp/pdfs-ae/` (NOT `sp/pdfs/`,
+      which holds AD references). **Verified end-to-end on real H1+CDC / H3+HINT+CDC / B/Vic+Crick**;
+      structure matches AD `sp/<prefix>.sp.pdf` (map count/columns track the current `.tal`). Tests:
+      `python3 cc/tal/test/test-section-maps.py` (synthetic, no WHO data). Full notes + fidelity gaps:
+      [`doc/SIGPAGE.md`](doc/SIGPAGE.md). Built ae-tree for **py3.14** (`build-py314`, `build`→it).
 - [ ] **Remaining (low-value tail only):** `for-each` loops / `max-edge-length` ladderize / other
       `tal` outputs (`.names`/`.html`). **`clades-whocc` struck** — obsolete in AD (clades assigned
       upstream at tree-build, stored in the `.tjz`, which `tal-draw` reads; persisted relabelling is

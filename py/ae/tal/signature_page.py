@@ -29,6 +29,7 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional, Sequence
@@ -141,10 +142,20 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
     caps = list(captions or [])
     caps += [""] * (len(maps) - len(caps))  # pad to one caption per map
     cols = columns if (columns and columns > 0) else max(1, math.ceil(math.sqrt(len(maps))))
+    rows = math.ceil(len(maps) / cols)
     paper_w, paper_h = paper_mm
-    # right panel ≈ 48% of the printable width; size each cell to fit `cols` across it
+    # Size each map cell to fit BOTH the right panel's width (cols across) and the
+    # printable height (rows down, leaving room for a caption+gap per row and the
+    # optional page title) so the whole figure stays on one page.
     right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
-    cell_mm = max(10.0, right_panel_mm / cols - 3.0)
+    title_mm = 9.0 if page_title else 0.0
+    # height available for the panels, with a safety margin so the row never spills
+    # to a 2nd page (the taller of tree/grid sets the row height)
+    avail_h = paper_h - 2.0 * margin_mm - title_mm - 6.0
+    cell_by_w = right_panel_mm / cols - 3.0
+    cell_by_h = avail_h / rows - 7.0  # ~7mm/row for the caption + vertical gap
+    cell_mm = max(10.0, min(cell_by_w, cell_by_h))
+    tree_h_frac = round(avail_h / (paper_h - 2.0 * margin_mm), 3)
 
     work = Path(tempfile.mkdtemp(prefix="tal-grid-"))
     try:
@@ -175,7 +186,7 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
             r"\begin{document}",
             title_tex + r"\noindent",
             r"\begin{minipage}[t]{0.5\linewidth}\vspace{0pt}\centering",
-            rf"\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{{tree.pdf}}{tree_cap_tex}",
+            rf"\includegraphics[width=\linewidth,height={tree_h_frac}\textheight,keepaspectratio]{{tree.pdf}}{tree_cap_tex}",
             r"\end{minipage}\hfill",
             r"\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}\centering",
             grid,
@@ -254,6 +265,65 @@ def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 80
 
     Path(out_pdf).write_bytes(asyncio.run(_run()))
     return Path(out_pdf)
+
+
+def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *, width: float = 800.0,
+                                   connect_timeout: float = 90.0) -> list:
+    """Render one antigenic-map PDF per named style in `chart`, in a single kateri
+    session (chart sent once; `set_style`+`pdf` looped). `chart` is an
+    `ae_backend.chart_v3.Chart` already carrying the section styles (built by
+    `ae.tal.section_maps.build_section_styles`). Returns the PDF paths in order.
+
+    This is the section<->map coupling's renderer: the per-section highlight/colour
+    lives in each style, so one kateri session emits the whole map grid."""
+    import asyncio
+
+    exe = _require("kateri", "install kateri (github.com/drserajames/kateri) or pass pre-rendered maps via --map")
+    try:
+        import ae_backend  # noqa: F401  (chart already loaded by caller, but the socket layer needs the module)
+        from ae.utils import kateri as K
+    except ImportError as err:
+        raise SignaturePageError(
+            f"the kateri section-maps path needs ae_backend ({err}); run under the Python that can import it "
+            "(arm64 python with PYTHONPATH=build)") from err
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    app_bundle = _kateri_app_bundle(exe)
+
+    async def _run() -> list:
+        socket_dir = tempfile.mkdtemp(prefix="kateri-sock-")
+        socket_name = os.path.join(socket_dir, "kateri.sock")
+        server = await asyncio.start_unix_server(K.communicator.connected, socket_name)
+        direct = None
+        try:
+            if app_bundle is not None:
+                opener = await asyncio.create_subprocess_exec("open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name)
+                await opener.wait()
+            else:
+                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name)
+            waited = 0.0
+            while not K.communicator.is_connected():
+                if waited >= connect_timeout:
+                    raise SignaturePageError(f"kateri did not connect within {connect_timeout:.0f}s")
+                await asyncio.sleep(0.1)
+                waited += 0.1
+            K.communicator.send_chart(chart)
+            paths = []
+            for i, name in enumerate(style_names):
+                pdf_bytes = await K.communicator.get_pdf(style=name, width=width)
+                out = out_dir / f"map-{i:02d}.pdf"
+                out.write_bytes(pdf_bytes)
+                paths.append(out)
+            K.communicator.quit()
+            return paths
+        finally:
+            server.close()
+            if direct is not None and direct.returncode is None:
+                direct.terminate()
+            shutil.rmtree(socket_dir, ignore_errors=True)
+
+    return asyncio.run(_run())
 
 
 def load_vaccine_names(vaccines_file, subtype: str) -> list:
@@ -335,6 +405,79 @@ def _settings_with_mark_groups(settings: Optional[str], groups, tmpdir: Path) ->
     path = tmpdir / "tree-settings.json"
     path.write_text(json.dumps(config, indent=1, ensure_ascii=False), encoding="utf-8")
     return str(path)
+
+
+def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None) -> tuple[str, Optional[int]]:
+    """Translate an acmacs-tal settings-v3 `.tal` into a tal-draw settings file.
+    Returns (settings_path, image_size_or_None). Mirrors the `--tal` handling in
+    the tal-signature-page CLI so the tree panel is rendered from the same config
+    AD uses."""
+    from ae.tal.settings_v3 import load_tal
+
+    schema, warnings = load_tal(str(tal_path), defines or {})
+    for warning in warnings:
+        print(f"  [tal] {warning}", file=sys.stderr)
+    path = tmpdir / "tree-from-tal.json"
+    path.write_text(json.dumps(schema), encoding="utf-8")
+    size = int(schema["image_size"]) if "image_size" in schema else None
+    return str(path), size
+
+
+def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int] = None, map_width: float = 800.0,
+                                viewport: Optional[Sequence[float]] = None, page_title: Optional[str] = None,
+                                tree_caption: Optional[str] = None, defines: Optional[dict] = None,
+                                keep_temp: bool = False) -> Path:
+    """Build a faithful signature page: the TAL tree (rendered from `tal`) on the
+    left, and on the right one antigenic map per *shown* hz-section of `tal`, each
+    highlighting that section's antigens (coloured by date) and sera over a greyed
+    base map — AD's section<->map coupling, reproduced via kateri + a PDF grid.
+
+    `tree`/`chart` are file paths; `tal` is the acmacs-tal `.tal` settings holding
+    the hz-sections and time-series window. Needs ae_backend (run under the arm64
+    Python with PYTHONPATH=build) and the kateri executable on PATH."""
+    import sys as _sys
+
+    _sys.path.insert(0, str(REPO_ROOT / "build"))
+    try:
+        import ae_backend
+    except ImportError as err:
+        raise SignaturePageError(
+            f"section signature pages need ae_backend ({err}); run under the arm64 Python with PYTHONPATH=build") from err
+    from ae.tal import section_maps as SM
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="tal-sigsec-"))
+    try:
+        sections = SM.parse_sections(tal)
+        if not sections:
+            raise SignaturePageError(f"no shown hz-sections found in {tal}")
+        window = SM.parse_time_series(tal)
+        scale = SM.DateColorScale(*window) if window else None
+        if scale is None:
+            print("  [sigp] no time-series window in .tal; antigens won't be date-coloured", file=_sys.stderr)
+
+        settings_path, tal_size = _tal_to_settings(tal, tmpdir, defines)
+        chart_obj = ae_backend.chart_v3.Chart(str(chart))
+        # draw-order leaf names from tal-draw (matches the rendered tree's order;
+        # avoids the libc++-hardening trap of Python tree-leaf iteration on 3.14)
+        leaf_names = SM.leaf_names_from_taldraw(tree, settings_path, TAL_DRAW, tmpdir)
+        match = SM.match_leaf_names(leaf_names, chart_obj)
+        vp = list(viewport) if viewport else (SM.reset_viewport_from_ace(chart) or SM.viewport_from_layout(chart_obj))
+        styled = SM.build_section_styles(chart_obj, sections, match, scale, vp)
+        for s in styled:
+            print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
+
+        map_pdfs = render_section_maps_via_kateri(chart_obj, [s["name"] for s in styled], tmpdir / "maps", width=map_width)
+
+        tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size or tal_size or 1000, settings=settings_path)
+
+        # AD lays the section maps out 3 rows high -> columns = ceil(n / 3)
+        columns = math.ceil(len(map_pdfs) / 3)
+        compose_grid(tree_pdf, map_pdfs, output, captions=[s["title"] for s in styled],
+                     page_title=page_title, tree_caption=tree_caption, columns=columns)
+        return Path(output)
+    finally:
+        if not keep_temp:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def make_signature_page(tree, output, *, maps: Sequence[os.PathLike] = (), chart=None, size: int = 1000,

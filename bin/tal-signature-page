@@ -59,6 +59,29 @@ def main() -> int:
     parser.add_argument("--time-series", action="store_true")
     args = parser.parse_args()
 
+    # Section-maps mode: a .tal (with hz-sections) + a chart -> AD-style signature
+    # page (tree left, one antigenic map per shown hz-section right, coupled).
+    if args.tal and args.chart:
+        from ae.tal.signature_page import make_section_signature_page
+        defines = {}
+        for d in args.define:
+            name, eq, value = d.partition("=")
+            defines[name] = value if eq else "true"
+        try:
+            out = make_section_signature_page(
+                args.tree, args.chart, args.tal, args.output,
+                size=args.size if "--size" in sys.argv[1:] else None, map_width=args.map_width,
+                page_title=args.page_title, tree_caption=args.tree_caption, defines=defines)
+        except SignaturePageError as err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 2
+        except Exception as err:
+            import traceback; traceback.print_exc()
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 2
+        print(f"Wrote {out} (tree + per-hz-section antigenic maps)")
+        return 0
+
     tal_draw_args = ["--" + flag.replace("_", "-") for flag in ("labels", "color_by_clade", "clades", "time_series") if getattr(args, flag)]
     mark = [s for s in args.mark.split(",") if s] if args.mark else None
 
