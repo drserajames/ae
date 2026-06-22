@@ -324,8 +324,11 @@
     chartSel.onchange = () => {
       State.setChart(+chartSel.value);
       IV.Map.render();
-      // stress(/per-titre) + time are per-chart, so tip colours change with the chart
-      if (/^(stress|stressn|time)$/.test(State.colorBy)) IV.Tree.render();
+      // stress(/per-titre) + time + the serum-scoped modes (coverage/titre) are
+      // per-chart, so tip colours/outlines change with the chart (Bug 2: the serum-
+      // change subscriber misses this — the isolated serum's index is usually
+      // unchanged across charts, so it short-circuits).
+      if (/^(stress|stressn|time|coverage|titre)$/.test(State.colorBy)) IV.Tree.render();
       renderLegend(); State.notify(); updateTitles();
     };
 
