@@ -45,8 +45,9 @@
   const BLUE = "#1f77b4";   // too far  — should move together
   const CONN = "#8a8a8a";   // connection line
 
-  // overlay feature state: error/conn line layers + serum-circle mode
-  const show = { error: false, conn: false, circ: "off" };  // circ: off|selected|all
+  // overlay feature state: error/conn line layers + serum-circle mode/radius
+  // circ: off|selected|all ; circRadius (#8): which serum_circles radius to draw.
+  const show = { error: false, conn: false, circ: "off", circRadius: "empirical" };
   let ctlBuilt = false;
 
   // v6 F2: the "new since report/VCM" toggles drive shared State flags that
@@ -281,12 +282,40 @@
     }));
   }
 
+  // #8: the radius to draw — empirical (report default) or theoretical — falling
+  // back to whichever one the bundle actually has for this serum.
+  function circleRadius(s) {
+    const c = s.circle; if (!c) return null;
+    const primary = show.circRadius === "theoretical" ? c.theoretical : c.empirical;
+    const other = show.circRadius === "theoretical" ? c.empirical : c.theoretical;
+    return primary != null ? primary : other;
+  }
+
+  // #7: the single serum whose circle is the coverage subject, or null. The
+  // isolated serum (v8) wins; otherwise a single selected serum with a circle in
+  // "selected" mode. "all" mode / multiple sera → no single subject. map.js/colour.js
+  // read this to tie the pink/black coverage outline to the *shown* circle (so it
+  // appears whenever the circle is shown, not only in the coverage colour mode).
+  function circleSerum() {
+    if (show.circ === "off") return null;
+    const ch = activeChart(); if (!ch) return null;
+    const iso = State.isolatedSerum && State.isolatedSerum();
+    if (iso && iso.circle && circleRadius(iso) > 0) return iso;
+    if (show.circ === "selected") {
+      const norms = targetNorms();
+      const hit = ch.sera.filter(s => norms.has(s.norm) && s.x != null && s.y != null &&
+        s.circle && circleRadius(s) > 0);
+      if (hit.length === 1) return hit[0];
+    }
+    return null;
+  }
+
   // ---- F3: serum coverage circles -------------------------------------------
-  // One translucent circle per shown serum, radius = empirical (report) radius in
-  // antigenic units → px, outline coloured by serum passage. "selected" shows only
-  // sera in the selection/hover; "all" shows every positioned serum with a circle.
-  // v8: when a serum is isolated, "selected" mode scopes to that exact serum (by
-  // index), not its norm — so its same-name antigen's other serum isn't included.
+  // One translucent circle per shown serum, radius (#8) = empirical (report) or
+  // theoretical, in antigenic units → px, outline coloured by serum passage.
+  // "selected" shows only sera in the selection/hover; "all" shows every positioned
+  // serum with a circle. v8: when a serum is isolated, "selected" mode scopes to that
+  // exact serum (by index), not its norm — so its same-name antigen's serum isn't in.
   function paintCircles(g, ch, proj, isoSerum) {
     if (proj.scale == null) return 0;
     const sel = show.circ === "all" ? null : targetNorms();   // null = all sera
@@ -295,9 +324,7 @@
       if (s.x == null || s.y == null) continue;
       if (isoSerum && show.circ === "selected") { if (s.i !== isoSerum.i) continue; }
       else if (sel && !sel.has(s.norm)) continue;
-      const c = s.circle;
-      if (!c) continue;
-      const r = c.empirical != null ? c.empirical : c.theoretical;   // report = empirical
+      const r = circleRadius(s);
       if (r == null || !(r > 0)) continue;
       const [cx, cy] = proj.project(s.x, s.y);
       const ptype = serumPassageType(ch, s);
@@ -319,8 +346,11 @@
     ctlBuilt = true;
     const box = document.createElement("div");
     box.id = "linesCtl";
+    // #3: fixed width + reserved key heights so ticking conn/error never grows the
+    // panel (no horizontal reflow from wrapping hints, no vertical jump as the key
+    // appears). min-height holds room for the (up to) two-line line key.
     box.style.cssText =
-      "position:absolute;top:8px;right:8px;z-index:5;background:rgba(255,255,255,.92);" +
+      "position:absolute;top:8px;right:8px;z-index:5;width:184px;background:rgba(255,255,255,.92);" +
       "border:1px solid #ccc;border-radius:5px;padding:6px 8px;font-size:11px;" +
       "line-height:1.5;box-shadow:0 1px 3px rgba(0,0,0,.12);user-select:none;";
     const div = "border-top:1px solid #e2e2e2;margin:5px 0 3px";
@@ -328,21 +358,40 @@
       '<div style="font-weight:600;margin-bottom:2px">Overlays</div>' +
       '<label style="display:block;cursor:pointer"><input type="checkbox" id="lnConn"> connection lines</label>' +
       '<label style="display:block;cursor:pointer"><input type="checkbox" id="lnErr"> error lines</label>' +
-      '<div id="lnKey" style="margin:2px 0 0;color:#777"></div>' +
+      '<div id="lnKey" style="margin:2px 0 0;color:#777;min-height:4.6em"></div>' +
       `<div style="${div}"></div>` +
       '<label style="display:block;cursor:pointer"><input type="checkbox" id="lnNewR"> new since report</label>' +
       '<label style="display:block;cursor:pointer"><input type="checkbox" id="lnNewV"> new since VCM</label>' +
       `<div style="${div}"></div>` +
+      '<label style="display:block;cursor:pointer"><input type="checkbox" id="lnCircTh"> theoretical radius</label>' +
       '<label style="display:block">serum circles ' +
       '<select id="lnCirc"><option value="off">off</option>' +
       '<option value="selected">selected</option>' +
       '<option value="all">all</option></select></label>' +
-      '<div id="lnCircKey" style="margin-top:2px;color:#777"></div>';
+      '<div id="lnCircKey" style="margin-top:2px;color:#777;min-height:1.3em"></div>';
     wrap.appendChild(box);
     box.querySelector("#lnConn").onchange = e => { show.conn = e.target.checked; draw(); };
     box.querySelector("#lnErr").onchange = e => { show.error = e.target.checked; draw(); };
-    box.querySelector("#lnNewR").onchange = e => State.setShowNewReport(e.target.checked);
-    box.querySelector("#lnNewV").onchange = e => State.setShowNewVCM(e.target.checked);
+
+    // #2: the new-since toggles are mutually exclusive. Ticking one unticks the
+    // other; we drive the SELECT setters then mirror State back onto both boxes (so
+    // it stays correct whether or not the setters themselves also enforce exclusion).
+    const nr = box.querySelector("#lnNewR"), nv = box.querySelector("#lnNewV");
+    const syncNew = () => { nr.checked = !!State.showNewReport; nv.checked = !!State.showNewVCM; };
+    nr.onchange = e => {
+      const on = e.target.checked;
+      if (on && State.showNewVCM) State.setShowNewVCM(false);
+      State.setShowNewReport(on); syncNew();
+    };
+    nv.onchange = e => {
+      const on = e.target.checked;
+      if (on && State.showNewReport) State.setShowNewReport(false);
+      State.setShowNewVCM(on); syncNew();
+    };
+
+    box.querySelector("#lnCircTh").onchange = e => {
+      show.circRadius = e.target.checked ? "theoretical" : "empirical"; draw();
+    };
     box.querySelector("#lnCirc").onchange = e => { show.circ = e.target.value; draw(); };
   }
 
@@ -362,7 +411,7 @@
     }
     const ck = document.getElementById("lnCircKey");
     if (ck) ck.textContent = show.circ === "off" ? ""
-      : (circDrawn ? `${circDrawn} circle(s) · outline = passage`
+      : (circDrawn ? `${circDrawn} ${show.circRadius} circle(s) · outline = passage`
                    : (show.circ === "selected" ? "select a serum to show its circle"
                                                : "no serum-circle data"));
   }
@@ -374,6 +423,11 @@
     // which fires refresh() below and redraws.
     render() { draw(); },     // full (re)draw — used on chart/colour re-render
     refresh() { draw(); },    // selection / hover change (subscribed to State)
+    // #7: the serum whose circle is the coverage subject (single-serum context), or
+    // null. map.js applies Colour.coverageOutline tied to this so the pink/black
+    // titrated outline shows whenever the circle is shown, not only in coverage mode.
+    circleSerum,
+    circleActive() { return circleSerum() != null; },
     // exposed for verification / reuse (C2 per-point stress shares the math)
     _errorFromDist: errorFromDist,
   };
