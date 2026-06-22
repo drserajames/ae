@@ -20,6 +20,7 @@ window.IV = window.IV || {};
   IV.DATA = null;
 
   const listeners = [];
+  const SERUM_CATS = ["serum"];   // F3: marker categories for a serum glyph
 
   const State = {
     chartIdx: 0,          // active chart (Centre dropdown)
@@ -48,8 +49,9 @@ window.IV = window.IV || {};
     // report) or 2 (since previous VCM). Flags only; the drawing lives in the panels.
     showNewReport: false,   // highlight antigens with new >= 1
     showNewVCM: false,      // highlight antigens with new == 2
-    setShowNewReport(on) { State.showNewReport = !!on; State.notify(); },
-    setShowNewVCM(on) { State.showNewVCM = !!on; State.notify(); },
+    // #2 (v9): the two new-since toggles are mutually exclusive.
+    setShowNewReport(on) { State.showNewReport = !!on; if (on) State.showNewVCM = false; State.notify(); },
+    setShowNewVCM(on) { State.showNewVCM = !!on; if (on) State.showNewReport = false; State.notify(); },
 
     toggleClade(c) {
       if (State.offClades.has(c)) State.offClades.delete(c);
@@ -217,6 +219,44 @@ window.IV = window.IV || {};
       return (State.showNewReport && n === 1) || (State.showNewVCM && n >= 1);
     },
 
+    // ---- F3 (v9): marker-category cycle ------------------------------------
+    // A second cyclable dimension keyed "marker\x00<category>", ALWAYS active
+    // (independent of colorBy). Agent-COLOUR's legend marker swatches call
+    // cycleMarker(cat); emphasis()/pointEmphasis() fold the modes in exactly like
+    // the clade cycle — a front category pops while the rest fade. A point can be
+    // in several categories (e.g. an egg reference antigen). "serum" matches only
+    // serum glyphs (resolved by kind in pointEmphasis), so it has no tree tips.
+    MARKERS: ["reference", "vaccine", "serum", "egg", "reassortant"],
+    cycleMarker(cat) { return State.cycleAttr("marker", cat); },
+    markerMode(cat) { return State.attrMode("marker", cat); },
+    markerZRank(cat) { return State.attrZRank("marker", cat); },
+    _markerCache: null,
+    _markersOfNorm(norm) {                 // antigen marker categories for a norm
+      if (!State._markerCache) {
+        const m = Object.create(null), d = IV.DATA;
+        if (d) (d.charts || []).forEach(ch => (ch.antigens || []).forEach(a => {
+          if (!a.norm) return;
+          const arr = m[a.norm] || (m[a.norm] = []);
+          const add = c => { if (arr.indexOf(c) < 0) arr.push(c); };
+          if (a.ref) add("reference");
+          if (a.vac) add("vaccine");
+          if (a.pt === "egg") add("egg");
+          if (a.pt === "reassortant") add("reassortant");
+        }));
+        State._markerCache = m;
+      }
+      return State._markerCache[norm] || null;
+    },
+    // front/back contribution of a point's marker categories
+    _markerEmph(cats) {
+      let front = false, back = false;
+      if (cats) for (const c of cats) {
+        const mm = State.cycle.get("marker\x00" + c);
+        if (mm === "select") front = true; else if (mm === "back") back = true;
+      }
+      return { front, back };
+    },
+
     // ---- v8: point-identity isolation --------------------------------------
     // A double-click isolates ONE exact point (a serum or antigen, by index in the
     // active chart) — distinct from the norm selection, so a serum can be isolated
@@ -306,15 +346,27 @@ window.IV = window.IV || {};
         return { dim: hidden || (!isKept && !covKeep), lift: false, sel: isKept, z: isKept ? 1 : 0 };
       }
 
+      return State._coreEmphasis(norm, clade, hidden, State._markersOfNorm(norm));
+    },
+
+    // Core emphasis shared by emphasis() (tree, norm-based) and pointEmphasis()
+    // (map/grid, identity-based). Folds the active-attr cycle (clade/continent/aa),
+    // the F3 marker cycle (markerCats), the manual selection, and #3 new-since.
+    _coreEmphasis(norm, clade, hidden, markerCats) {
       const isActive = !!State.active && norm === State.active;
       const isSel = State.selected.has(norm);
 
-      // F2: fold the active attribute's (clade/continent/aa) cycle in
+      // F2: the active attribute's (clade/continent/aa) cycle
       const attr = State.activeAttr();
-      const val = attr ? State._attrValue(attr, norm, clade) : null;
-      const mode = attr ? State.attrMode(attr, val) : "normal";
-      const isFront = mode === "select", isBack = mode === "back";
-      const hasFront = attr ? State._anyFront(attr) : false;
+      const aval = attr ? State._attrValue(attr, norm, clade) : null;
+      const amode = attr ? State.attrMode(attr, aval) : "normal";
+
+      // F3: the marker cycle (always active, independent of colorBy)
+      const mk = State._markerEmph(markerCats);
+
+      const isFront = amode === "select" || mk.front;
+      const isBack = !isFront && (amode === "back" || mk.back);
+      const hasFront = (attr && State._anyFront(attr)) || State._anyFront("marker");
 
       // #3 new-since: a "keep" layer that dims non-members (coverage needs isolation)
       const newActive = State._newActive();
@@ -326,22 +378,25 @@ window.IV = window.IV || {};
       const dim = hidden || isBack ||
         (!!State.active && !isActive) ||
         (hasEmph && !isEmph && !isActive);
-      return { dim, lift: isActive, sel: isSel, z: attr ? State.attrZRank(attr, val) : 0 };
+      return { dim, lift: isActive, sel: isSel, z: isFront ? 1 : (isBack ? -1 : 0) };
     },
 
     // v8: point-identity emphasis for panels whose glyphs carry (kind,i) — map/grid.
     // When a point is isolated, ONLY the exact (kind,i) is `sel`; everything else
     // dims (so a serum isolates without lighting its same-name antigen). In coverage
     // mode the titrated antigens stay visible (kept) for their pink/black outlines.
-    // With nothing isolated it defers to the norm-based emphasis() above.
+    // With nothing isolated it runs the shared core, resolving "serum" markers by kind.
     pointEmphasis(kind, i, norm, clade) {
       const iso = State.isolated;
-      if (!iso) return State.emphasis(norm, clade);
-      const isThis = kind === iso.kind && +i === iso.i;
-      const cov = State._coverage();
-      const covKeep = !isThis && kind === "antigen" && !!cov && cov.titrated.has(norm);
-      const hidden = State.isCladeHidden(clade);
-      return { dim: hidden || (!isThis && !covKeep), lift: false, sel: isThis, z: isThis ? 1 : 0 };
+      if (iso) {
+        const isThis = kind === iso.kind && +i === iso.i;
+        const cov = State._coverage();
+        const covKeep = !isThis && kind === "antigen" && !!cov && cov.titrated.has(norm);
+        const hidden = State.isCladeHidden(clade);
+        return { dim: hidden || (!isThis && !covKeep), lift: false, sel: isThis, z: isThis ? 1 : 0 };
+      }
+      const cats = kind === "serum" ? SERUM_CATS : State._markersOfNorm(norm);
+      return State._coreEmphasis(norm, clade, State.isCladeHidden(clade), cats);
     },
   };
 
@@ -360,7 +415,8 @@ window.IV = window.IV || {};
     if (svg.__ivSelect) return;   // idempotent across re-renders (svg node is reused)
     svg.__ivSelect = true;
 
-    let drag = null;   // { x0,y0, additive, point, rect, moved }
+    let drag = null;   // { x0,y0, additive, point, kind, i, rect, moved }
+    let lastClick = null;   // #5 manual double-click: { point, kind, i, t }
 
     svg.addEventListener("mousedown", e => {
       if (e.button !== 0) return;
@@ -370,6 +426,8 @@ window.IV = window.IV || {};
         x0: p.x, y0: p.y, moved: false,
         additive: e.shiftKey || e.metaKey || e.ctrlKey,
         point: hit ? hit.getAttribute("data-norm") : null,
+        kind: hit ? hit.getAttribute("data-kind") : null,
+        i: hit ? hit.getAttribute("data-i") : null,
         rect: null,
       };
       e.preventDefault();
@@ -399,22 +457,45 @@ window.IV = window.IV || {};
       if (d.rect) d.rect.remove();
 
       if (!d.moved) {             // a click, not a drag
-        const hadIso = !!State.isolated;
-        State.isolated = null;    // any single click supersedes point isolation (v8)
         if (d.point) {
-          // F1: a serum click also pulls its homologous antigen (+ its tree tip).
-          const norms = State.expandNorms([d.point]);
+          // #5 (v9): manual double-click detection — the native dblclick event on
+          // SVG is unreliable in Safari, so we pair two clicks on the same point
+          // within 300 ms ourselves. Second click → isolate that EXACT point (by
+          // identity, not norm) and F2: clear the legend cycle. First/lone click →
+          // norm selection (with F1 homolog expansion).
+          const now = (window.performance && performance.now) ? performance.now() : Date.now();
+          if (lastClick && lastClick.point === d.point && lastClick.kind === d.kind &&
+              lastClick.i === d.i && (now - lastClick.t) < 300) {
+            lastClick = null;
+            State.cycle.clear(); State._zDirty = true;   // F2: dblclick clears the legend cycle
+            if (d.kind && d.i != null && d.i !== "") {
+              State.setIsolated(d.kind, +d.i);           // identity-carrying glyph (map/grid)
+            } else {                                     // tree tip (norm only) → matching antigen
+              const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
+              const a = ch && ch.antigens && ch.antigens.find(x => x.norm === d.point);
+              if (a) State.setIsolated("antigen", a.i); else State.clearIsolated();
+            }
+            return;
+          }
+          lastClick = { point: d.point, kind: d.kind, i: d.i, t: now };
+          State.isolated = null;          // a fresh single click supersedes isolation (v8)
+          const norms = State.expandNorms([d.point]);   // F1 homolog expansion
           if (d.additive) {
             if (State.isSelected(d.point)) State.deselect(norms);
             else State.select(norms, { additive: true });
           } else {
             State.setSelection(norms);   // always notifies → reflects the cleared isolation
           }
-        } else if (!d.additive) {        // empty space → clear selection + isolation
-          if (State.selected.size) State.clearSelection();
-          else if (hadIso) State.notify();
-        } else if (hadIso) {
-          State.notify();                // additive empty click just cleared isolation
+        } else {                          // empty space → clear selection + isolation
+          lastClick = null;
+          const hadIso = !!State.isolated;
+          State.isolated = null;
+          if (!d.additive) {
+            if (State.selected.size) State.clearSelection();
+            else if (hadIso) State.notify();
+          } else if (hadIso) {
+            State.notify();
+          }
         }
         return;
       }
@@ -431,33 +512,22 @@ window.IV = window.IV || {};
           hits.add(el.getAttribute("data-norm"));
       });
       State.isolated = null;             // box-select supersedes isolation
+      lastClick = null;                  // a drag breaks any pending double-click
       State.select(State.expandNorms(hits), { additive: d.additive });
     });
 
-    // v8: double-click a point to ISOLATE that EXACT point (a serum or antigen, by
-    // identity — not the norm), so a serum isolates without lighting its same-name
-    // antigen and its lines/circle/coverage scope to it alone. Map/grid glyphs carry
-    // data-kind + data-i (index in the active chart); a tree tip carries only
-    // data-norm, so we resolve it to the matching antigen. Capture phase +
-    // stopImmediatePropagation so a point dblclick beats the panel's zoom-reset
-    // dblclick even when that listener is on the SAME SVG node (#1 v7); a dblclick
-    // on empty space falls through untouched and still resets the view.
+    // #5 (v9): isolation is now driven by the manual two-click detection above
+    // (the native dblclick event is unreliable in Safari). This listener only
+    // SUPPRESSES the panel's own zoom-reset on a point dblclick where the native
+    // event *does* fire (e.g. Chrome): capture phase + stopImmediatePropagation so
+    // it beats a resetView listener on the SAME SVG node (#1 v7). Where the native
+    // dblclick doesn't fire (Safari), the panel's resetView (also native dblclick)
+    // doesn't fire either, so there is nothing to suppress. An empty-space dblclick
+    // falls through untouched and still resets the view.
     svg.addEventListener("dblclick", e => {
-      const hit = e.target.closest("[data-norm]");
-      if (!hit) return;            // empty space → let the panel zoom-reset handle it
+      if (!e.target.closest("[data-norm]")) return;   // empty space → allow zoom-reset
       e.preventDefault();
       e.stopImmediatePropagation();
-      const kind = hit.getAttribute("data-kind");
-      const iAttr = hit.getAttribute("data-i");
-      if (kind && iAttr != null && iAttr !== "") {
-        State.setIsolated(kind, +iAttr);          // identity-carrying glyph (map/grid)
-      } else {
-        // tree tip (norm only): isolate the matching antigen in the active chart
-        const norm = hit.getAttribute("data-norm");
-        const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
-        const a = ch && ch.antigens && ch.antigens.find(x => x.norm === norm);
-        if (a) State.setIsolated("antigen", a.i); else State.clearIsolated();
-      }
     }, true);
 
     // Esc clears isolation (and selection). Bound once globally.
