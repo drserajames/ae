@@ -438,6 +438,11 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const auto dev_y = [&](double vertical_offset) { return vmargin + top_reserve + (vertical_offset - 0.5) * vstep; };
 
     const double line_width = std::clamp(vstep * 0.5, 0.2, 3.0);
+    // AD renders the tree branches as thin hairlines — about the stroke weight of the tip
+    // strain-name glyphs at zoom, NOT the fat bars `line_width` produced. A dedicated weight
+    // for the three tree-edge draws only (leaf edge, inode edge, vertical connector); clade
+    // arrows/spines, time-series separators, hz-lines and dash marks keep their own widths.
+    const double tree_line_width = std::clamp(vstep * 0.15, 0.1, 0.6);
     const double font_size = std::clamp(vstep * 0.8, 3.0, 14.0);
 
     ae::draw::CairoPdf pdf{output, width, height};
@@ -465,7 +470,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const Color color = leaf_color(leaf);        // matrix / label colour (may be clade)
         const Color edge_col = edge_color_for(leaf); // tree edge colour (black under clades-whocc)
         const auto edge_it = edge_color_override.find(node.node);
-        pdf.line(dev_x(node.x - leaf.edge.get()), y, dev_x(node.x), y, edge_it != edge_color_override.end() ? edge_it->second : edge_col, line_width);
+        pdf.line(dev_x(node.x - leaf.edge.get()), y, dev_x(node.x), y, edge_it != edge_color_override.end() ? edge_it->second : edge_col, tree_line_width);
         // AD tip names: every shown leaf's seq_id at its tip, ~row height (vertical_step*0.8,
         // UNCLAMPED so one fits per row), no column / no collision — faint at page scale,
         // readable on zoom. Drawn in the leaf's matrix colour (AD coloring().color(leaf)).
@@ -495,7 +500,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const Inode& inode = tree.inode(node_index_t{node.node});
         const double y = dev_y(node.y);
         const auto edge_it = edge_color_override.find(node.node);
-        pdf.line(dev_x(node.x - inode.edge.get()), y, dev_x(node.x), y, edge_it != edge_color_override.end() ? edge_it->second : BLACK, line_width);
+        pdf.line(dev_x(node.x - inode.edge.get()), y, dev_x(node.x), y, edge_it != edge_color_override.end() ? edge_it->second : BLACK, tree_line_width);
         double first_child_y{std::numeric_limits<double>::quiet_NaN()};
         double last_child_y{first_child_y};
         for (const node_index_t child : inode.children) {
@@ -506,7 +511,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             }
         }
         if (!std::isnan(first_child_y))
-            pdf.line(dev_x(node.x), dev_y(first_child_y), dev_x(node.x), dev_y(last_child_y), BLACK, line_width);
+            pdf.line(dev_x(node.x), dev_y(first_child_y), dev_x(node.x), dev_y(last_child_y), BLACK, tree_line_width);
     }
 
     // --- aa-transition labels at inodes (port of DrawAATransitions) ---
@@ -533,13 +538,13 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double slot_px = clade_slot_px > 0.0 ? clade_slot_px : clade_w / static_cast<double>(clade_max_slot + 2);
         // Arrowhead: an ABSOLUTE size tied to page height, not slot_px, so every subtype gets the
         // same head (H1's wide clade slot otherwise produced oversized heads vs H3). ~1.4px @1000.
-        const double ahw = std::clamp(0.0014 * height, 1.0, 2.2);  // arrowhead half-width
-        const double ahl = ahw * 3.5;                             // arrowhead length (sharp)
+        const double ahw = std::clamp(0.0012 * height, 0.8, 1.8);  // arrowhead half-width (narrower -> sharper)
+        const double ahl = ahw * 4.8;                             // arrowhead length (long, crisp apex; AD double_arrow)
         const double line_to = ts_w > 0.0 ? x_ts0 : x_clade0;    // grey lines start at the matrix (AD horizontal_line)
         for (const auto& plan : clade_plan) {
             const Clade& clade = clade_sections[plan.rank];
             const double cx = x_clade0 + slot_px * (static_cast<double>(plan.slot) + 1.0); // AD pos_x
-            const double clade_fs = std::clamp(slot_px * plan.label_scale, 3.0, 14.0);      // label_size = slot.width * scale (AD), capped smaller
+            const double clade_fs = std::clamp(slot_px * plan.label_scale, 3.0, 11.0);      // label_size = slot.width * scale (AD); 11 cap bites only H1's wide derived slot, leaving H3/BVic (7.0/9.8px) untouched
             // ONE arrow per clade, spanning its LARGEST contiguous band (the AD reference brackets
             // only the main block — not the whole first..last extent, which a stray distant
             // section would over-stretch, e.g. H1 B(5a.1)). Collapses the tiny-section clutter too.
@@ -563,7 +568,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 // the per-clade offset (fractions of height); rotation 90 = clockwise (top->bottom),
                 // 0 = horizontal. Placed just right of the arrow.
                 const double center_y = dev_y(static_cast<double>(ext_first + ext_last) / 2.0) + plan.offset_y * height;
-                const double tx = cx + ahw + clade_fs * 0.2 + plan.offset_x * height; // just right of the arrow, not crossing the spine/rules
+                const double tx = cx + ahw + clade_fs * 0.1 + plan.offset_x * height; // hugs just right of the arrow (tighter than before), not crossing the spine/rules
                 if (plan.rotation == 0) {
                     pdf.text(tx, center_y + clade_fs * 0.32, name, clade_fs, BLACK, /*center=*/false); // horizontal
                 }
