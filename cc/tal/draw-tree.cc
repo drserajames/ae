@@ -930,7 +930,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double mrca_fs = 0.0095 * height; // AD draw-aa-transitions default label scale ~0.01
         struct Placed { double nx, ny, tx, ty, fs, x0, x1, y0, y1; std::string text; Color color; };
         // resolve each curated label to its anchor (the MRCA branch point) + text metrics
-        struct Anchor { double nx, ny, fs, tw, off_x, off_y; std::string text; Color color; };
+        struct Anchor { double nx, ny, mid_x, fs, tw, off_x, off_y; std::string text; Color color; };
         std::vector<Anchor> anchors;
         for (const auto& label : params.mrca_labels) {
             const auto fi = leaf_by_name.find(label.first);
@@ -948,9 +948,11 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             if (!label.color.empty()) {
                 try { color = Color{label.color}; } catch (const std::exception&) { }
             }
-            const double nx = dev_x(found->second.first), ny = dev_y(found->second.second); // branch point
+            const double nx = dev_x(found->second.first), ny = dev_y(found->second.second); // branch (node) point
+            double mid_x = nx; // tether target = the MIDDLE of the node's horizontal edge (AD)
+            { node_index_t self{*node}; if (*self != root) { const auto pp = pos.find(*tree.parent(self)); if (pp != pos.end()) mid_x = 0.5 * (dev_x(pp->second.first) + nx); } }
             const double tw = pdf.text_size(label.text, fs).first;
-            anchors.push_back({nx, ny, fs, tw, label.offset_x, label.offset_y, label.text, color});
+            anchors.push_back({nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, label.text, color});
         }
 
         std::vector<Placed> done;
@@ -1002,33 +1004,59 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             if (!params.title.empty()) mark_box(gx0, gy0, 0.18 * width, mrca_fs * 1.6);
             for (const auto& b : text_label_boxes) mark_box(b[0], b[1], b[2] - b[0], b[3] - b[1]);
 
-            // place top-to-bottom for stable, non-overlapping results
+            // Per-label placement: each label goes just LEFT of its branch and, by preference,
+            // BELOW it (downward-sloping tether). We take the nearest free spot whose tether to
+            // the branch midpoint crosses no already-placed tether or label box, so leader lines
+            // never touch. `tlines` is a second grid holding the placed tethers + label boxes;
+            // tethers may cross tree ink (unavoidable) but not each other.
+            std::vector<unsigned char> tlines(static_cast<std::size_t>(GX) * static_cast<std::size_t>(GY), 0);
+            const auto seg_each = [&](double xa, double ya, double xb, double yb, auto&& fn) {
+                const double len = std::hypot(xb - xa, yb - ya);
+                const int n = std::max(2, static_cast<int>(len / (cell * 0.5)) + 1);
+                for (int i = 0; i <= n; ++i) { const double t = static_cast<double>(i) / n; fn(row(ya + (yb - ya) * t), col(xa + (xb - xa) * t)); }
+            };
+            const auto seg_hits = [&](double xa, double ya, double xb, double yb) { bool h = false; seg_each(xa, ya, xb, yb, [&](int r, int c) { if (tlines[static_cast<std::size_t>(r) * GX + c]) h = true; }); return h; };
+            const auto seg_mark = [&](double xa, double ya, double xb, double yb) { seg_each(xa, ya, xb, yb, [&](int r, int c) { tlines[static_cast<std::size_t>(r) * GX + c] = 1; }); };
+            const auto attach = [](double mid_x, double mid_y, double rx, double ry, double tw, double fs, double& cx, double& cy) {
+                const double cmidx = rx + tw * 0.5, cmidy = ry + fs * 0.5, ddx = mid_x - cmidx, ddy = mid_y - cmidy;
+                if (std::abs(ddy) >= std::abs(ddx)) { cx = cmidx; cy = ddy < 0.0 ? ry : ry + fs; } // branch above -> top, below -> bottom
+                else { cy = cmidy; cx = ddx < 0.0 ? rx : rx + tw; }                                 // ~level -> facing side
+            };
             std::sort(anchors.begin(), anchors.end(), [](const Anchor& a, const Anchor& b) { return a.ny < b.ny; });
-            const double gap0 = mrca_fs * 0.6; // base clearance between the label edge and the branch
-            for (const auto& a : anchors) {
-                const double rw = a.tw, rh = a.fs;
-                double best_rx = a.nx - gap0 - rw, best_ry = a.ny - rh * 0.5, best_cost = 1e18;
-                const int MV = std::min(GY, 80);
-                for (int vi = 0; vi <= MV; ++vi) {
-                    for (int vs = (vi == 0 ? 0 : -1); vs <= 1; vs += 2) {
-                        const double ry = a.ny - rh * 0.5 + vs * vi * cell;
-                        for (int side = 0; side < 2; ++side) {        // 0 = left (preferred), 1 = right
-                            const int MH = side == 0 ? std::min(GX, 240) : 60;
-                            for (int hi = 0; hi <= MH; ++hi) {
-                                const double rx = side == 0 ? a.nx - (gap0 + hi * cell) - rw : a.nx + (gap0 + hi * cell);
-                                if (!box_free(rx, ry, rw, rh)) continue;
-                                const double anchor_edge = side == 0 ? rx + rw : rx;
-                                const double dxp = anchor_edge - a.nx, dyp = (ry + rh * 0.5) - a.ny;
-                                double cost = std::hypot(dxp, dyp) + std::abs(dyp) * 0.5 + (side == 1 ? rw * 0.5 : 0.0);
-                                if (cost < best_cost) { best_cost = cost; best_rx = rx; best_ry = ry; }
-                                break; // nearest free spot at this ring/side
-                            }
+            const double gap0 = mrca_fs * 0.5;
+            const int MV = std::min(GY, 200);
+            // find the nearest free box LEFT of and (by preference) BELOW the branch. When
+            // avoid_tethers, also require the tether not to cross a placed tether/label.
+            const auto find_spot = [&](double mid_x, double mid_y, double tw, double fs, bool avoid_tethers, double& out_rx, double& out_ry) -> bool {
+                double bc = 1e18; bool found = false;
+                for (int vo = 0; vo <= MV; ++vo) {
+                    for (int dir = 1; dir >= -1; dir -= 2) { // downward first, then upward
+                        if (vo == 0 && dir == -1) continue;
+                        const double ry = dir > 0 ? mid_y + vo * cell : mid_y - fs - vo * cell;
+                        for (int ho = 0; ho <= GX; ++ho) {
+                            const double rx = mid_x - gap0 - tw - ho * cell; // left of the branch only
+                            if (rx < gx0) break;
+                            if (!box_free(rx, ry, tw, fs)) continue;
+                            if (avoid_tethers) { double cx, cy; attach(mid_x, mid_y, rx, ry, tw, fs, cx, cy); if (seg_hits(mid_x, mid_y, cx, cy)) continue; }
+                            const double cost = std::hypot(mid_x - (rx + tw * 0.5), mid_y - (ry + fs * 0.5)) + (dir < 0 ? fs * 4.0 : 0.0) + ho * cell * 0.1;
+                            if (cost < bc) { bc = cost; out_rx = rx; out_ry = ry; found = true; }
+                            break; // nearest free x at this row
                         }
                     }
                 }
-                const double tx = best_rx, ty = best_ry + rh; // text baseline at box bottom
-                mark_box(best_rx, best_ry, rw, rh);
-                done.push_back({a.nx, a.ny, tx, ty, a.fs, tx, tx + rw, ty - a.fs, ty, a.text, a.color});
+                return found;
+            };
+            for (const auto& a : anchors) {
+                const double tw = a.tw, fs = a.fs, mid_x = a.mid_x, mid_y = a.ny;
+                double rx = std::max(gx0, mid_x - gap0 - tw), ry = std::min(gy1 - fs, mid_y + fs * 0.3);
+                if (!find_spot(mid_x, mid_y, tw, fs, true, rx, ry)) // prefer a non-crossing tether...
+                    find_spot(mid_x, mid_y, tw, fs, false, rx, ry); // ...but never overlap a box
+                const double tx = rx, y0 = ry, ty = y0 + fs;
+                mark_box(tx, y0, tw, fs); // reserve the box for later label boxes
+                for (int r = row(y0); r <= row(y0 + fs); ++r) for (int c = col(tx); c <= col(tx + tw); ++c) tlines[static_cast<std::size_t>(r) * GX + c] = 1; // and for later tethers
+                double cx, cy; attach(mid_x, mid_y, tx, y0, tw, fs, cx, cy);
+                seg_mark(mid_x, mid_y, cx, cy);
+                done.push_back({mid_x, mid_y, tx, ty, fs, tx, tx + tw, y0, ty, a.text, a.color});
             }
         }
         else {
@@ -1055,11 +1083,15 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             }
         }
         for (const auto& p : done) {
-            // tether: thin line from the branch to the label's near edge (AD LabelTether),
-            // drawn only when the label sits off the branch (incl. after a collision nudge).
-            const double anchor_x = p.tx < p.nx ? p.x1 : p.tx;
-            if (std::abs(anchor_x - p.nx) > p.fs * 0.5 || std::abs(p.ty - p.ny) > p.fs * 0.5)
-                pdf.line(p.nx, p.ny, anchor_x, p.ty - p.fs * 0.3, GREY, 0.3);
+            // tether to the MIDDLE of the branch (p.nx,p.ny); the attach point on the text box
+            // depends on the slope (AD): branch above the label -> line slopes down -> top-middle;
+            // branch below -> slopes up -> bottom-middle; ~level -> the side facing the branch.
+            const double cmidx = (p.x0 + p.x1) * 0.5, cmidy = (p.y0 + p.y1) * 0.5;
+            const double ddx = p.nx - cmidx, ddy = p.ny - cmidy;
+            double cx, cy;
+            if (std::abs(ddy) >= std::abs(ddx)) { cx = cmidx; cy = ddy < 0.0 ? p.y0 : p.y1; } // top / bottom middle
+            else { cy = cmidy; cx = ddx < 0.0 ? p.x0 : p.x1; }                                 // middle left / right
+            pdf.line(p.nx, p.ny, cx, cy, GREY, 0.3);
             pdf.text(p.tx, p.ty, p.text, p.fs, p.color, /*center=*/false, /*monospace=*/true);
         }
     }
