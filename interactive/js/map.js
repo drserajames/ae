@@ -176,6 +176,21 @@
     for (const ln of gridLineEls(geom.SX, geom.SY, geom.scale, base.xmin, base.ymax, base.W, base.H))
       gridG.appendChild(ln);
   }
+  // #1: keep the gridLayer the bottom-most child of #mapSvg. IV.Lines inserts its
+  // error/connection/circle overlay at svg.firstChild on every (re)draw, which would
+  // otherwise push the gridlines on top of the lines. A MutationObserver re-asserts
+  // the gridlines at the bottom whenever the child order changes (self-corrects after
+  // Lines inserts, so order becomes gridlines → lines → points).
+  let _gridObs = null;
+  function keepGridBottom(svg) {
+    if (svg && gridG && svg.firstChild !== gridG) svg.insertBefore(gridG, svg.firstChild);
+    if (_gridObs || !svg) return;
+    _gridObs = new MutationObserver(() => {
+      if (gridG && gridG.parentNode === svg && svg.firstChild !== gridG)
+        svg.insertBefore(gridG, svg.firstChild);
+    });
+    _gridObs.observe(svg, { childList: true });
+  }
 
   let raf = 0;
   function scheduleApply() {
@@ -264,9 +279,17 @@
       hi.push({ el: node, norm: a.norm, clade: a.clade, serum: false, kind: "antigen", i: a.i, a: a, baseStroke, baseSW });
     }
 
-    const vacs = [];
-    pts.forEach(a => { if (a.vac) vacs.push(a); else drawAntigen(a); });
-    vacs.forEach(drawAntigen);   // vaccines on top
+    // F1: paint normal antigens oldest→newest (by collection date) so newer points
+    // sit on top of older; reference antigens then vaccines drawn LAST (on top).
+    const normal = [], refs = [], vacs = [];
+    pts.forEach(a => { if (a.vac) vacs.push(a); else if (a.ref) refs.push(a); else normal.push(a); });
+    normal.sort((p, q) => {
+      const da = p.date || "", db = q.date || "";
+      return da === db ? 0 : !da ? -1 : !db ? 1 : (da < db ? -1 : 1);   // undated oldest
+    });
+    normal.forEach(drawAntigen);
+    refs.forEach(drawAntigen);
+    vacs.forEach(drawAntigen);
 
     return { nodes, placed: plc, hi };
   }
@@ -291,11 +314,13 @@
 
     gridG = el("g", { class: "gridLayer", "pointer-events": "none" });
     svg.appendChild(gridG);          // first child → behind all points
+    keepGridBottom(svg);             // #1: stay below IV.Lines' overlay (it inserts at firstChild)
     drawGrid();
 
     const out = paintChart(svg, chart, geom, { r0: 3.5 });
     hiList = out.hi; placed = out.placed;
-    applyCoverageTo(hiList);   // F3: coverage outline on the fresh nodes (no-op if not coverage)
+    _covApplied = State.colorBy === "coverage" || circleActive();   // F3/#7 on the fresh nodes
+    applyCoverageTo(hiList, _covApplied);
 
     bindViewHandlers(svg);
     IV.installSelect(svg);   // S1: click / drag-box selection (shared, idempotent)
@@ -309,7 +334,8 @@
     if (!stressEl) {
       stressEl = document.createElement("div");
       stressEl.id = "mapStress";
-      stressEl.style.cssText = "position:absolute;left:8px;bottom:8px;font-size:11px;" +
+      // F4: top-left corner — the bottom legend can occlude the bottom of the pane.
+      stressEl.style.cssText = "position:absolute;left:8px;top:8px;font-size:11px;" +
         "color:#666;background:rgba(255,255,255,.82);padding:2px 7px;border-radius:4px;" +
         "pointer-events:none;z-index:4;font-variant-numeric:tabular-nums;";
       wrap.appendChild(stressEl);
@@ -384,11 +410,13 @@
     });
     window.addEventListener("keyup", e => { if (e.code === "Space") { spaceHeld = false; setCursor(false); } });
 
-    // on-map controls. #3: move the cluster to the BOTTOM-right so it isn't hidden
-    // under the Overlays panel (lines.js, top-right). Add a discoverable pan toggle.
+    // on-map controls. #9: the bottom legend occludes the bottom of the pane, and the
+    // Overlays panel (lines.js) owns the top-right — so dock the zoom/pan cluster at the
+    // TOP-LEFT, just below the stress readout. Add a discoverable pan toggle.
     const mapCtl = document.querySelector(".mapCtl");
     if (mapCtl) {
-      mapCtl.style.top = "auto"; mapCtl.style.bottom = "8px";
+      mapCtl.style.top = "30px"; mapCtl.style.bottom = "auto";
+      mapCtl.style.left = "8px"; mapCtl.style.right = "auto";
       panBtn = document.createElement("button");
       panBtn.id = "mapPan"; panBtn.type = "button";
       panBtn.title = "Pan tool (toggle) — or hold Space and drag, or drag with the right button. Scroll = zoom; plain drag = box-select.";
@@ -432,11 +460,12 @@
       n.el.classList.toggle("lift", !!e.lift);
       n.el.classList.toggle("sel", !!e.sel);
     }
-    // F3 serum-coverage: always (re)apply in coverage mode (no stale gate). The fill
-    // and pink/black outline come from Colour, which resolves the active serum
-    // (Colour.coverageSerum → the isolated serum in v8); applyCoverageTo no-ops
-    // otherwise so this is free outside coverage mode.
-    applyCoverageTo(hiList);
+    // F3/#7 serum-coverage: (re)apply the pink/black outline (and, in coverage mode,
+    // the fill) whenever coverage should show — i.e. the coverage colour mode OR a
+    // serum circle is displayed (#7). Gate on a map-local flag so we still iterate
+    // once to CLEAR when it turns off, but skip entirely when it was and is off.
+    const want = State.colorBy === "coverage" || circleActive();
+    if (want || _covApplied) { _covApplied = want; applyCoverageTo(hiList, want); }
   }
 
   // ---- F3: serum-coverage colour mode --------------------------------------
@@ -445,17 +474,26 @@
   // State.selected), coverageOutline() returns the pink(≤4-fold,w3)/black(>4-fold,
   // w4.5) outline (null = untitrated → base stroke; it dims via emphasis), and
   // antigen() the fill. We just write what Colour says, on every refresh.
+  // #7: the pink/black coverage outline should also show when a serum's CIRCLE is
+  // displayed (IV.Lines), not only in the coverage colour mode. circleActive() reads
+  // the Lines overlay state (defensive until LINES exposes it).
+  function circleActive() {
+    return !!(IV.Lines && typeof IV.Lines.circleActive === "function" && IV.Lines.circleActive());
+  }
   function coverageKey() {
-    if (State.colorBy !== "coverage") return "";
+    const want = State.colorBy === "coverage" || circleActive();
+    if (!want) return "";
     const s = Colour.coverageSerum && Colour.coverageSerum();
     return "cov:" + (s ? s.i : "none");
   }
-  function applyCoverageTo(list) {
-    if (State.colorBy !== "coverage") return;
+  let _covApplied = false;   // map-only (refresh) — grid has its own covChanged gate
+  function applyCoverageTo(list, want) {
+    const covMode = State.colorBy === "coverage";
+    if (want == null) want = covMode || circleActive();   // grid calls without the flag
     for (const n of list) {
       if (n.serum || !n.a) continue;
-      n.el.setAttribute("fill", Colour.antigen(n.a));
-      const o = Colour.coverageOutline(n.a);
+      if (covMode) n.el.setAttribute("fill", Colour.antigen(n.a));   // coverage fill only in coverage mode
+      const o = want ? Colour.coverageOutline(n.a) : null;
       if (o) { n.el.setAttribute("stroke", o.stroke); n.el.setAttribute("stroke-width", o.width); }
       else { n.el.setAttribute("stroke", n.baseStroke); n.el.setAttribute("stroke-width", n.baseSW); }
     }
