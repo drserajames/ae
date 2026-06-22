@@ -87,7 +87,9 @@
       if (/(^|[ _/-])E\d|\bEGG\b/.test(p)) return "egg";
       if (/(MDCK|SIAT|QMC|HCK|\bMK\d|\bC\d|CELL)/.test(p)) return "cell";
     }
-    const ag = (s.homologous != null && ch.antigens[s.homologous]) ? ch.antigens[s.homologous] : null;
+    // homologous is a list (v9 #4); use the scalar alias for the first homolog.
+    const hi = s.homologous0;
+    const ag = (hi != null && ch.antigens[hi]) ? ch.antigens[hi] : null;
     return ag && ag.pt ? ag.pt : null;
   }
   // "#rrggbb" → translucent rgba string (kateri serum-circle fill ≈ alpha 0x18).
@@ -310,6 +312,24 @@
     return null;
   }
 
+  // #5: a single positioned serum that IS the circle subject (isolated, or the one
+  // selected serum) but has NO drawable circle — e.g. H3 VIDRL A9933, which acmacs
+  // leaves circle-less (no homologous antigen / no valid homologous titre). Lets the
+  // overlay say so explicitly instead of silently drawing nothing. null otherwise.
+  function circlelessSubject() {
+    if (show.circ === "off") return null;
+    const ch = activeChart(); if (!ch) return null;
+    const positioned = s => s && s.x != null && s.y != null;
+    const iso = State.isolatedSerum && State.isolatedSerum();
+    if (iso) return (positioned(iso) && !(circleRadius(iso) > 0)) ? iso : null;
+    if (show.circ === "selected") {
+      const norms = targetNorms();
+      const hit = ch.sera.filter(s => norms.has(s.norm) && positioned(s));
+      if (hit.length === 1 && !(circleRadius(hit[0]) > 0)) return hit[0];
+    }
+    return null;
+  }
+
   // ---- F3: serum coverage circles -------------------------------------------
   // One translucent circle per shown serum, radius (#8) = empirical (report) or
   // theoretical, in antigenic units → px, outline coloured by serum passage.
@@ -334,6 +354,18 @@
         strokeWidth: 2.4, class: "serumCircle",
       }));
       n++;
+    }
+    // #5: if the single subject serum is circle-less, label it at its point instead of
+    // silently drawing nothing (e.g. H3 VIDRL A9933 — no valid homologous titre).
+    if (n === 0) {
+      const cl = circlelessSubject();
+      if (cl && cl.x != null && cl.y != null) {
+        const [cx, cy] = proj.project(cl.x, cl.y);
+        const txt = IV.el("text", { x: cx + 7, y: cy - 7, class: "serumCircleNote",
+          "font-size": 10, fill: "#a00", "pointer-events": "none" });
+        txt.textContent = "no valid homologous titre — no circle";
+        g.appendChild(txt);
+      }
     }
     return n;
   }
@@ -413,10 +445,14 @@
       }
     }
     const ck = document.getElementById("lnCircKey");
-    if (ck) ck.textContent = show.circ === "off" ? ""
-      : (circDrawn ? `${circDrawn} ${show.circRadius} circle(s) · outline = passage`
-                   : (show.circ === "selected" ? "select a serum to show its circle"
-                                               : "no serum-circle data"));
+    if (ck) {
+      const cl = circDrawn ? null : circlelessSubject();   // #5
+      ck.textContent = show.circ === "off" ? ""
+        : circDrawn ? `${circDrawn} ${show.circRadius} circle(s) · outline = passage`
+        : cl ? `${cl.serum_id || cl.name}: no valid homologous titre — no circle`
+        : (show.circ === "selected" ? "select a serum to show its circle"
+                                    : "no serum-circle data");
+    }
   }
 
   const Lines = {
