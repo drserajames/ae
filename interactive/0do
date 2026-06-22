@@ -9,6 +9,7 @@ Commands:
   ./0do h1              H1, all centres
   ./0do bvic            B/Victoria, all centres
   ./0do h3-hi-vidrl     a single centre  (<subtype>-<lab>)
+  ./0do h3-hint-neut    H3 CDC-HINT + neut (Crick/NIID/VIDRL) in one file; CNIC dropped
   ./0do <cmd> open      build, then open the result in the browser
 
 Outputs go to <SSM>/interactive/ (with the report data, never the repo).
@@ -44,6 +45,15 @@ SUBTYPES = {
              "dir": "bvic-{lab}"},
 }
 
+# Hand-picked multi-chart viewers (mixed assays / chosen centres) — explicit
+# (dropdown-label, chart-dir) pairs rather than the uniform per-subtype recipe.
+COMBOS = {
+    "h3-hint-neut": {"tree": "h3.asr.after-2021.tjz", "subtype": "A(H3N2)", "assay": "HINT+neut",
+                     "out": "h3-hint-neut-all-centres.html",
+                     "charts": [("cdc-hint", "h3-hint-cdc"), ("crick-neut", "h3-neut-crick"),
+                                ("niid-neut", "h3-neut-niid"), ("vidrl-neut", "h3-neut-vidrl")]},
+}
+
 # ======================================================================
 
 def export(key: str, labs: list[str], open_after: bool) -> None:
@@ -66,6 +76,25 @@ def export(key: str, labs: list[str], open_after: bool) -> None:
 
 # ----------------------------------------------------------------------
 
+def export_combo(name: str, open_after: bool) -> None:
+    "Build one viewer from an explicit list of (dropdown-label, chart-dir) pairs."
+    c = COMBOS[name]
+    out = OUT / c["out"]
+    OUT.mkdir(parents=True, exist_ok=True)
+
+    cmd = [str(HERE / "run.sh"), "--tree", str(SSM / "tree" / c["tree"])]
+    for label, cdir in c["charts"]:
+        cmd += ["--chart", f"{label}={SSM / cdir / 'styled.ace'}"]
+    cmd += ["--subtype", c["subtype"], "--assay", c["assay"], "--out", str(out)]
+
+    print(f">>> {name}: {len(c['charts'])} charts -> {out.name}")
+    if subprocess.call(cmd) != 0:
+        raise BuildError(f"{name}: export failed (see output above)")
+    if open_after:
+        subprocess.check_call(["open", str(out)])
+
+# ----------------------------------------------------------------------
+
 def all(open_after: bool) -> None:
     "Every subtype, all five WHO CCs (one HTML per subtype). Aborts if any subtype fails."
     for key in SUBTYPES:
@@ -79,6 +108,8 @@ for _key, _cfg in SUBTYPES.items():
     COMMANDS[_key] = (lambda o, key=_key: export(key, LABS, o))
     for _lab in LABS:
         COMMANDS[f"{_cfg['slug']}-{_lab}"] = (lambda o, key=_key, lab=_lab: export(key, [lab], o))
+for _name in COMBOS:
+    COMMANDS[_name] = (lambda o, name=_name: export_combo(name, o))
 
 # ======================================================================
 
