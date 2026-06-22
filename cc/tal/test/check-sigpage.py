@@ -73,7 +73,8 @@ def probe_gridline_grey(im: "Image.Image", region) -> int:
     in `region` (fractional box). Lower = darker grid."""
     w, h = im.size
     crop = im.crop((int(w * region[0]), int(h * region[1]), int(w * region[2]), int(h * region[3])))
-    greys = [p[0] for p in crop.getdata() if _is_grey(p, 150, 240)]
+    # gridlines render ~200-212; exclude the grey88 (~224) base antigens and white
+    greys = [p[0] for p in crop.getdata() if _is_grey(p, 150, 218)]
     greys.sort()
     return greys[len(greys) // 2] if greys else 255
 

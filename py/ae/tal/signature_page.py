@@ -423,7 +423,8 @@ def _settings_with_mark_groups(settings: Optional[str], groups, tmpdir: Path) ->
 def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
                      title: Optional[str] = None, show_legend: Optional[bool] = None,
                      drop_dash_bars: bool = False, clades_before_time_series: bool = False,
-                     matches_chart_seq_ids: Optional[Sequence[str]] = None) -> tuple[str, Optional[int]]:
+                     matches_chart_seq_ids: Optional[Sequence[str]] = None,
+                     section_prefixes: Optional[dict] = None) -> tuple[str, Optional[int]]:
     """Translate an acmacs-tal settings-v3 `.tal` into a tal-draw settings file.
     Returns (settings_path, image_size_or_None). Mirrors the `--tal` handling in
     the tal-signature-page CLI so the tree panel is rendered from the same config
@@ -453,6 +454,10 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
         schema["hz_section_labels"] = True  # draw section letters (A/B/C) on the right, like AD
     if matches_chart_seq_ids:
         schema["matches_chart_seq_ids"] = list(matches_chart_seq_ids)
+    if section_prefixes and isinstance(schema.get("hz_sections"), list):
+        for hs in schema["hz_sections"]:  # AD assigns A/B/C in tree order, not the .tal "L"
+            if hs.get("first") in section_prefixes:
+                hs["prefix"] = section_prefixes[hs["first"]]
     path = tmpdir / "tree-from-tal.json"
     path.write_text(json.dumps(schema), encoding="utf-8")
     size = int(schema["image_size"]) if "image_size" in schema else None
@@ -498,9 +503,12 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         chart_obj = ae_backend.chart_v3.Chart(str(chart))
         leaf_names = SM.leaf_names_from_taldraw(tree, names_settings, TAL_DRAW, tmpdir)
         match = SM.match_leaf_names(leaf_names, chart_obj)
+        section_prefixes = SM.assign_prefixes(sections, match)  # A/B/C in tree order (AD set_prefix)
         reset_vp, available_styles = SM.report_styles_from_ace(chart)
+        vaccine_marks = SM.vaccine_marks_from_ace(chart)
         vp = list(viewport) if viewport else (reset_vp or SM.viewport_from_layout(chart_obj))
-        styled = SM.build_section_styles(chart_obj, sections, match, scale, vp, available_styles=available_styles)
+        styled = SM.build_section_styles(chart_obj, sections, match, scale, vp,
+                                         available_styles=available_styles, vaccine_marks=vaccine_marks)
         for s in styled:
             print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
 
@@ -512,7 +520,7 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
         tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
                                             drop_dash_bars=True, clades_before_time_series=True,
-                                            matches_chart_seq_ids=matched_seq_ids)
+                                            matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes)
         tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size or tal_size or 1000, settings=tree_settings)
 
         # AD lays the section maps out 3 rows high -> columns = ceil(n / 3).

@@ -97,6 +97,26 @@ drove these fixes, mapped to AD's `conf/tal.json` `layout-with-maps` spec:
 The two layouts (`clades_before_time_series`, `hz_section_labels`, the grey dash, and the
 aa-column drop) are **flag-gated**, so tree-only rendering is unchanged.
 
+### Second fidelity pass (2026-06-22)
+
+A closer diff against the AD codebase (`conf/tal.json` `antigenic-map-reset`, `hz-sections.cc`,
+`ssm-report/signature_page.py`) drove:
+
+- **AD map point sizes** (`section_maps.py`): all points light grey **grey88** with a **white
+  outline** (no visible border); in-tree antigens **gray63**; in-section antigens small with a
+  black outline; **vaccine marks small (≈15) with small labels (≈9)** — redrawn from the chart's
+  `-vaccines` data (colours + label text) rather than inheriting the report's 40/30. Fixes the
+  "antigens in white", oversized-points and oversized-vaccine feedback.
+- **hz-section letters A, B, C…** assigned in **tree (draw) order** (AD `HzSections::set_prefix`,
+  not the `.tal` "L"), used for both the markers and the map titles (`assign_prefixes`).
+- **hz bracket direction** (`draw-tree.cc`): "]" with the spine on the right and arms extending
+  **left** toward the matrix (AD `HzSectionMarker::draw`); the letter sits centred over a small
+  white box.
+- Tree fills slightly more height (reduced top/bottom margin).
+
+Serum circles: AD's sig-page map removes them (`serum-circles-remove`); they're available as an
+opt-in (the chart's serum-circle / serum-coverage styles) but off by default, matching AD.
+
 ### Checking
 `python3 cc/tal/test/check-sigpage.py <ae.pdf> [<AD-reference.pdf>]` emits an AD-vs-ae
 montage (eyeball #1/#2/#3/#4/#8) plus automated probes for the data-independent items

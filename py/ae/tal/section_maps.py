@@ -44,12 +44,24 @@ from .settings_v3 import _loads_relaxed
 # viridis purple -> cyan -> yellow.
 VIRIDIS_ANCHORS = (0x440154, 0x40FFFF, 0xFDE725)
 
-# Base (out-of-section / greyed) appearance, and in-section emphasis defaults.
-BASE_ANTIGEN = {"fill": "#d0d0d0", "outline": "#d0d0d0", "size": 4}
-BASE_SERUM = {"fill": "#e8e8e8", "outline": "#c4c4c4", "size": 6}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.4, "size": 8}
-INSECTION_SERUM = {"fill": "#1f78b4", "outline": "black", "outline_width": 1.0, "size": 16}
-NO_DATE_FILL = "#9e9e9e"  # in-section antigen whose date falls outside the time-series window
+# AD antigenic-map-reset recipe (conf/tal.json): all points light grey (grey88) with a
+# WHITE outline (so no visible border); in-tree antigens a touch darker (gray63); in-section
+# antigens filled by date with a black outline; vaccines small with a small label. Sizes are
+# AD's (test 3 / ref 5 / serum 5 / in-section 5 / vaccine 15) scaled to kateri's larger canvas.
+GREY88 = "#e0e0e0"   # AD grey88: out-of-section / "older" antigens
+GRAY63 = "#a1a1a1"   # AD gray63: in-tree antigens (those with a tree leaf)
+WHITE = "#ffffff"
+# Small AD-like sizes (kateri px), tuned by eye against the AD reference. AD's data values
+# are test 3 / ref 5 / serum 5 / in-section 5 / vaccine 15; kept small here so the grid maps
+# read like AD's rather than the report's full-size maps (reset 20 / vaccine 40).
+BASE_ANTIGEN = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 4}
+REF_ANTIGEN_SIZE = 6
+BASE_SERUM = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 5}
+INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE, "outline_width": 0.5}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.5, "size": 7}
+NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
+VACCINE_SIZE = 15  # AD sig-page vaccine mark
+VACCINE_LABEL_SIZE = 12
 MAP_TITLE_SIZE = 16  # kateri px; AD's in-map "{prefix}. {label} {aa}" is a small sans title
 
 
@@ -338,6 +350,26 @@ def report_styles_from_ace(ace_path) -> tuple[Optional[list[float]], set]:
     return viewport, set(styles.keys())
 
 
+def vaccine_marks_from_ace(ace_path) -> list:
+    """Per-vaccine mark + label data from the chart's ``-vaccines`` style:
+    ``[{index, fill, text, offset}]``. Lets the section maps redraw vaccines at AD's
+    small sig-page sizes (mark 15 / label 9) with the report's colours + labels,
+    rather than inheriting the report's oversized 40/30."""
+    try:
+        data = json.loads(subprocess.check_output(["decat", str(ace_path)]))
+    except Exception:
+        return []
+    style = data.get("c", {}).get("R", {}).get("-vaccines", {})
+    out = []
+    for mod in style.get("A", []):
+        sel = mod.get("T", {})
+        label = mod.get("l", {})
+        if "!i" in sel and isinstance(label, dict) and label.get("t"):
+            out.append({"index": sel["!i"], "fill": mod.get("F"), "text": label.get("t"),
+                        "offset": label.get("p", [0, 1])})
+    return out
+
+
 def reset_viewport_from_ace(ace_path) -> Optional[list[float]]:
     """The report's clades-map viewport (from the chart's ``-reset`` style)."""
     return report_styles_from_ace(ace_path)[0]
@@ -357,6 +389,25 @@ def viewport_from_layout(chart) -> list[float]:
     return [cx - span / 2, cy - span / 2, span, span]
 
 
+def assign_prefixes(sections, match) -> dict:
+    """Assign section letters A, B, C… to the shown sections in **tree (draw) order**
+    — by the draw-order index of each section's first leaf — exactly as AD's
+    `HzSections::set_prefix()` does (it ignores the .tal "L" field). Mutates each
+    section's ``prefix`` and returns ``{section_id: letter}`` for the hz-marker column."""
+    big = 1 << 30
+
+    def first_index(section):
+        idx = match.find_leaf(section["first"])
+        return idx if idx is not None else big
+
+    first_to_prefix = {}
+    for rank, i in enumerate(sorted(range(len(sections)), key=lambda i: first_index(sections[i]))):
+        letter = chr(ord("A") + rank) if rank < 26 else f"A{chr(ord('A') + rank - 26)}"
+        sections[i]["prefix"] = letter
+        first_to_prefix[sections[i].get("first", "")] = letter  # key by first seq_id (the schema hz_sections carry it)
+    return first_to_prefix
+
+
 def section_title(section: dict) -> str:
     aa = section.get("aa_transitions", "").strip()
     label = section.get("label", "").strip()
@@ -367,7 +418,7 @@ def section_title(section: dict) -> str:
 
 def build_section_styles(chart, sections, match, scale: Optional[DateColorScale], viewport, *,
                          base_priority: int = 50000, available_styles: Optional[set] = None,
-                         reset_style: str = "-reset", pale_style: str = "-pale", vaccine_style: str = "-vaccines"):
+                         vaccine_marks: Optional[list] = None):
     """Add one semantic style per section to `chart` and return
     ``[{name, title, n_antigens, n_sera}]``. kateri renders each via set_style.
 
@@ -384,10 +435,7 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
     antigen in nested clades is in several), optionally ANDed with kateri's `!D`
     date-range selector to colour by month slot. (kateri's `!i` matches a single
     index only, so an index *list* can't be used.)"""
-    available = available_styles if available_styles is not None else set()
-    use_reset = reset_style in available
-    use_pale = pale_style in available
-    use_vaccines = vaccine_style in available
+    vaccine_marks = vaccine_marks or []
 
     # 1. resolve each section's antigens/sera and tag them with a per-section attribute
     per_section = []
@@ -401,16 +449,21 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         for s in sr_idx:
             sr_sections.setdefault(s, []).append(si)
 
-    # tag antigens/sera with per-section attributes. Keep the report's existing
-    # semantic attributes (clade/continent/vaccine) — they drive -vaccines etc.
+    # in-tree antigens (those matched to a tree leaf) — AD draws these gray63 vs grey88
+    in_tree = {a for ags in match.leaf_to_ag.values() for a in ags}
+
+    # tag antigens/sera with per-section + in-tree attributes. Keep the report's existing
+    # semantic attributes (clade/continent/vaccine "V"/reference "R") — they drive -vaccines etc.
     for no, ag in chart.select_all_antigens():
+        if no in in_tree:
+            ag.semantic.set("it", True)
         for si in ag_sections.get(no, ()):
             ag.semantic.set(f"sg{si}", True)
     for no, sr in chart.select_all_sera():
         for si in sr_sections.get(no, ()):
             sr.semantic.set(f"ss{si}", True)
 
-    # 2. one style per section
+    # 2. one style per section — AD antigenic-map recipe
     results = []
     for si, (section, ag_idx, sr_idx) in enumerate(per_section):
         ag_key, sr_key = f"sg{si}", f"ss{si}"
@@ -419,32 +472,29 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         style.priority = base_priority + si
         style.viewport(*viewport)
         style.legend.shown = False
-        # base: AD sizes + grey everything (reuse report styles; else hand-rolled grey)
-        if use_reset:
-            style.add_modifier(parent=reset_style)
-        else:
-            style.add_modifier(only="antigens", **BASE_ANTIGEN)
-            style.add_modifier(only="sera", **BASE_SERUM)
-        if use_pale:
-            style.add_modifier(parent=pale_style)
+        # base: all points light grey (grey88), white outline (no visible border), small
+        style.add_modifier(only="antigens", **BASE_ANTIGEN)
+        style.add_modifier(selector={"R": True}, only="antigens", size=REF_ANTIGEN_SIZE)  # reference antigens a touch bigger
+        style.add_modifier(only="sera", **BASE_SERUM)
+        style.add_modifier(selector={"it": True}, only="antigens", **INTREE_ANTIGEN)  # in-tree antigens gray63
         if ag_idx:
-            # in-section emphasis (outline + raise); grey fill for dates outside the window
-            insection = dict(INSECTION_ANTIGEN) if not use_reset else {"outline": "black", "outline_width": 0.5}
-            style.add_modifier(selector={ag_key: True}, only="antigens", fill=NO_DATE_FILL, raise_=True, **insection)
+            # in-section emphasis (black outline + raise); grey fill for dates outside the window
+            style.add_modifier(selector={ag_key: True}, only="antigens", fill=NO_DATE_FILL, raise_=True, **INSECTION_ANTIGEN)
             # colour by date: one modifier per occupied month slot (in-section AND in-month)
             if scale is not None:
                 occupied = sorted({scale.slot_index(chart.antigen(a).date()) for a in ag_idx} - {None})
                 for slot in occupied:
                     lo, hi = scale.slot_date_range(slot)
                     style.add_modifier(selector={ag_key: True, "!D": [lo, hi]}, only="antigens", fill=scale.slot_color(slot), raise_=True)
-        if sr_idx:
-            serum_mod = {"outline": "black", "raise_": True} if use_reset else INSECTION_SERUM
-            style.add_modifier(selector={sr_key: True}, only="sera", **serum_mod)
-        # vaccine marks + on-map strain labels, on top (AD shows these on every map)
-        if use_vaccines:
-            style.add_modifier(parent=vaccine_style)
+        # vaccine marks + on-map strain labels, on top — redraw from the report's -vaccines data
+        # (colours + label text) at AD's small sig-page sizes (mark 15, label 9; report uses 40/30).
+        for vac in vaccine_marks:
+            mod = {"only": "antigens", "size": VACCINE_SIZE, "outline": "black", "outline_width": 1.0, "raise_": True,
+                   "label": {"text": vac["text"], "size": VACCINE_LABEL_SIZE, "offset": vac.get("offset", [0, 1])}}
+            if vac.get("fill"):
+                mod["fill"] = vac["fill"]
+            style.add_modifier(selector={"!i": vac["index"]}, **mod)
         # in-map title: small Helvetica, top-left — AD draws "{prefix}. {label} {aa}"
-        # at size ~0.015*canvas (a small sans title), not a big caption.
         style.plot_title.text.text = section_title(section)
         style.plot_title.text.font_size = MAP_TITLE_SIZE
         style.plot_title.text.font_face = "helvetica"

@@ -433,7 +433,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
 
     // --- vertical reserves: title (top); time-series / dash slot labels (bottom). The
     //     colour legend sits in the top-right corner (acmacs-tal), so it needs no bottom reserve. ---
-    const double vmargin = 0.015 * height; // AD uses a small vertical margin so the tree fills the height
+    const double vmargin = 0.008 * height; // small vertical margin so the tree fills more of the height (AD)
     // AD draws the continent legend as the lower-left world map (LegendContinentMap),
     // not as a coloured-square legend — so when the geo inset is present it IS the legend
     // and the top-right square legend is suppressed (otherwise it duplicates the inset).
@@ -841,8 +841,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         name_y.reserve(layout.leaves.size());
         for (const auto& ln : layout.leaves)
             name_y.emplace(ln.name, ln.y);
-        const double bx = x_hzmark0 + hz_marker_w * 0.32;       // bracket spine x
-        const double tick = hz_marker_w * 0.18;                 // end-tick length
+        // AD HzSectionMarker::draw: the bracket is a "]" — spine on the RIGHT (adjacent to the
+        // maps), top/bottom arms extending LEFT across the column toward the matrix.
+        const double spine_x = x_hzmark0 + hz_marker_w * 0.88;  // spine near the right edge
+        const double arm_left = x_hzmark0;                      // arms reach left across the column
         const double label_fs = std::clamp(hz_marker_w * 0.5, 6.0, 14.0);
         for (const auto& section : params.hz_sections) {
             const auto itf = name_y.find(section.first), itl = name_y.find(section.last);
@@ -851,11 +853,18 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             double y0 = dev_y(itf->second - 0.5), y1 = dev_y(itl->second + 0.5);
             if (y0 > y1)
                 std::swap(y0, y1);
-            pdf.line(bx, y0, bx, y1, BLACK, 0.6);               // bracket spine
-            pdf.line(bx, y0, bx + tick, y0, BLACK, 0.6);        // top tick
-            pdf.line(bx, y1, bx + tick, y1, BLACK, 0.6);        // bottom tick
-            if (!section.prefix.empty())
-                pdf.text(bx + tick + label_fs * 0.2, (y0 + y1) / 2.0 + label_fs * 0.32, section.prefix, label_fs, BLACK, /*center=*/false);
+            pdf.line(spine_x, y0, spine_x, y1, BLACK, 0.6);     // spine (right)
+            pdf.line(arm_left, y0, spine_x, y0, BLACK, 0.6);    // top arm (extends left)
+            pdf.line(arm_left, y1, spine_x, y1, BLACK, 0.6);    // bottom arm (extends left)
+            if (!section.prefix.empty()) {
+                // section letter, vertically centred on the section and horizontally in the
+                // middle of the column, over a small white box so it stays legible (AD).
+                const double cy = (y0 + y1) / 2.0;
+                const auto [tw, th] = pdf.text_size(section.prefix, label_fs);
+                const double lx = (arm_left + spine_x) / 2.0 - tw / 2.0;
+                pdf.rectangle(lx - label_fs * 0.15, cy - th * 0.6, tw + label_fs * 0.3, th * 1.2, WHITE, 0.0, WHITE);
+                pdf.text(lx, cy + th * 0.4, section.prefix, label_fs, BLACK, /*center=*/false);
+            }
         }
     }
 
