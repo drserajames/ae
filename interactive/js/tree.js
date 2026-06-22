@@ -319,9 +319,12 @@
       // _y — the branch position in the render (the recursive child-midpoint that the
       // edges use), NOT the median tip row. For nested/spread clades the median sits
       // below the branch (K's median 1179 vs its branch y 922); node._y lands the label
-      // on the branch. node._lo/_hi (the MRCA's extent) bound it when zoomed.
+      // on the branch. v9 #6: bound it by the clade's OWN tip extent [lo,hi] (not the
+      // MRCA's full subtree, which can run past the clade's tips and drop the label off
+      // them — J.2.5's branch y sat ~37px below its 5 tips), so placeCladeLabels nudges
+      // the anchor back onto the clade when the branch is outside its tips.
       cladeLabels.push({
-        clade, x: node.x, row: node._y, rowLo: node._lo, rowHi: node._hi,
+        clade, x: node.x, row: node._y, rowLo: lo, rowHi: hi,
         color: Colour.cladeColor(clade),
         text: short,
         prio: (prio[clade] != null ? prio[clade] : 9999),
