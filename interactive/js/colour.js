@@ -75,7 +75,10 @@
   let covSig = null;                   // chart|serumIdx signature for the cache
   let covSerum = null;                 // the selected serum (active chart) or null
   let covThreshold = null;             // log2(homologous/10) − 2 for that serum
-  let titreMin = null, titreMax = null;   // F1: log2(titre/10) range vs the serum
+  // F1 titre range: GLOBAL over the whole chart (every antigen × every serum), NOT
+  // per-serum — so the gradient + legend stay identical whichever serum is selected
+  // (#2), letting the user compare titres across sera. Cached per chart.
+  let gTitreMin = null, gTitreMax = null, gTitreChart = -1;
 
   const Colour = {
     init(bundle) {
@@ -192,13 +195,14 @@
     // ---- F1 (v10): colour by log2(titre/10) vs the selected serum ------------
     // Only meaningful when a single serum is resolved (coverageSerum()). Reuses the
     // sequential gradient (SEQ, like stress) over the titre range against that serum.
-    hasTitre() { ensureCoverage(); return !!covSerum && titreMin != null; },
+    hasTitre() { ensureCoverage(); ensureTitreRange(); return !!covSerum && gTitreMin != null; },
     titreColor(titer) {
-      if (titer == null || titreMin == null) return UNMATCHED;
-      const span = titreMax - titreMin;
-      return seqColor(span > 0 ? (titer - titreMin) / span : 0.5);
+      ensureTitreRange();
+      if (titer == null || gTitreMin == null) return UNMATCHED;
+      const span = gTitreMax - gTitreMin;
+      return seqColor(span > 0 ? (titer - gTitreMin) / span : 0.5);
     },
-    titreScale() { ensureCoverage(); return { min: titreMin, max: titreMax, stops: SEQ.slice() }; },
+    titreScale() { ensureTitreRange(); return { min: gTitreMin, max: gTitreMax, stops: SEQ.slice() }; },
     // true when coverage mode is showing and `norm`'s antigen was NOT titrated by the
     // selected serum — State.emphasis() folds this in so untitrated points dim (v7).
     coverageDim(norm) {
@@ -386,15 +390,24 @@
       }
       covThreshold = (ht == null) ? null : ht - 2;
     }
-    // F1: log2(titre/10) range over antigens titrated by this serum (for the gradient)
-    titreMin = titreMax = null;
-    if (serum && ch.logged) {
-      for (let i = 0; i < ch.antigens.length; i++) {
-        const row = ch.logged[i];
-        const v = row ? row[serum.i] : null;
+  }
+  // F1 (#2): GLOBAL log2(titre/10) range over EVERY antigen × serum in the chart, so
+  // the titre gradient + legend are the same regardless of which serum is selected
+  // (the per-serum range used to rescale on each switch). Cached per chart.
+  function ensureTitreRange() {
+    const idx = State.chartIdx;
+    if (gTitreChart === idx) return;
+    gTitreChart = idx; gTitreMin = gTitreMax = null;
+    const ch = IV.DATA && IV.DATA.charts[idx];
+    if (!ch || !ch.logged) return;
+    for (let ai = 0; ai < ch.logged.length; ai++) {
+      const row = ch.logged[ai];
+      if (!row) continue;
+      for (let si = 0; si < row.length; si++) {
+        const v = row[si];
         if (v == null) continue;
-        if (titreMin == null || v < titreMin) titreMin = v;
-        if (titreMax == null || v > titreMax) titreMax = v;
+        if (gTitreMin == null || v < gTitreMin) gTitreMin = v;
+        if (gTitreMax == null || v > gTitreMax) gTitreMax = v;
       }
     }
   }

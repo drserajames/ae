@@ -75,6 +75,10 @@
   // Feature 1: a serum's outline = its strain's current colour-by colour (clade / AA
   // / continent / stress), taken from its homologous antigen so it tracks colorBy.
   function serumColour(chart, s) {
+    // #1: in titre mode a serum's strain colour is meaningless (titre is antigen-vs-
+    // the-selected-serum), so paint every serum black — the selected one still gets
+    // the blue .sel ring, the rest read as plain black squares the user can switch to.
+    if (State.colorBy === "titre") return "#000";
     const ag = homAg(chart, s);
     return ag ? Colour.antigen(ag) : Colour.unmatched();
   }
@@ -421,6 +425,9 @@
       mapCtl.style.left = "8px"; mapCtl.style.right = "auto";
       panBtn = document.createElement("button");
       panBtn.id = "mapPan"; panBtn.type = "button";
+      // centre the inline SVG icon: an inline <svg> sits on the text baseline, so it
+      // rode high-and-left in the 26×26 button (#3). Flex-centre both axes.
+      panBtn.style.display = "flex"; panBtn.style.alignItems = "center"; panBtn.style.justifyContent = "center";
       panBtn.title = "Pan tool (toggle) — or hold Space and drag, or drag with the right button. Scroll = zoom; plain drag = box-select.";
       panBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg>';
       panBtn.onclick = () => { panMode = !panMode; reflectPan(); };

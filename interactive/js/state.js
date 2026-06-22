@@ -385,7 +385,11 @@ window.IV = window.IV || {};
         const keptNorm = State._isolatedKeptNorm();
         const isKept = keptNorm != null && norm === keptNorm;
         const sc = State._serumScope();
-        const titKeep = !!sc && sc.titrated.has(norm);
+        let titKeep = !!sc && sc.titrated.has(norm);
+        // #4: in the serum-scoped modes the new-since toggle narrows the foreground to
+        // titrated AND new (otherwise it appeared to do nothing under titre/coverage,
+        // because this isolated branch never reached the _coreEmphasis new-since layer).
+        if (titKeep && State._newActive()) titKeep = State._newMatch(norm);
         return { dim: hidden || (!isKept && !titKeep), lift: false, sel: isKept, z: isKept ? 1 : 0 };
       }
 
@@ -438,9 +442,15 @@ window.IV = window.IV || {};
         const isThis = kind === iso.kind && +i === iso.i;
         const sc = State._serumScope();
         // per-antigen titration on the map (#task: dim = !logged[antigen.i][serum.i])
-        const titKeep = !isThis && kind === "antigen" && !!sc && sc.titratedAg.has(+i);
+        let titKeep = !isThis && kind === "antigen" && !!sc && sc.titratedAg.has(+i);
+        // #4: new-since narrows the titre/coverage foreground to titrated AND new.
+        if (titKeep && State._newActive()) titKeep = State._newMatch(norm);
+        // #1: in titre mode keep the OTHER sera at full opacity (map.js paints them
+        // black) so the user can see them and double-click to switch the titre serum,
+        // rather than fading every serum but the isolated one.
+        const serumKeep = !isThis && kind === "serum" && !!sc && State.colorBy === "titre";
         const hidden = State.isCladeHidden(clade);
-        return { dim: hidden || (!isThis && !titKeep), lift: false, sel: isThis, z: isThis ? 1 : 0 };
+        return { dim: hidden || (!isThis && !titKeep && !serumKeep), lift: false, sel: isThis, z: isThis ? 1 : 0 };
       }
       const cats = kind === "serum" ? SERUM_CATS : State._markersOfAntigen(i);
       return State._coreEmphasis(norm, clade, State.isCladeHidden(clade), cats);
