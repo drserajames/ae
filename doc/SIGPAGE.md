@@ -114,8 +114,11 @@ A closer diff against the AD codebase (`conf/tal.json` `antigenic-map-reset`, `h
   white box.
 - Tree fills slightly more height (reduced top/bottom margin).
 
-Serum circles: AD's sig-page map removes them (`serum-circles-remove`); they're available as an
-opt-in (the chart's serum-circle / serum-coverage styles) but off by default, matching AD.
+Serum circles: AD's sig-page map removes them (`serum-circles-remove`), so they're **off by
+default**. Opt in with **`tal-signature-page --serum-circles [--serum-circle-fold N]`** (or
+`make_section_signature_page(..., serum_circles=True)`): each section's sera get their empirical
+circle (passage-type coloured — cell blue / egg red / reassortant orange, via
+`semantic.serum_circle`), with the serum point drawn dark so the centre is visible.
 
 ### Checking
 `python3 cc/tal/test/check-sigpage.py <ae.pdf> [<AD-reference.pdf>]` emits an AD-vs-ae

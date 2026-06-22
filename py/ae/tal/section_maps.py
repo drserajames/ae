@@ -418,7 +418,8 @@ def section_title(section: dict) -> str:
 
 def build_section_styles(chart, sections, match, scale: Optional[DateColorScale], viewport, *,
                          base_priority: int = 50000, available_styles: Optional[set] = None,
-                         vaccine_marks: Optional[list] = None):
+                         vaccine_marks: Optional[list] = None, serum_circles: bool = False,
+                         serum_circle_fold: float = 2.0):
     """Add one semantic style per section to `chart` and return
     ``[{name, title, n_antigens, n_sera}]``. kateri renders each via set_style.
 
@@ -436,6 +437,12 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
     date-range selector to colour by month slot. (kateri's `!i` matches a single
     index only, so an index *list* can't be used.)"""
     vaccine_marks = vaccine_marks or []
+
+    # serum circles are off by default (AD's antigenic-map-reset does serum-circles-remove);
+    # opt-in computes each serum's empirical circle so kateri can draw it.
+    if serum_circles:
+        from ae import semantic
+        semantic.serum_circle.attributes(chart)
 
     # 1. resolve each section's antigens/sera and tag them with a per-section attribute
     per_section = []
@@ -494,6 +501,15 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
             if vac.get("fill"):
                 mod["fill"] = vac["fill"]
             style.add_modifier(selector={"!i": vac["index"]}, **mod)
+        # serum circles (opt-in): empirical circle for each of the section's sera, plus a small
+        # dark serum point so the circle centre is visible (AD draws these only when requested).
+        if serum_circles and sr_idx:
+            from ae import semantic
+            sc_name = f"sigsec-sc-{si:02d}"
+            semantic.serum_circle.style(chart, style_name=sc_name, sera=list(sr_idx), fold=serum_circle_fold,
+                                        priority=base_priority + 100 + si)
+            style.add_modifier(parent=sc_name)
+            style.add_modifier(selector={sr_key: True}, only="sera", fill="black", size=6, raise_=True)
         # in-map title: small Helvetica, top-left — AD draws "{prefix}. {label} {aa}"
         style.plot_title.text.text = section_title(section)
         style.plot_title.text.font_size = MAP_TITLE_SIZE

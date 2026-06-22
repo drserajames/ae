@@ -50,6 +50,10 @@ def main() -> int:
     parser.add_argument("--caption", action="append", default=[], dest="captions", metavar="TEXT",
                         help="caption for the corresponding --map (repeatable, in order); enables the grid layout")
     parser.add_argument("--page-title", metavar="TEXT", help="title across the top of the signature page")
+    parser.add_argument("--serum-circles", action="store_true",
+                        help="(section-maps mode) draw empirical serum circles for each section's sera (AD removes them by default)")
+    parser.add_argument("--serum-circle-fold", type=float, default=2.0, metavar="FOLD",
+                        help="serum-circle fold threshold (default 2.0)")
     parser.add_argument("--tree-caption", metavar="TEXT", help="caption under the tree panel")
     parser.add_argument("--columns", type=int, metavar="N", help="maps per row in the grid (default ceil(sqrt(#maps)))")
     # common tal-draw passthrough flags (settings can express everything else)
@@ -71,7 +75,8 @@ def main() -> int:
             out = make_section_signature_page(
                 args.tree, args.chart, args.tal, args.output,
                 size=args.size if "--size" in sys.argv[1:] else None, map_width=args.map_width,
-                page_title=args.page_title, tree_caption=args.tree_caption, defines=defines)
+                page_title=args.page_title, tree_caption=args.tree_caption, defines=defines,
+                serum_circles=args.serum_circles, serum_circle_fold=args.serum_circle_fold)
         except SignaturePageError as err:
             print(f"ERROR: {err}", file=sys.stderr)
             return 2

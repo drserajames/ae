@@ -467,6 +467,7 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
 def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int] = None, map_width: float = 800.0,
                                 viewport: Optional[Sequence[float]] = None, page_title: Optional[str] = None,
                                 tree_caption: Optional[str] = None, defines: Optional[dict] = None,
+                                serum_circles: bool = False, serum_circle_fold: float = 2.0,
                                 keep_temp: bool = False) -> Path:
     """Build a faithful signature page: the TAL tree (rendered from `tal`) on the
     left, and on the right one antigenic map per *shown* hz-section of `tal`, each
@@ -508,7 +509,8 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         vaccine_marks = SM.vaccine_marks_from_ace(chart)
         vp = list(viewport) if viewport else (reset_vp or SM.viewport_from_layout(chart_obj))
         styled = SM.build_section_styles(chart_obj, sections, match, scale, vp,
-                                         available_styles=available_styles, vaccine_marks=vaccine_marks)
+                                         available_styles=available_styles, vaccine_marks=vaccine_marks,
+                                         serum_circles=serum_circles, serum_circle_fold=serum_circle_fold)
         for s in styled:
             print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
 
