@@ -99,8 +99,9 @@
     return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},0.09)`;
   }
 
-  // Map projection: prefer the map's own (tracks zoom/pan); fall back to a copy
-  // of map.js's fit-projection so the overlay still aligns before M1 / in tests.
+  // Map projection: prefer the map's own (tracks zoom/pan). The fallback below
+  // reproduces map.js computeBase() at k=1 — same maxR-based padding — so overlay
+  // lines align with the points before the first map render / when project() is null.
   function getProj(ch) {
     if (IV.Map && typeof IV.Map.project === "function" && IV.Map.scale != null) {
       const t = IV.Map.project(0, 0);
@@ -115,7 +116,16 @@
     const xmin = Math.min(...xs), xmax = Math.max(...xs);
     const ymin = Math.min(...ys), ymax = Math.max(...ys);
     const W = (wrap && wrap.clientWidth) || 600, H = (wrap && wrap.clientHeight) || 600;
-    const pad = 30, spanX = xmax - xmin || 1, spanY = ymax - ymin || 1;
+    // pad = 20 + maxR + 3, maxR = largest rendered point radius (map.js computeBase);
+    // pad=30 here previously offset overlay lines from points by the maxR delta.
+    const R = 3.5;
+    let maxR = R;
+    for (const p of all) {
+      const r = p.vac ? R * 2.2 : p.ref ? R * 1.43 : (p.serum_id != null) ? R * 1.7 : R;
+      if (r > maxR) maxR = r;
+    }
+    const pad = 20 + maxR + 3;
+    const spanX = xmax - xmin || 1, spanY = ymax - ymin || 1;
     const scale = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
     const ox = (W - spanX * scale) / 2, oy = (H - spanY * scale) / 2;
     return { project: (x, y) => [ox + (x - xmin) * scale, oy + (ymax - y) * scale], scale };
@@ -137,8 +147,12 @@
   function errorFromDist(tableDist, mapDist, raw) {
     const lt = typeof raw === "string" && raw[0] === "<";
     const mt = typeof raw === "string" && raw[0] === ">";
-    if (lt) { const D = tableDist - mapDist; return (D + 1) * Math.sqrt(sigmoid((D + 1) * 10)); }
-    if (mt) { const D = mapDist - tableDist; return -(D + 1) * Math.sqrt(sigmoid((D + 1) * 10)); }
+    // Threshold titers are one-sided: a "<" (lower-bound distance) is only violated
+    // by being too close (red, err>0); a ">" only by being too far (blue, err<0).
+    // The sigmoid term flips sign when D+1<0 in the transition band, which would draw
+    // a spurious opposite-colour tick — clamp each branch to its intended sign.
+    if (lt) { const D = tableDist - mapDist; return Math.max(0, (D + 1) * Math.sqrt(sigmoid((D + 1) * 10))); }
+    if (mt) { const D = mapDist - tableDist; return Math.min(0, -(D + 1) * Math.sqrt(sigmoid((D + 1) * 10))); }
     return tableDist - mapDist;
   }
 
