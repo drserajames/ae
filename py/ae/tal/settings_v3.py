@@ -289,11 +289,50 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list) -> float:
     return (width + margins["left"] + margins["right"]) / (1.0 + margins["top"] + margins["bottom"])
 
 
+def _expand_seq_id(sid: str) -> list:
+    """AD matches a `seq_id` select as a regex. The report `.tal`s use that only as a
+    top-level alternation of exact seq_ids — `(A|B|C)` to hide many long-branch strains
+    at once (tal-draw matches seq_ids exactly, so the literal `(A|B|C)` would match
+    nothing). Expand such an alternation into its exact members; pass any other string
+    through unchanged."""
+    s = sid.strip()
+    if len(s) >= 3 and s[0] == "(" and s[-1] == ")" and "|" in s:
+        inner = s[1:-1]
+        if "(" not in inner and ")" not in inner:   # flat alternation, no nested groups
+            return [part for part in inner.split("|") if part]
+    return [sid]
+
+
+def _dash_bar_legend(labels) -> list:
+    """A dash-bar's legend: [{text, color, aa}] for each real label (text != ".") so the bar can
+    show its position+amino-acid variants in their colours (AD dash-bar labels). `labels` is
+    either an object keyed by aa (dash-bar-aa-at) or a list (dash-bar). For the object form the
+    key is the amino acid, so the renderer can recolour the swatch with the leaf's ACTUAL colour
+    (AD draws each label in colors.get(aa))."""
+    out: list = []
+    items = labels.items() if isinstance(labels, dict) else (
+        [(None, e) for e in labels] if isinstance(labels, list) else [])
+    for aa, e in items:
+        if not isinstance(e, dict):
+            continue
+        text = e.get("text", "")
+        if isinstance(text, str) and text and text != "." and len(text) > 1:
+            entry = {"text": text, "color": e.get("color", "")}
+            if isinstance(aa, str) and len(aa) == 1:
+                entry["aa"] = aa
+            out.append(entry)
+    return out
+
+
 def _select(select: dict, warnings: list) -> dict:
     out: dict = {}
     if "seq_id" in select:
         sid = select["seq_id"]
-        out["seq_id"] = sid if isinstance(sid, list) else [sid]
+        ids = sid if isinstance(sid, list) else [sid]
+        expanded: list = []
+        for one in ids:
+            expanded.extend(_expand_seq_id(one) if isinstance(one, str) else [one])
+        out["seq_id"] = expanded
     if "cumulative >=" in select:
         out["cumulative_min"] = select["cumulative >="]
     if "edge >=" in select:
@@ -404,6 +443,18 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 # (color_by_continent already set) the matrix stays continent-coloured.
                 if not schema.get("color_by_continent"):
                     schema["color_by_clade"] = True
+                # slot geometry + default label scale (AD Clades::Parameters): the column lays
+                # brackets out at slot.width*(slot+1); label_size = slot.width * scale.
+                slot = cmd.get("slot")
+                if isinstance(slot, dict) and isinstance(slot.get("width"), (int, float)):
+                    clades["slot_width"] = float(slot["width"])
+                if isinstance(cmd.get("width-to-height-ratio"), (int, float)):
+                    clades["width_ratio"] = float(cmd["width-to-height-ratio"])
+                all_clades = cmd.get("all-clades")
+                if isinstance(all_clades, dict):
+                    al = all_clades.get("label")
+                    if isinstance(al, dict) and isinstance(al.get("scale"), (int, float)):
+                        clades["label_scale"] = float(al["scale"])
                 for pc in cmd.get("per-clade", []):
                     if not isinstance(pc, dict) or not pc.get("name"):
                         continue
@@ -416,6 +467,26 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                         style["display_name"] = pc["display_name"]
                     elif isinstance(pc.get("label"), dict) and "text" in pc["label"]:
                         style["display_name"] = pc["label"]["text"]  # label.text doubles as the display name
+                    # explicit slot (AD honours per-clade slot; set_slots only fills NoSlot)
+                    if isinstance(pc.get("slot"), (int, float)):
+                        style["slot"] = int(pc["slot"])
+                    # per-clade label scale + rotation (the report's `label` is an array whose
+                    # first element carries rotation_degrees/scale; tolerate the dict form too)
+                    lab = pc.get("label")
+                    lab0 = lab[0] if isinstance(lab, list) and lab and isinstance(lab[0], dict) else (lab if isinstance(lab, dict) else None)
+                    if isinstance(lab0, dict):
+                        if isinstance(lab0.get("scale"), (int, float)):
+                            style["label_scale"] = float(lab0["scale"])
+                        if isinstance(lab0.get("rotation_degrees"), (int, float)):
+                            style["rotation_degrees"] = int(lab0["rotation_degrees"])
+                        off = lab0.get("offset")  # [dx, dy] fractions of height (AD label.offset)
+                        if isinstance(off, list) and len(off) == 2 and all(isinstance(v, (int, float)) for v in off):
+                            style["label_offset"] = [float(off[0]), float(off[1])]
+                    # section merge/drop tolerances (AD make_sections; in leaf-index units)
+                    if isinstance(pc.get("section-inclusion-tolerance"), (int, float)):
+                        style["section_inclusion_tolerance"] = float(pc["section-inclusion-tolerance"])
+                    if isinstance(pc.get("section-exclusion-tolerance"), (int, float)):
+                        style["section_exclusion_tolerance"] = float(pc["section-exclusion-tolerance"])
                     if len(style) > 1:  # name + at least one styling key
                         schema.setdefault("clade_styles", []).append(style)
             elif name == "time-series":
@@ -426,6 +497,18 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 if "end" in cmd:
                     ts["end"] = cmd["end"]
                 ts.setdefault("interval", "month")
+                # slot geometry (fraction of height) + date-label scale/rotation, so the
+                # column is AD's narrow width and the dates AD's small clockwise labels.
+                slot = cmd.get("slot")
+                if isinstance(slot, dict):
+                    if isinstance(slot.get("width"), (int, float)):
+                        ts["slot_width"] = float(slot["width"])
+                    label = slot.get("label")
+                    if isinstance(label, dict):
+                        if isinstance(label.get("scale"), (int, float)):
+                            ts["label_scale"] = float(label["scale"])
+                        if isinstance(label.get("rotation"), str):
+                            ts["label_rotation"] = label["rotation"]
                 # the matrix is coloured by the time-series color-by (AD reports use continent;
                 # ae has the exact AD continent palette). Set the leaf colour mode accordingly.
                 if cmd.get("color-by") == "continent":
@@ -442,6 +525,12 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 # of the AD reference. Only the explicit "imported" method (use the tree's
                 # stored transitions) shows transitions.
                 pernode = cmd.get("per-node")
+                emitted_mrca = False
+                # default label style for all nodes (AD `all-nodes.label`) — the report sets
+                # colour grey30; per-node entries inherit it unless they override.
+                all_nodes_label = (cmd.get("all-nodes") or {}).get("label") or {}
+                default_color = all_nodes_label.get("color") if isinstance(all_nodes_label, dict) else None
+                default_scale = all_nodes_label.get("scale") if isinstance(all_nodes_label, dict) else None
                 if isinstance(pernode, list):
                     # AD selects each curated label's node by draw-time node_id, which ae's tree
                     # doesn't carry — but every entry ALSO records its node's first/last leaf seq_ids
@@ -466,10 +555,20 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                                 ml["color"] = lab["color"]
                             if isinstance(lab.get("scale"), (int, float)):
                                 ml["size"] = lab["scale"]
+                        if "color" not in ml and isinstance(default_color, str):
+                            ml["color"] = default_color           # all-nodes default (grey30)
+                        if "size" not in ml and isinstance(default_scale, (int, float)):
+                            ml["size"] = default_scale
                         schema.setdefault("mrca_labels", []).append(ml)
+                        emitted_mrca = True
                     if skipped:
                         warnings.append(f"draw-aa-transitions: {skipped} per-node label(s) lacked first/last bounds — skipped")
-                if cmd.get("method", "imported") == "imported":
+                # AD draws the curated per-node labels OR (when no curation is given) every
+                # stored inode transition — never both. When we emitted curated MRCA labels,
+                # leaving aa_transitions.show on would flood the tree with every stored inode
+                # transition (the H3/H1 purple flood). Only enable show for an "imported"
+                # block that carries NO per-node curation.
+                if not emitted_mrca and cmd.get("method", "imported") == "imported":
                     aa = schema.setdefault("aa_transitions", {})
                     aa["show"] = True
                     aa["compute"] = False  # use the tree's stored ("imported") transitions
@@ -483,7 +582,36 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 ]
             elif name == "dash-bar-aa-at":
                 if "pos" in cmd:
-                    schema.setdefault("dash_bars", []).append({"pos": int(cmd["pos"])})
+                    bar = {"pos": int(cmd["pos"])}
+                    # AD's per-aa colour map (`colors`: {aa: colour}, "transparent" = don't
+                    # draw that aa) — pass it through as the schema's [{aa, color}] array so the
+                    # bar shows AD's exact variant colours instead of the frequency palette.
+                    colors = cmd.get("colors")
+                    if isinstance(colors, dict):
+                        bar["colors"] = [{"aa": aa, "color": col}
+                                         for aa, col in colors.items() if isinstance(aa, str) and aa]
+                    legend = _dash_bar_legend(cmd.get("labels"))
+                    if legend:
+                        bar["legend"] = legend
+                    schema.setdefault("dash_bars", []).append(bar)
+            elif name == "dash-bar":
+                # AD's clade/aa-select bar (dash-bar.cc): each leaf is coloured by the FIRST
+                # matching `nodes` select (a set of "<pos><aa>" conditions that must ALL hold);
+                # `labels` is the legend. Port as a select-based dash bar.
+                selects = []
+                for nd in cmd.get("nodes", []):
+                    if not isinstance(nd, dict):
+                        continue
+                    sel = nd.get("select", {})
+                    aa = sel.get("aa") if isinstance(sel, dict) else None
+                    if isinstance(aa, list) and aa and "color" in nd:
+                        selects.append({"aa": [str(a) for a in aa], "color": nd["color"]})
+                if selects:
+                    bar = {"selects": selects}
+                    legend = _dash_bar_legend(cmd.get("labels"))
+                    if legend:
+                        bar["legend"] = legend
+                    schema.setdefault("dash_bars", []).append(bar)
             elif name == "nodes":
                 select_raw, apply_raw = cmd.get("select", {}), cmd.get("apply", {})
                 if not isinstance(select_raw, dict) or not isinstance(apply_raw, dict):
@@ -502,18 +630,25 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 # leaf colouring: color-by is a string ("continent") or an object
                 # ({"N": "pos-aa-frequency"|"pos-aa-colors", "pos": N}). Both pos modes
                 # map to color_by_pos (frequency colouring; explicit aa scheme approximated).
+                # A `tree` element's color-by recolours the tree EDGES (acmacs-tal DrawTree);
+                # the continent colouring of the WHOCC report comes instead from the
+                # time-series / clades-whocc and tints only the matrix (edges stay black). So
+                # set color_edges only here, when the tree itself asks for an edge colouring.
                 cb = cmd.get("color-by")
                 if isinstance(cb, str):
                     if cb == "continent":
                         schema["color_by_continent"] = True
+                        schema["color_edges"] = True
                     elif cb not in ("", "uniform"):
                         warnings.append(f"tree color-by {cb!r} not supported — skipped")
                 elif isinstance(cb, dict):
                     cbn = cb.get("N")
                     if cbn == "continent":
                         schema["color_by_continent"] = True
+                        schema["color_edges"] = True
                     elif cbn in ("pos-aa-frequency", "pos-aa-colors") and "pos" in cb:
                         schema["color_by_pos"] = {"pos": int(cb["pos"])}
+                        schema["color_edges"] = True
                     else:
                         warnings.append(f"tree color-by {cbn!r} not supported — skipped")
                 if isinstance(cmd.get("legend"), dict) and cmd["legend"].get("show"):
@@ -546,7 +681,12 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                         defines.pop(var, None)
                 else:
                     warnings.append("for-each needs array 'values' and 'do' — skipped")
-            elif name in ("margins", "gap", "node-id-size", "set"):
+            elif name == "node-id-size":
+                # AD's report annotates every leaf tip with its strain name (tiny vector text,
+                # ~row height — faint at page scale, readable when zoomed). The presence of a
+                # node-id-size mod signals that annotation; enable per-leaf tip names.
+                schema["tip_names"] = True
+            elif name in ("margins", "gap", "set"):
                 pass  # no tal-draw equivalent / no-op for a one-off render
             else:
                 warnings.append(f"command {name!r} not handled — skipped")

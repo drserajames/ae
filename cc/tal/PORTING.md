@@ -437,11 +437,15 @@ the `cc/draw/` surface API."*
       needs a bottom reserve. (AD draws the *continent* legend as the bottom-left world map —
       `LegendContinentMap`, `continent-map.hh`; ae has no map asset linked into `tal-draw`, so the
       coloured-squares legend top-right is the substitute. World-map inset stays open, #5.)
-    - **Clade column → far right, bracket staircase.** Moved the clades column to the **rightmost**
-      slot (past time-series + dash bars), matching AD. Each shown clade is now a vertical
-      **double-arrow bracket** (spine + arrowheads, BLACK) with a **rotated** name label, in a
-      **slot** (`set_slots` port): widest extent → slot 0 (right edge), overlapping sub-clades bumped
-      left → AD's nested staircase. ae's `compute_clade_sections` has **no section tolerance**
+    - **Clade column → bracket staircase, between matrix and dash-bars.** The clades column sits
+      after the time-series matrix and left of the aa dash-bars (AD column order). Each shown
+      clade is a vertical **double-arrow bracket** (spine + arrowheads, BLACK) with a **rotated**
+      name label and top/bottom **horizontal arms**, in a **slot** (`set_slots` port): widest
+      extent → slot 0 (the **LEFT** edge, matrix side), overlapping sub-clades bumped **right** →
+      AD's nested staircase with **deeper clades to the RIGHT of their parent** (e.g. h3 `K` right
+      of `J.2.4`). *(This is AD's time-series-to-the-left layout: `pos_x = viewport.left +
+      slot.width·(slot+1)`, horizontal_line from viewport.left to the spine. An earlier ae version
+      had slot 0 at the right edge / deeper-left — the opposite — now corrected.)* ae's `compute_clade_sections` has **no section tolerance**
       (acmacs-tal `section-inclusion/exclusion-tolerance`), so a clade interrupted by interspersed
       leaves fragments into dozens–hundreds of 1-leaf sections (e.g. `C (5a.2)`: 338 sections). Drawing
       them all was a cloud of ticks. Approximated the tolerances **at draw time**: drop sections below
@@ -518,6 +522,58 @@ synthetic `tree-geo.json`: a nine-colour continent map renders lower-left on eac
 the AD reference PDFs (colours per `ae::geo::continent_color`: N-America dark blue,
 S-America turquoise, Europe green, Africa orange, Middle-East purple, Asia red, Russia
 maroon, Australia-Oceania pink, Central-America cyan).
+
+---
+
+## Report-tree AD-fidelity completion (June 2026) — DONE
+
+Iterative pass (branch `ae-tree`, worktree `~/AC/eu/ae-tree`) to make the three seasonal
+report trees pixel-faithful to the AD references
+(`~/AC/eu/ac/results/ssm/2026-0223-ssm/tree/{h3,h1,bvic}.asr.after-2021.pdf`). The earlier
+items above got the structure right; this pass closed the remaining visual gaps, verified per
+subtype against the AD reference (h3 alone is misleading — h1/bvic exposed bugs h3 masked).
+
+**What landed (all three subtypes unless noted):**
+- **aa-transition labels** — only the curated `mrca_labels` (no imported-transition flood);
+  **monospace**, small, **grey** (`grey30`), with **leader lines** to the branch node.
+- **Tree edges black** under WHOCC continent colouring — `edge_color_for`; continent colour
+  tints only the matrix/time-series/dash-bars, never the edges. (`color-by:"continent"` on a
+  `tree` element sets `color_edges`; the WHOCC continent comes from time-series/clades-whocc
+  and does **not**.)
+- **Tip strain names** re-enabled at the `.tal` `node-id-size` (0.0002) — tiny zoomable vector
+  text (schema `tip_names:true`).
+- **Single continent legend** = the lower-left world-map inset only (top-right swatch legend
+  suppressed when `geo_inset` is on); **subtype title** (`A(H3N2)`/`A(H1N1)`/`B/Vic`).
+- **Vertical fill** — tree+matrix use the full page height; title nudged to the very top.
+- **Time series** — narrow AD slot width (`.tal` `slot.width` 0.005, label `scale`), `Mon YY`
+  month labels at **top and bottom**, rotated **clockwise** (top→bottom), and faint horizontal
+  row lines that **stop at the clade column** (don't cross the tree/left margin).
+- **Clade column** (port of AD `clades.cc` `set_slots`) — labels read **top→bottom**, nested
+  **rightward staircase** (deeper clade right of its parent, e.g. `K` right of `J.2.4`),
+  **per-clade varying label size**.
+- **aa colour bars** (`dash-bar-aa-at`) — coloured by **amino-acid identity** from the `.tal`'s
+  explicit maps, with a coloured **position+aa legend at the bottom** (e.g. `135K`/`135A`).
+
+**Two `.tal` gotchas worth remembering:**
+1. `dash-bar-aa-at` entries come in two shapes: a **colours** shape (`"pos"`, explicit
+   `"colors":{aa→hex}` where `"transparent"`=no dash, and a `"labels":{aa→{text,color,
+   vertical_position}}` map → the legend) and an **aa-select** shape (`"selects":[{"aa":[…],
+   "color":…}]`, multi-position, so it has no single `pos`). The translator must read both and
+   honour the explicit colours/labels (not a frequency fallback). h3's third bar is position
+   **158** (`158K/158D`), not 156.
+2. **h1's colour-bar entries are all `?N`-disabled** in `h1.after-2021.tal` (`"?N":
+   "dash-bar-aa-at"`). The translator must **skip any `?`-prefixed key/entry** and render the
+   *active* dash-bars — picking up a disabled stub yielded `pos=None` and a blank bar.
+
+**Pixel-diff harness:** [`cc/tal/test/tree-vs-ad.sh`](test/tree-vs-ad.sh) `{h3|h1|bvic|all}`
+renders a subtype, rasterises it + the AD reference at matched geometry, and emits whole-page +
+per-region RMSE and a `new|AD|diff` montage in `/tmp/treediff_<sub>/`. **RMSE is insensitive**
+(dominated by tree-topology AA/alignment) — judge by the diff montage, not the number. Outputs
+to `/tmp` only (inputs carry WHO strain data — nothing rendered is committed).
+
+Status: feature-complete vs the AD references; minor cosmetic residuals only (legend lists one
+extra aa variant AD omits; AD boxes matrix sections where ae draws separator lines). Branch
+`ae-tree` not yet merged to `main`.
 
 ---
 

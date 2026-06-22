@@ -38,6 +38,13 @@ namespace ae::tal
         std::string color{};
         std::string display_name{};
         bool hide{false}; // suppress this clade's bar + label from the clades column / legend (acmacs-tal per-clade show:false)
+        int slot{-1};                          // explicit horizontal slot (AD per-clade slot); -1 = compute via set_slots
+        double label_scale{0.0};               // label size = clades slot.width * this scale; 0 = column default
+        int rotation_degrees{90};              // label rotation (90 = clockwise / top-to-bottom, 0 = horizontal)
+        double section_inclusion_tolerance{0.0}; // merge sections whose gap (leaf indices) <= this (AD make_sections)
+        double section_exclusion_tolerance{0.0}; // drop sections whose size (leaves) <= this
+        double label_offset_x{0.002};          // label offset, fractions of height (just right of the arrow)
+        double label_offset_y{0.0};
     };
 
     // A node-select / node-apply mod — the core of the acmacs-tal settings pipeline.
@@ -93,13 +100,22 @@ namespace ae::tal
         NodeApply apply{};
     };
 
-    // A per-leaf dash column keyed by the amino acid at a position (acmacs-tal
-    // dash-bar-aa-at). Each shown leaf gets a dash coloured by its aa at `pos` (1-based):
-    // by `colors_by_aa` when given, else by frequency (most common = grey, variants pop).
+    // An amino-acid condition "<pos><aa>" (1-based position, required residue), e.g. "156N".
+    struct AaCondition { int pos{0}; char aa{0}; };
+
+    // A per-leaf dash column (acmacs-tal dash-bar / dash-bar-aa-at). Two flavours:
+    //  - pos-based (dash-bar-aa-at): colour each shown leaf by its aa at `pos` (1-based), via
+    //    `colors_by_aa` when given else by frequency (most common = grey, variants pop);
+    //  - select-based (dash-bar): colour each leaf by the FIRST matching `selects` entry (all of
+    //    its conditions hold), else not drawn.
+    // `legend` is the position+aa swatch list shown (in colour) at the bottom of the bar.
     struct DashBarAAAt
     {
         int pos{0};
         std::map<char, std::string> colors_by_aa{}; // aa char -> colour string ("#rrggbb"/name)
+        std::vector<std::pair<std::vector<AaCondition>, std::string>> selects{}; // (conditions, colour)
+        struct LegendItem { std::string text; std::string color; char aa{0}; }; // aa=0 -> no actual-colour lookup
+        std::vector<LegendItem> legend{};
     };
 
     // A horizontal section of the tree (acmacs-tal hz-sections): the contiguous run of
@@ -123,15 +139,25 @@ namespace ae::tal
         std::string ladderize{};             // "" | "none" | "number-of-leaves" | "max-edge-length" — reorder children before layout
         bool labels{false};                  // draw each leaf's name to the right of its tip
         bool labels_avoid_collisions{true};  // suppress leaf labels that would overlap the one above
+        bool tip_names{false};               // draw EVERY shown leaf's name at its tip, tiny (~row height),
+                                             // no reserved column / no collision avoidance (AD DrawTree,
+                                             // faint at page scale, readable when zoomed)
         bool color_by_clade{false};  // colour leaf edges/labels/dashes by first clade
         bool color_by_continent{false}; // colour leaves by geographic continent (acmacs-tal color-by continent)
+        bool color_edges{false};     // recolour tree EDGES by the active mode (tree color-by); else edges stay black
         int color_by_pos{0};         // colour leaves by amino acid at this 1-based position (0 = off)
         std::map<char, std::string> color_by_pos_colors{}; // aa char -> colour for color_by_pos; empty = colour by frequency
         bool clades{false};          // draw the clade-sections column
+        double clades_slot_width{0.0};   // clade column slot width as a fraction of height (AD clades slot.width); 0 = derived
+        double clades_label_scale{0.0};  // default per-clade label scale (AD all-clades label.scale); 0 = 1.0
+        double clades_width_ratio{0.0};  // clade column width as a fraction of height (AD clades width-to-height-ratio); 0 = derived
         bool time_series{false};     // draw the time-series dash column
         std::string time_series_interval{"month"}; // year | month | week | day
         std::string time_series_start{};            // optional "YYYY-MM-DD" range start
         std::string time_series_end{};              // optional "YYYY-MM-DD" range end
+        double time_series_slot_width{0.0};         // slot width as a fraction of height (AD slot.width); 0 = fallback
+        double time_series_label_scale{0.0};        // date-label size = slot_width * scale * height; 0 = derived
+        std::string time_series_label_rotation{};   // "clockwise" | "anticlockwise" (date reading direction)
         std::string title{};         // page title (top, centred); empty = none
         bool legend{false};          // draw a clade colour legend (bottom row)
         bool geo_inset{false};       // draw the continent-coloured world-map inset (lower-left); doubles as the continent legend (acmacs-tal LegendContinentMap)

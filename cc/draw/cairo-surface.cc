@@ -108,6 +108,17 @@ namespace ae::draw
         cairo_stroke(context_);
     }
 
+    void CairoPdf::filled_triangle(double x0, double y0, double x1, double y1, double x2, double y2, Color fill)
+    {
+        cairo_new_path(context_);
+        cairo_move_to(context_, x0, y0);
+        cairo_line_to(context_, x1, y1);
+        cairo_line_to(context_, x2, y2);
+        cairo_close_path(context_);
+        set_source(context_, fill);
+        cairo_fill(context_);
+    }
+
     void CairoPdf::line(double x1, double y1, double x2, double y2, Color color, double width)
     {
         cairo_new_path(context_);
@@ -171,10 +182,10 @@ namespace ae::draw
         cairo_restore(context_);
     }
 
-    void CairoPdf::text(double x, double y, std::string_view utf8, double font_size, Color color, bool center)
+    void CairoPdf::text(double x, double y, std::string_view utf8, double font_size, Color color, bool center, bool monospace)
     {
         const std::string str{utf8};
-        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_select_font_face(context_, monospace ? "monospace" : "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(context_, font_size);
         cairo_text_extents_t ext;
         cairo_text_extents(context_, str.c_str(), &ext);

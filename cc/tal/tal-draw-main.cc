@@ -30,10 +30,14 @@ int main(int argc, char* const argv[])
                 params.labels_avoid_collisions = false;
             else if (arg == "--color-by-clade")
                 params.color_by_clade = true;
-            else if (arg == "--color-by-continent")
+            else if (arg == "--color-by-continent") {
                 params.color_by_continent = true;
-            else if (arg.substr(0, 15) == "--color-by-pos=")
+                params.color_edges = true; // CLI colours the whole tree (edges + matrix)
+            }
+            else if (arg.substr(0, 15) == "--color-by-pos=") {
                 params.color_by_pos = std::stoi(std::string{arg.substr(15)});
+                params.color_edges = true;
+            }
             else if (arg == "--clades")
                 params.clades = true;
             else if (arg == "--time-series")

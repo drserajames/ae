@@ -1,3 +1,4 @@
+#include <cctype>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -55,8 +56,10 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
     params.title = get_string(config["title"]);
     params.labels = get_bool(config["labels"]);
     params.labels_avoid_collisions = get_bool(config["labels_avoid_collisions"], true);
+    params.tip_names = get_bool(config["tip_names"]);
     params.color_by_clade = get_bool(config["color_by_clade"]);
     params.color_by_continent = get_bool(config["color_by_continent"]);
+    params.color_edges = get_bool(config["color_edges"]);
     if (const auto& cbp = config["color_by_pos"]; cbp.is_object()) {
         params.color_by_pos = static_cast<int>(get_double(cbp["pos"], 0.0));
         if (const auto& colors = cbp["colors"]; colors.is_array()) {
@@ -70,13 +73,20 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         }
     }
 
-    if (const auto& clades = config["clades"]; clades.is_object())
+    if (const auto& clades = config["clades"]; clades.is_object()) {
         params.clades = get_bool(clades["show"]);
+        params.clades_slot_width = get_double(clades["slot_width"], 0.0);
+        params.clades_label_scale = get_double(clades["label_scale"], 0.0);
+        params.clades_width_ratio = get_double(clades["width_ratio"], 0.0);
+    }
     if (const auto& time_series = config["time_series"]; time_series.is_object()) {
         params.time_series = get_bool(time_series["show"]);
         params.time_series_interval = get_string(time_series["interval"], "month");
         params.time_series_start = get_string(time_series["start"]);
         params.time_series_end = get_string(time_series["end"]);
+        params.time_series_slot_width = get_double(time_series["slot_width"], 0.0);
+        params.time_series_label_scale = get_double(time_series["label_scale"], 0.0);
+        params.time_series_label_rotation = get_string(time_series["label_rotation"]);
     }
     if (const auto& legend = config["legend"]; legend.is_object())
         params.legend = get_bool(legend["show"]);
@@ -95,7 +105,17 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
             if (!entry.is_object())
                 continue;
             if (std::string name = get_string(entry["name"]); !name.empty())
-                params.clade_styles.insert_or_assign(std::move(name), CladeStyle{.color = get_string(entry["color"]), .display_name = get_string(entry["display_name"]), .hide = get_bool(entry["hide"])});
+                params.clade_styles.insert_or_assign(std::move(name), CladeStyle{
+                    .color = get_string(entry["color"]),
+                    .display_name = get_string(entry["display_name"]),
+                    .hide = get_bool(entry["hide"]),
+                    .slot = entry["slot"].is_null() ? -1 : static_cast<int>(get_double(entry["slot"], -1.0)),
+                    .label_scale = get_double(entry["label_scale"], 0.0),
+                    .rotation_degrees = static_cast<int>(get_double(entry["rotation_degrees"], 90.0)),
+                    .section_inclusion_tolerance = get_double(entry["section_inclusion_tolerance"], 0.0),
+                    .section_exclusion_tolerance = get_double(entry["section_exclusion_tolerance"], 0.0),
+                    .label_offset_x = entry["label_offset"].is_array() && entry["label_offset"].array().size() == 2 ? get_double(entry["label_offset"].array()[0], 0.002) : 0.002,
+                    .label_offset_y = entry["label_offset"].is_array() && entry["label_offset"].array().size() == 2 ? get_double(entry["label_offset"].array()[1], 0.0) : 0.0});
         }
     }
 
@@ -158,6 +178,42 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                     if (color_entry.is_object())
                         if (const std::string aa = get_string(color_entry["aa"]); !aa.empty())
                             bar.colors_by_aa.emplace(aa[0], get_string(color_entry["color"]));
+                }
+            }
+            // select-based (dash-bar): a list of {aa:["156N",...], color}
+            if (const auto& selects = entry["selects"]; selects.is_array()) {
+                const auto& sel_array = selects.array();
+                for (std::size_t j = 0; j < sel_array.size(); ++j) {
+                    const auto& sel = sel_array[j];
+                    if (!sel.is_object())
+                        continue;
+                    std::vector<AaCondition> conds;
+                    if (const auto& aa = sel["aa"]; aa.is_array()) {
+                        const auto& aa_arr = aa.array();
+                        for (std::size_t m = 0; m < aa_arr.size(); ++m) {
+                            const std::string cond = get_string(aa_arr[m]); // "156N" -> pos 156, aa 'N'
+                            std::size_t p = 0;
+                            while (p < cond.size() && std::isdigit(static_cast<unsigned char>(cond[p]))) ++p;
+                            if (p > 0 && p < cond.size()) {
+                                try {
+                                    conds.push_back(AaCondition{std::stoi(cond.substr(0, p)), cond[p]});
+                                }
+                                catch (const std::exception&) {} // pathologically long position digits — skip the condition
+                            }
+                        }
+                    }
+                    if (!conds.empty())
+                        bar.selects.emplace_back(std::move(conds), get_string(sel["color"]));
+                }
+            }
+            if (const auto& legend = entry["legend"]; legend.is_array()) {
+                const auto& leg_array = legend.array();
+                for (std::size_t j = 0; j < leg_array.size(); ++j) {
+                    const auto& le = leg_array[j];
+                    if (le.is_object()) {
+                        const std::string aa = get_string(le["aa"]);
+                        bar.legend.push_back(DashBarAAAt::LegendItem{get_string(le["text"]), get_string(le["color"]), aa.empty() ? char{0} : aa[0]});
+                    }
                 }
             }
             params.dash_bars.push_back(std::move(bar));
