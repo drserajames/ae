@@ -226,26 +226,38 @@ contracts that feature modules build on (rather than re-deriving) are:
   `State.expandNorms(norms)` adds each serum's homologous-antigen norm so a serum
   click lights the serum + its homologous antigen + the matching tree tip
   (installSelect already routes clicks/box through `expandNorms`).
-  **#2 double-click isolate (v6/v7):** installSelect handles a point dblclick — it
-  isolates that one strain (`setSelection([norm])`, **no** homolog expansion) so a
-  serum's lines/coverage apply to just that serum, and `stopImmediatePropagation`s
-  (capture phase) so it doesn't trigger the panel's zoom-reset **even when that
-  resetView listener is on the same SVG node** (#1 v7); an empty-space dblclick
-  falls through and still resets the view. No panel change needed.
-  **new-since toggles (v6/v7 #3):** `State.showNewReport` / `State.showNewVCM`
-  booleans with `setShowNewReport/setShowNewVCM(on)` (both notify); Agent-LINES
-  wires the Overlays checkboxes. These are now **emphasis keep-layers, not bold
-  outlines**: `emphasis()` keeps antigens/tips whose semantic `new` matches
-  (`showNewReport`→`new==1`, `showNewVCM`→`new>=1`) and dims the rest, so map/tree
-  get it via their existing refresh — drop the width-3/6 outline render.
-  **serum-coverage (v7 #4) — single source of truth:** `State.coverageActive()` /
-  `State.coverageSerum() → {i,norm}|null` / `State.coverageTitrated(norm)`. Coverage
-  is active only when the Colour menu is in `"coverage"` mode AND **exactly one
-  serum is selected** (typically via dbl-click isolate). `emphasis()` then keeps
-  norms titrated against that serum and dims untitrated ones (norm-level, on both
-  panels); panels read `coverageSerum()`/`coverageTitrated()` to draw the pink
-  (≤4-fold) / thicker-black (>4-fold) outlines on the titrated points — drop the
-  pale-untitrated tint.
+  **double-click isolate (v6/v7/v8) — point identity:** a point dblclick isolates
+  ONE exact point by **identity, not norm** — `State.isolated = {kind:'serum'|
+  'antigen', i}` (`i` = index in the active chart), with `setIsolated(kind,i)` /
+  `clearIsolated()` / `isIsolated()` / `isolatedSerum()` (the active chart's serum
+  object when `kind==='serum'`). So a serum isolates **without** lighting its
+  same-name antigen. Map/grid glyphs carry `data-kind`+`data-i` (the handler reads
+  them); a tree tip (norm-only) resolves to its matching antigen. Panels use
+  `State.pointEmphasis(kind,i,norm,clade) → {dim,lift,sel,z}` (map/grid) — only the
+  exact (kind,i) is `sel`, everything else dims (titrated antigens stay in coverage
+  mode); `emphasis(norm,clade)` carries the same logic norm-side for the tree.
+  Single click / box-select / empty-click / **Esc** clear isolation; isolation also
+  clears on chart change. **#5 (v9): double-click is detected manually** (two clicks
+  on the same point within 300 ms) because the native `dblclick` event on SVG is
+  unreliable in Safari — the second click isolates and also `resetCycle()`s the
+  legend cycle (**F2 v9**). A residual capture-phase `dblclick` listener only
+  `stopImmediatePropagation`s on a point (to suppress the panel zoom-reset where the
+  native event *does* fire, even on the same SVG node); empty-space dblclick still
+  resets the view.
+  **new-since toggles (v6/v7 #3, v9 #2):** `State.showNewReport` / `State.showNewVCM`
+  booleans with `setShowNewReport/setShowNewVCM(on)` (both notify); **mutually
+  exclusive** (v9 #2 — setting one clears the other). Agent-LINES wires the Overlays
+  checkboxes. These are **emphasis keep-layers, not bold outlines**: `emphasis()`
+  keeps antigens/tips whose semantic `new` matches (`showNewReport`→`new==1`,
+  `showNewVCM`→`new>=1`) and dims the rest, via the panels' existing refresh.
+  **serum-coverage (v7 #4 / v8) — single source of truth:** `State.coverageActive()`
+  / `State.coverageSerum() → {i,norm}|null` / `State.coverageTitrated(norm)`.
+  Coverage is active when the Colour menu is in `"coverage"` mode AND a serum is
+  **isolated** (v8 — was "exactly one serum selected"; subject = `isolatedSerum()`).
+  `emphasis()`/`pointEmphasis()` keep norms titrated against that serum and dim
+  untitrated ones (norm-level, on both panels); panels read `coverageSerum()`/
+  `coverageTitrated()` (or `isolatedSerum()`) to draw the pink (≤4-fold) /
+  thicker-black (>4-fold) outlines on the titrated points — drop the pale tint.
   **F2 legend cycle (per-attribute z-order tri-state):** generalises the v3 clade
   cycle to whichever attribute colorBy selects — `clade`, `continent`, or `aa`
   value. The legend (Agent-COLOUR) calls `State.cycleActive(value)` on the active
@@ -262,6 +274,15 @@ contracts that feature modules build on (rather than re-deriving) are:
   refresh; panels MAY additionally reorder points by `z` to draw *back* behind and
   *front* on top. Cycle state is keyed per `(attr, value)`, so it persists across
   colorBy switches and each mode only ever sees its own groups.
+  **F3 marker cycle (v9):** a second cyclable dimension, **always active**
+  (independent of colorBy), for the marker-key categories `State.MARKERS =
+  ["reference","vaccine","serum","egg","reassortant"]`. Agent-COLOUR's legend
+  marker swatches call `State.cycleMarker(cat)` and read `State.markerMode(cat)` /
+  `State.markerZRank(cat)` (it's `cycleAttr("marker", cat)` under the hood).
+  `emphasis()`/`pointEmphasis()` fold marker modes in exactly like the clade cycle —
+  a *front* category pops, others fade; a point may match several categories (an egg
+  reference antigen). `"serum"` matches only serum glyphs (resolved by `kind` in
+  `pointEmphasis`), so fronting it dims every antigen and all tree tips.
 - **`IV.Colour`** — colour API: `Colour.leaf(node)`, `Colour.antigen(ag)`,
   `Colour.cladeColor(c)`, `Colour.cladeLegend(c)`, `Colour.clades()`,
   `Colour.unmatched()`, honouring the active `State.colorBy`. Continent key:
