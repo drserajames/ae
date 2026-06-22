@@ -50,6 +50,7 @@ BASE_SERUM = {"fill": "#e8e8e8", "outline": "#c4c4c4", "size": 6}
 INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.4, "size": 8}
 INSECTION_SERUM = {"fill": "#1f78b4", "outline": "black", "outline_width": 1.0, "size": 16}
 NO_DATE_FILL = "#9e9e9e"  # in-section antigen whose date falls outside the time-series window
+MAP_TITLE_SIZE = 16  # kateri px; AD's in-map "{prefix}. {label} {aa}" is a small sans title
 
 
 # ======================================================================
@@ -322,15 +323,24 @@ def antigens_sera_in_section(match: LeafMatch, first: str, last: str) -> tuple[l
 # ======================================================================
 
 
-def reset_viewport_from_ace(ace_path) -> Optional[list[float]]:
-    """The report's clades-map viewport, reused so every section map shares one
-    scale. Read from the chart's existing ``-reset`` semantic style if present."""
+def report_styles_from_ace(ace_path) -> tuple[Optional[list[float]], set]:
+    """Read the chart's existing semantic styles (built by ae.report): returns
+    ``(reset_viewport, style_names)``. The section maps reuse these report styles
+    (`-reset` sizes+viewport, `-pale` greying, `-vaccines` marks+labels) so they
+    look like AD's, instead of hand-rolled sizes."""
     try:
         data = json.loads(subprocess.check_output(["decat", str(ace_path)]))
     except Exception:
-        return None
-    vp = data.get("c", {}).get("R", {}).get("-reset", {}).get("V")
-    return list(vp) if isinstance(vp, list) and len(vp) == 4 else None
+        return None, set()
+    styles = data.get("c", {}).get("R", {})
+    vp = styles.get("-reset", {}).get("V")
+    viewport = list(vp) if isinstance(vp, list) and len(vp) == 4 else None
+    return viewport, set(styles.keys())
+
+
+def reset_viewport_from_ace(ace_path) -> Optional[list[float]]:
+    """The report's clades-map viewport (from the chart's ``-reset`` style)."""
+    return report_styles_from_ace(ace_path)[0]
 
 
 def viewport_from_layout(chart) -> list[float]:
@@ -355,20 +365,30 @@ def section_title(section: dict) -> str:
     return f"{head}  {aa}".rstrip()
 
 
-def build_section_styles(chart, sections, match, scale: Optional[DateColorScale], viewport, *, base_priority: int = 50000):
+def build_section_styles(chart, sections, match, scale: Optional[DateColorScale], viewport, *,
+                         base_priority: int = 50000, available_styles: Optional[set] = None,
+                         reset_style: str = "-reset", pale_style: str = "-pale", vaccine_style: str = "-vaccines"):
     """Add one semantic style per section to `chart` and return
     ``[{name, title, n_antigens, n_sera}]``. kateri renders each via set_style.
 
-    Each style greys the whole map, emphasises the section's antigens (outlined,
-    raised) and fills them by date (viridis time-series colour), draws its sera,
-    and titles the map ``"{prefix}. {label} {aa}"`` — matching AD's per-section
-    ``antigenic-map`` config.
+    To match AD's per-section ``antigenic-map`` look, each style **reuses the
+    report's own styles already in the chart** when present: ``-reset`` (AD point
+    sizes + viewport), ``-pale`` (grey the whole map), then the section's antigens
+    filled by date (viridis time-series colour) + its sera, then ``-vaccines``
+    (vaccine marks + on-map strain labels). Titled ``"{prefix}. {label} {aa}"``.
+    If those report styles are absent (a chart not styled by ae.report) it falls
+    back to a plain grey base.
 
     Selection uses what kateri's resolver supports (`plot_spec.dart`): a per-section
     boolean semantic attribute (``sg{i}``/``ss{i}`` — one key per section so an
     antigen in nested clades is in several), optionally ANDed with kateri's `!D`
     date-range selector to colour by month slot. (kateri's `!i` matches a single
     index only, so an index *list* can't be used.)"""
+    available = available_styles if available_styles is not None else set()
+    use_reset = reset_style in available
+    use_pale = pale_style in available
+    use_vaccines = vaccine_style in available
+
     # 1. resolve each section's antigens/sera and tag them with a per-section attribute
     per_section = []
     ag_sections: dict[int, list[int]] = {}
@@ -381,13 +401,12 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         for s in sr_idx:
             sr_sections.setdefault(s, []).append(si)
 
-    chart.styles().remove()  # clean style set in the working copy
+    # tag antigens/sera with per-section attributes. Keep the report's existing
+    # semantic attributes (clade/continent/vaccine) — they drive -vaccines etc.
     for no, ag in chart.select_all_antigens():
-        ag.semantic.remove_all()
         for si in ag_sections.get(no, ()):
             ag.semantic.set(f"sg{si}", True)
     for no, sr in chart.select_all_sera():
-        sr.semantic.remove_all()
         for si in sr_sections.get(no, ()):
             sr.semantic.set(f"ss{si}", True)
 
@@ -400,12 +419,18 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         style.priority = base_priority + si
         style.viewport(*viewport)
         style.legend.shown = False
-        # grey base for the whole map
-        style.add_modifier(only="antigens", **BASE_ANTIGEN)
-        style.add_modifier(only="sera", **BASE_SERUM)
+        # base: AD sizes + grey everything (reuse report styles; else hand-rolled grey)
+        if use_reset:
+            style.add_modifier(parent=reset_style)
+        else:
+            style.add_modifier(only="antigens", **BASE_ANTIGEN)
+            style.add_modifier(only="sera", **BASE_SERUM)
+        if use_pale:
+            style.add_modifier(parent=pale_style)
         if ag_idx:
             # in-section emphasis (outline + raise); grey fill for dates outside the window
-            style.add_modifier(selector={ag_key: True}, only="antigens", fill=NO_DATE_FILL, raise_=True, **INSECTION_ANTIGEN)
+            insection = dict(INSECTION_ANTIGEN) if not use_reset else {"outline": "black", "outline_width": 0.5}
+            style.add_modifier(selector={ag_key: True}, only="antigens", fill=NO_DATE_FILL, raise_=True, **insection)
             # colour by date: one modifier per occupied month slot (in-section AND in-month)
             if scale is not None:
                 occupied = sorted({scale.slot_index(chart.antigen(a).date()) for a in ag_idx} - {None})
@@ -413,8 +438,16 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
                     lo, hi = scale.slot_date_range(slot)
                     style.add_modifier(selector={ag_key: True, "!D": [lo, hi]}, only="antigens", fill=scale.slot_color(slot), raise_=True)
         if sr_idx:
-            style.add_modifier(selector={sr_key: True}, only="sera", raise_=True, **INSECTION_SERUM)
+            serum_mod = {"outline": "black", "raise_": True} if use_reset else INSECTION_SERUM
+            style.add_modifier(selector={sr_key: True}, only="sera", **serum_mod)
+        # vaccine marks + on-map strain labels, on top (AD shows these on every map)
+        if use_vaccines:
+            style.add_modifier(parent=vaccine_style)
+        # in-map title: small Helvetica, top-left — AD draws "{prefix}. {label} {aa}"
+        # at size ~0.015*canvas (a small sans title), not a big caption.
         style.plot_title.text.text = section_title(section)
-        style.plot_title.text.font_size = 36
+        style.plot_title.text.font_size = MAP_TITLE_SIZE
+        style.plot_title.text.font_face = "helvetica"
+        style.plot_title.text.font_weight = "normal"
         results.append({"name": name, "title": section_title(section), "n_antigens": len(ag_idx), "n_sera": len(sr_idx)})
     return results

@@ -159,8 +159,17 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
             const auto& entry = array[i];
             if (!entry.is_object())
                 continue;
-            params.hz_sections.push_back(HzSection{.first = get_string(entry["first"]), .last = get_string(entry["last"]), .label = get_string(entry["label"])});
+            params.hz_sections.push_back(HzSection{.first = get_string(entry["first"]), .last = get_string(entry["last"]),
+                                                   .label = get_string(entry["label"]), .prefix = get_string(entry["prefix"])});
         }
+    }
+    params.hz_section_labels = get_bool(config["hz_section_labels"]);
+    params.clades_before_time_series = get_bool(config["clades_before_time_series"]);
+    if (const auto& mc = config["matches_chart_seq_ids"]; mc.is_array()) {
+        const auto& array = mc.array();
+        params.matches_chart_seq_ids.reserve(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i)
+            params.matches_chart_seq_ids.push_back(get_string(array[i]));
     }
 
     if (const auto& bars = config["dash_bars"]; bars.is_array()) {
@@ -236,6 +245,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                 params.mrca_labels.push_back(std::move(label));
         }
     }
+    params.mrca_labels_auto_place = get_bool(config["mrca_labels_auto_place"]);
 
     return params;
 

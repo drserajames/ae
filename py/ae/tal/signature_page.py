@@ -123,10 +123,15 @@ def _latex_escape(text: str) -> str:
 
 def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions: Optional[Sequence[str]] = None,
                  page_title: Optional[str] = None, tree_caption: Optional[str] = None, columns: Optional[int] = None,
-                 paper_mm: tuple = (297.0, 210.0), margin_mm: float = 6.0) -> Path:
-    """Compose the tree (left) and an R×C grid of captioned antigenic maps (right) onto one
-    landscape page via `pdflatex`. This is the richer counterpart to `compose_side_by_side`:
-    it adds per-map captions, an optional page title, and a real grid (vs a 1×N stack).
+                 paper_mm: tuple = (297.0, 210.0), margin_mm: float = 6.0, frame: bool = False, sans: bool = False) -> Path:
+    """Compose the tree (left) and an R×C grid of antigenic maps (right) onto one landscape
+    page via `pdflatex`. The richer counterpart to `compose_side_by_side`: optional per-map
+    captions, a page title, and a real grid (vs a 1×N stack).
+
+    `frame=True` draws a thin black box around each map (matching AD's per-map border, since
+    kateri draws no border itself). `sans=True` typesets text in Helvetica to match AD.
+    For the section-map signature page, titles are drawn *inside* each map (kateri), so
+    `captions` is omitted — no text appears between maps.
 
     `columns` defaults to ceil(sqrt(n)). If `pdflatex` isn't available it falls back to
     `compose_side_by_side` (which drops the captions/title but still composes the page).
@@ -153,7 +158,9 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
     # to a 2nd page (the taller of tree/grid sets the row height)
     avail_h = paper_h - 2.0 * margin_mm - title_mm - 6.0
     cell_by_w = right_panel_mm / cols - 3.0
-    cell_by_h = avail_h / rows - 7.0  # ~7mm/row for the caption + vertical gap
+    # per-row overhead: caption line (if any) + vertical gap; less when unframed/untitled
+    row_overhead = 7.0 if any(caps) else 3.0
+    cell_by_h = avail_h / rows - row_overhead
     cell_mm = max(10.0, min(cell_by_w, cell_by_h))
     tree_h_frac = round(avail_h / (paper_h - 2.0 * margin_mm), 3)
 
@@ -163,12 +170,17 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
         for i, m in enumerate(maps):
             shutil.copyfile(m, str(work / f"map{i}.pdf"))
 
+        def boxed(i: int) -> str:
+            img = rf"\includegraphics[width=\linewidth]{{map{i}.pdf}}"
+            # AD draws a thin black border around each map; kateri draws none, so frame here.
+            return rf"\setlength{{\fboxsep}}{{0pt}}\setlength{{\fboxrule}}{{0.5pt}}\fbox{{{img}}}" if frame else img
+
         cells = []
-        for i, cap in enumerate(caps):
+        for i in range(len(maps)):
+            cap = caps[i] if i < len(caps) else ""
+            cap_tex = rf"\\[1pt]{{\footnotesize {_latex_escape(cap)}}}" if cap else ""
             cells.append(
-                rf"\begin{{minipage}}[t]{{{cell_mm:.1f}mm}}\centering"
-                rf"\includegraphics[width=\linewidth]{{map{i}.pdf}}\\[1pt]"
-                rf"{{\footnotesize {_latex_escape(cap)}}}\end{{minipage}}%"
+                rf"\begin{{minipage}}[t]{{{cell_mm:.1f}mm}}\centering{boxed(i)}{cap_tex}\end{{minipage}}%"
             )
             cells.append(r"\hspace{2mm}")
             if (i + 1) % cols == 0:  # row break
@@ -182,6 +194,7 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
             r"\documentclass{article}",
             rf"\usepackage[paperwidth={paper_w:.0f}mm,paperheight={paper_h:.0f}mm,margin={margin_mm:.0f}mm]{{geometry}}",
             r"\usepackage{graphicx}",
+            (r"\usepackage{helvet}\renewcommand{\familydefault}{\sfdefault}" if sans else "%"),
             r"\setlength{\parindent}{0pt}\pagestyle{empty}",
             r"\begin{document}",
             title_tex + r"\noindent",
@@ -407,16 +420,39 @@ def _settings_with_mark_groups(settings: Optional[str], groups, tmpdir: Path) ->
     return str(path)
 
 
-def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None) -> tuple[str, Optional[int]]:
+def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
+                     title: Optional[str] = None, show_legend: Optional[bool] = None,
+                     drop_dash_bars: bool = False, clades_before_time_series: bool = False,
+                     matches_chart_seq_ids: Optional[Sequence[str]] = None) -> tuple[str, Optional[int]]:
     """Translate an acmacs-tal settings-v3 `.tal` into a tal-draw settings file.
     Returns (settings_path, image_size_or_None). Mirrors the `--tal` handling in
     the tal-signature-page CLI so the tree panel is rendered from the same config
-    AD uses."""
+    AD uses, with sig-page overrides matching AD's `layout-with-maps`:
+
+      * `title` / `show_legend` — title drawn top-left; no aa-at-pos legend;
+      * `drop_dash_bars` — AD's sig page disables the aa `dash-bar-aa-at` columns
+        (the `155E/156N…` colour bar), so drop them;
+      * `clades_before_time_series` — AD draws the clades column to the LEFT of the
+        time-series matrix on the sig page (tree-only puts it right);
+      * `matches_chart_seq_ids` — leaves whose antigen is in the chart, drawn as
+        AD's grey `matches-chart-antigen` dash-bar.
+    """
     from ae.tal.settings_v3 import load_tal
 
     schema, warnings = load_tal(str(tal_path), defines or {})
     for warning in warnings:
         print(f"  [tal] {warning}", file=sys.stderr)
+    if title is not None:
+        schema["title"] = title
+    if show_legend is not None:
+        schema["legend"] = {"show": show_legend}
+    if drop_dash_bars:
+        schema.pop("dash_bars", None)  # remove the aa colour bar (AD's sig page has none)
+    if clades_before_time_series:
+        schema["clades_before_time_series"] = True
+        schema["hz_section_labels"] = True  # draw section letters (A/B/C) on the right, like AD
+    if matches_chart_seq_ids:
+        schema["matches_chart_seq_ids"] = list(matches_chart_seq_ids)
     path = tmpdir / "tree-from-tal.json"
     path.write_text(json.dumps(schema), encoding="utf-8")
     size = int(schema["image_size"]) if "image_size" in schema else None
@@ -455,25 +491,36 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         if scale is None:
             print("  [sigp] no time-series window in .tal; antigens won't be date-coloured", file=_sys.stderr)
 
-        settings_path, tal_size = _tal_to_settings(tal, tmpdir, defines)
+        # Pass 1: a basic translation just to get draw-order leaf names from tal-draw
+        # (matches the rendered tree's order; avoids the libc++-hardening trap of
+        # Python tree-leaf iteration on 3.14).
+        names_settings, tal_size = _tal_to_settings(tal, tmpdir, defines)
         chart_obj = ae_backend.chart_v3.Chart(str(chart))
-        # draw-order leaf names from tal-draw (matches the rendered tree's order;
-        # avoids the libc++-hardening trap of Python tree-leaf iteration on 3.14)
-        leaf_names = SM.leaf_names_from_taldraw(tree, settings_path, TAL_DRAW, tmpdir)
+        leaf_names = SM.leaf_names_from_taldraw(tree, names_settings, TAL_DRAW, tmpdir)
         match = SM.match_leaf_names(leaf_names, chart_obj)
-        vp = list(viewport) if viewport else (SM.reset_viewport_from_ace(chart) or SM.viewport_from_layout(chart_obj))
-        styled = SM.build_section_styles(chart_obj, sections, match, scale, vp)
+        reset_vp, available_styles = SM.report_styles_from_ace(chart)
+        vp = list(viewport) if viewport else (reset_vp or SM.viewport_from_layout(chart_obj))
+        styled = SM.build_section_styles(chart_obj, sections, match, scale, vp, available_styles=available_styles)
         for s in styled:
             print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
 
         map_pdfs = render_section_maps_via_kateri(chart_obj, [s["name"] for s in styled], tmpdir / "maps", width=map_width)
 
-        tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size or tal_size or 1000, settings=settings_path)
+        # Pass 2: the final tree settings with AD sig-page overrides — title top-left,
+        # no aa-at-pos legend, no aa colour-bar dash columns, clades left of the matrix,
+        # and the grey matches-chart-antigen dash-bar for leaves whose antigen is in the chart.
+        matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
+        tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
+                                            drop_dash_bars=True, clades_before_time_series=True,
+                                            matches_chart_seq_ids=matched_seq_ids)
+        tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size or tal_size or 1000, settings=tree_settings)
 
-        # AD lays the section maps out 3 rows high -> columns = ceil(n / 3)
+        # AD lays the section maps out 3 rows high -> columns = ceil(n / 3).
+        # No captions (titles are inside each map), a black frame per map, sans text;
+        # the page title is drawn by the tree (above), not the composite.
         columns = math.ceil(len(map_pdfs) / 3)
-        compose_grid(tree_pdf, map_pdfs, output, captions=[s["title"] for s in styled],
-                     page_title=page_title, tree_caption=tree_caption, columns=columns)
+        compose_grid(tree_pdf, map_pdfs, output, captions=None,
+                     page_title=None, tree_caption=tree_caption, columns=columns, frame=True, sans=True)
         return Path(output)
     finally:
         if not keep_temp:

@@ -126,6 +126,7 @@ namespace ae::tal
         std::string first{};
         std::string last{};
         std::string label{};
+        std::string prefix{};  // section letter (AD "L": A, B, C…) drawn in the hz-section-marker column
     };
 
     struct TreeDrawParameters
@@ -168,8 +169,12 @@ namespace ae::tal
         std::map<std::string, CladeStyle> clade_styles{}; // clade name -> override
         std::vector<NodeMod> node_mods{};                 // select/apply mods, applied in order
         std::vector<HzSection> hz_sections{};             // horizontal section bands (left marker column)
+        bool hz_section_labels{false};                    // draw the section letters (A/B/C) + brackets in a right-edge marker column (AD hz-section-marker)
+        bool clades_before_time_series{false};            // draw the clades column LEFT of the time-series matrix (AD layout-with-maps); default = right (layout-tree-only)
+        std::vector<std::string> matches_chart_seq_ids{}; // leaves whose antigen is in the chart — drawn as AD's grey matches-chart-antigen dash-bar
         std::vector<DashBarAAAt> dash_bars{};             // per-leaf aa-at-position dash columns
         std::vector<MrcaLabel> mrca_labels{};             // curated on-tree labels at MRCA(first,last) nodes (draw-aa-transitions per-node)
+        bool mrca_labels_auto_place{false};               // auto-place mrca labels into whitespace (ignore per-label offsets), with collision avoidance + tether
     };
 
     // Render `tree` to a PDF whose height is `image_size` device units. The width is

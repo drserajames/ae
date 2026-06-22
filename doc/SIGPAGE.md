@@ -78,6 +78,38 @@ python3 -m ae.report.signature_page <report>                   # all discovered
 6. **Compose**: tree (left) + an R×C grid of captioned maps (right) via `pdflatex`, laid
    out **3 rows** high (`columns = ceil(n_sections / 3)`), as AD does.
 
+## AD-fidelity pass (2026-06-22)
+
+A round of visual diffing against the AD `sigp` reference (`sp/pdfs/<prefix>.…sp.pdf`)
+drove these fixes, mapped to AD's `conf/tal.json` `layout-with-maps` spec:
+
+| # | Issue | Fix | Layer |
+|---|-------|-----|-------|
+| 1 | Clade labels on wrong side | Draw the clades column **left** of the time-series matrix (`clades_before_time_series`; AD `layout-with-maps` vs `layout-tree-only`) | `draw-tree.cc` |
+| 2 | hz-section letters + grey "in map" dash | Render section letters **A/B/C** + brackets in a right-edge column (`hz_section_labels`); add the grey `matches-chart-antigen` dash-bar (`#808080`) from the matched-leaf list | `draw-tree.cc` |
+| 3 | Text between maps | Titles drawn inside each map (kateri `plot_title`); composite draws no captions | `signature_page.py` |
+| 4 | Section letter/clade title too big | Map title → 16px Helvetica | `section_maps.py` |
+| 5 | Missing black map border | Frame each map cell in a 0.5pt black box (kateri draws none) | `compose_grid` |
+| 6 | Gridlines too light | Darken kateri's grid default `0xFFCCCCCC → 0xFFB0B0B0` (renders ~grey 204, matching AD) | kateri `draw_on_pdf.dart` + `draw_on_canvas.dart` |
+| 7 | aa colour bar present | Drop the aa `dash-bar-aa-at` columns from the sig-page tree (AD disables them) | `signature_page.py` |
+| 8 | Fonts | Helvetica/sans for composite + map titles; title drawn top-left by the tree (like AD) | `compose_grid` + `section_maps.py` |
+
+The two layouts (`clades_before_time_series`, `hz_section_labels`, the grey dash, and the
+aa-column drop) are **flag-gated**, so tree-only rendering is unchanged.
+
+### Checking
+`python3 cc/tal/test/check-sigpage.py <ae.pdf> [<AD-reference.pdf>]` emits an AD-vs-ae
+montage (eyeball #1/#2/#3/#4/#8) plus automated probes for the data-independent items
+(#5 border, #6 gridline grey, #7 no aa legend, map-title size). Run against the AD
+reference `sp/pdfs/<prefix>.…sp.pdf` (the style/layout is data-independent, so the stale
+reference is a valid target for these).
+
+### Remaining (data-driven, not defects)
+- **Map count / grid columns** track the current `.tal`'s shown hz-sections (e.g. H1 = 6 → 2×3
+  vs the 2025 reference's 9 → 3×3).
+- **Date-colour skew** (ours bluer, AD greener) follows the `.tal` time-series window.
+- **Page aspect** is A4 landscape; AD's page is wider.
+
 ## What matches AD
 
 - Tree panel: rendered by `tal-draw` from the same `.tal` (continent-coloured time-series
