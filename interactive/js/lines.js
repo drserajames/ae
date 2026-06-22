@@ -389,10 +389,13 @@
       State.setShowNewVCM(on); syncNew();
     };
 
+    // Circle toggles use State.notify() (not just draw()) so map.js re-runs its
+    // circle-tied coverage outline (applyCoverageTo keys off IV.Lines.circleActive()).
+    // notify() also fires our own subscribed refresh()→draw(), so the overlay updates.
     box.querySelector("#lnCircTh").onchange = e => {
-      show.circRadius = e.target.checked ? "theoretical" : "empirical"; draw();
+      show.circRadius = e.target.checked ? "theoretical" : "empirical"; State.notify();
     };
-    box.querySelector("#lnCirc").onchange = e => { show.circ = e.target.value; draw(); };
+    box.querySelector("#lnCirc").onchange = e => { show.circ = e.target.value; State.notify(); };
   }
 
   // hint text is static + numeric (no user input), so innerHTML is safe here.
