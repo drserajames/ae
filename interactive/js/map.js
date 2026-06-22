@@ -397,8 +397,10 @@
     window.addEventListener("mouseup", () => { if (panDrag) { panDrag = null; setCursor(false); } });
     // v7 #1: a dblclick ON a point is S1's double-click-to-isolate (same #mapSvg node,
     // so stopPropagation can't shield it) — leave it alone; only reset on empty space.
+    // Key on [data-kind] (present on EVERY glyph), not [data-norm]: norm-less sera have
+    // no data-norm, so keying on it let a dblclick on such a serum fall through to reset.
     svg.addEventListener("dblclick", e => {
-      if (e.target.closest("[data-norm]")) return;
+      if (e.target.closest("[data-kind]")) return;
       e.preventDefault(); resetView();
     });
 
