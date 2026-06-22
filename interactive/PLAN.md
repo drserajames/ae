@@ -315,3 +315,27 @@ Coordination: Agent-SELECT defines `isolated` + `isolatedSerum()` first; map/tre
 consume it (coverage `singleSelectedSerum` → `isolatedSerum`). Verify: double-click a serum
 → only that serum highlighted (same-name antigen NOT), its lines/circle/coverage show; map
 coverage outlines render (pink + thicker black). Verify/commit/WHO/rAF rules as in v3.
+
+---
+
+# v9 — sixth feedback wave (10 fixes + 5 features)
+
+Diagnoses: F4 stress readout already exists (`map.js showStress`, bottom-left) but is
+occluded by the bottom legend (same cause as #9) → move to a visible corner. #5 double-click
+uses the **native `dblclick`** event (state.js) — unreliable in Safari; replace with manual
+detection (two clicks <~300ms on the same point).
+
+| Agent | Items |
+|-------|-------|
+| Agent-MAP | #1 gridlines behind points/error/conn lines (z-order); #9 reset/zoom buttons clear of bottom legend; **F1** draw points old→new by collection date, refs+vaccines on top; **F4** move stress readout to a non-occluded corner; #7 (shared) circle-tied coverage outline |
+| Agent-LINES | #2 new-since toggles mutually exclusive; #3 keep Overlays panel size stable when conn/error ticked; **#8** empirical-vs-theoretical serum-circle toggle (bundle has both radii); #7 circle-tied outline |
+| Agent-COLOUR | #10 stress colour bar: numeric values + start at 0; **F5** colour-by-stress-per-titre (per-point stress ÷ titre count); **F3** marker categories (reference/vaccine/serum/egg/reassortant) clickable like clade; **F2** map dblclick resets legend cycle |
+| Agent-SELECT | **#5** Safari double-click: replace native `dblclick` with manual detection (timestamp+target); #2 mutual-exclusion flags; F2 clear cycle on dblclick; F3 cycle for marker categories |
+| Agent-EXP | **#4** sera with >1 reference: export ALL homologous antigen indices (egg+cell), not just first; serum-circle algo takes min over them |
+| Agent-TREE | #6 verify J.2.5 clade-label placement (anchor on its clade) |
+
+#7 circle↔coverage: when a single serum + its circle is shown, titrated antigens get a
+slightly thicker outline — pink ≤4-fold of homologous, black >4-fold (report addendum style);
+reconcile with the existing `coverage` colorBy so it's driven by the shown circle, not only
+the colour mode. Coordination: #2/F2/F3/#5 span SELECT + LINES/COLOUR; #7 spans MAP+LINES
++COLOUR; #4 (EXP) feeds #7. Verify/commit/WHO/rAF rules as in v3.
