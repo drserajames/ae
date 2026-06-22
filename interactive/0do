@@ -15,10 +15,10 @@ Outputs go to <SSM>/interactive/ (with the report data, never the repo).
 Override the report dir with the SSM env var. The export itself runs under
 arm64 / Python-3.10 via run.sh; this driver only assembles the arguments.
 
-B/Victoria currently does not link (0 matched — its antigen names keep a bare
-"B/" prefix the tree tips lack), so its export fails; `all` builds H3 and H1
-and then fails on B/Vic until the exporter's name normalization is fixed.
-B/Yamagata is absent entirely: it has neither charts nor a tree in this report.
+All three subtypes link and build. B/Victoria uses the manually-built ASR tree
+(bvic.asr.after-2021.tjz) so branch-AA / colour-by-AA work; the bare-"B/" antigen
+prefix is normalised in the exporter. B/Yamagata is absent entirely: it has
+neither charts nor a tree in this report.
 """
 
 import sys, os, subprocess
@@ -40,7 +40,7 @@ SUBTYPES = {
              "dir": "h3-hi-guinea-pig-{lab}"},
     "h1":   {"slug": "h1",    "tree": "h1.asr.after-2021.tjz",   "subtype": "A(H1N1)", "assay": "HI",
              "dir": "h1-{lab}"},
-    "bvic": {"slug": "bvic",  "tree": "bvic.after-2021.tjz",     "subtype": "BV",      "assay": "HI",
+    "bvic": {"slug": "bvic",  "tree": "bvic.asr.after-2021.tjz", "subtype": "BV",      "assay": "HI",
              "dir": "bvic-{lab}"},
 }
 
