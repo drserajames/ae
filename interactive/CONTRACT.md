@@ -250,14 +250,18 @@ contracts that feature modules build on (rather than re-deriving) are:
   checkboxes. These are **emphasis keep-layers, not bold outlines**: `emphasis()`
   keeps antigens/tips whose semantic `new` matches (`showNewReport`→`new==1`,
   `showNewVCM`→`new>=1`) and dims the rest, via the panels' existing refresh.
-  **serum-coverage (v7 #4 / v8) — single source of truth:** `State.coverageActive()`
-  / `State.coverageSerum() → {i,norm}|null` / `State.coverageTitrated(norm)`.
-  Coverage is active when the Colour menu is in `"coverage"` mode AND a serum is
-  **isolated** (v8 — was "exactly one serum selected"; subject = `isolatedSerum()`).
-  `emphasis()`/`pointEmphasis()` keep norms titrated against that serum and dim
-  untitrated ones (norm-level, on both panels); panels read `coverageSerum()`/
-  `coverageTitrated()` (or `isolatedSerum()`) to draw the pink (≤4-fold) /
-  thicker-black (>4-fold) outlines on the titrated points — drop the pale tint.
+  **serum-scoped colour modes — coverage (v7 #4 / v8) + titre (v10):** the two
+  serum-scoped colorBy modes, `"coverage"` and `"titre"`, are driven by the
+  **isolated** serum (`isolatedSerum()`). When either is active, point opacity
+  follows **titration to that serum, overriding the isolation dimming**: an antigen
+  is foreground iff it has a titre to the serum, untitrated ones dim, and the serum
+  stays selected. The titration check is **per-antigen on the map**
+  (`logged[antigen.i][serum.i] != null`, so a cell antigen isn't kept by an egg
+  sibling's titre) and norm-level on the tree (no per-antigen index there). Coverage
+  also exposes the single-source-of-truth `State.coverageActive()` /
+  `State.coverageSerum() → {i,norm}|null` / `State.coverageTitrated(norm)` (these stay
+  **coverage-only**, for the pink ≤4-fold / black >4-fold outline consumers); `titre`
+  reuses the same titration but its fill comes from `Colour` (F1, independent of dim).
   **F2 legend cycle (per-attribute z-order tri-state):** generalises the v3 clade
   cycle to whichever attribute colorBy selects — `clade`, `continent`, or `aa`
   value. The legend (Agent-COLOUR) calls `State.cycleActive(value)` on the active
@@ -274,15 +278,19 @@ contracts that feature modules build on (rather than re-deriving) are:
   refresh; panels MAY additionally reorder points by `z` to draw *back* behind and
   *front* on top. Cycle state is keyed per `(attr, value)`, so it persists across
   colorBy switches and each mode only ever sees its own groups.
-  **F3 marker cycle (v9):** a second cyclable dimension, **always active**
+  **F3 marker cycle (v9 / v10 #4):** a second cyclable dimension, **always active**
   (independent of colorBy), for the marker-key categories `State.MARKERS =
-  ["reference","vaccine","serum","egg","reassortant"]`. Agent-COLOUR's legend
+  ["reference","vaccine","serum","egg","cell","reassortant"]`. Agent-COLOUR's legend
   marker swatches call `State.cycleMarker(cat)` and read `State.markerMode(cat)` /
   `State.markerZRank(cat)` (it's `cycleAttr("marker", cat)` under the hood).
   `emphasis()`/`pointEmphasis()` fold marker modes in exactly like the clade cycle —
   a *front* category pops, others fade; a point may match several categories (an egg
-  reference antigen). `"serum"` matches only serum glyphs (resolved by `kind` in
-  `pointEmphasis`), so fronting it dims every antigen and all tree tips.
+  reference antigen). Passage categories are matched **strictly on the authoritative
+  `pt`** (#4 v10 — egg = only `pt==='egg'`, cell = only `pt==='cell'`, etc.; no
+  passage-string/regex fallback), and **per-antigen on the map** (via the exact
+  antigen index in `pointEmphasis`), so a cell antigen never inherits an egg same-name
+  sibling's category; the tree uses each tip's own `passage`. `"serum"` matches only
+  serum glyphs (resolved by `kind`), so fronting it dims every antigen and all tips.
 - **`IV.Colour`** — colour API: `Colour.leaf(node)`, `Colour.antigen(ag)`,
   `Colour.cladeColor(c)`, `Colour.cladeLegend(c)`, `Colour.clades()`,
   `Colour.unmatched()`, honouring the active `State.colorBy`. Continent key:
