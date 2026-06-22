@@ -364,3 +364,20 @@ the colour mode. Coordination: #2/F2/F3/#5 span SELECT + LINES/COLOUR; #7 spans 
   same colour range as elsewhere; shown only when a single serum is selected.
 
 Verify/commit/WHO/rAF rules as in v3.
+
+---
+
+# v11 — titre/coverage emphasis (in flight)
+
+Problem: colour-by-`titre` (and `coverage`) require a single serum, set via double-click
+ISOLATION — but isolation's emphasis dims everything except the isolated point, so the
+titrated antigens (the focus) are faded.
+
+Fix (Agent-SELECT, `state.js`): when `colorBy ∈ {titre, coverage}` AND a single serum is
+active (`isolatedSerum()`), drive antigen opacity by titrated-vs-not, NOT by isolation:
+in `emphasis()`/`pointEmphasis()` an antigen returns `dim = !titrated(serum, antigen)`
+(`logged[a.i][serum.i] != null` → foreground; null → dim); the serum stays lifted; this
+overrides the isolation dim for just these two modes. Other modes unchanged. Agent-COLOUR
+confirms titre fill / coverage outline still apply to the now-foreground points.
+Verify: isolate serum → titre mode → titrated antigens full-opacity & titre-coloured,
+untitrated faded; same in coverage. (Status: spec'd, handed to Agent-SELECT, not yet done.)
