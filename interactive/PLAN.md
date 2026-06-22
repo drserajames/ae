@@ -367,7 +367,7 @@ Verify/commit/WHO/rAF rules as in v3.
 
 ---
 
-# v11 — titre/coverage emphasis (in flight)
+# v11 — titre/coverage emphasis (done)
 
 Problem: colour-by-`titre` (and `coverage`) require a single serum, set via double-click
 ISOLATION — but isolation's emphasis dims everything except the isolated point, so the
@@ -380,4 +380,7 @@ in `emphasis()`/`pointEmphasis()` an antigen returns `dim = !titrated(serum, ant
 overrides the isolation dim for just these two modes. Other modes unchanged. Agent-COLOUR
 confirms titre fill / coverage outline still apply to the now-foreground points.
 Verify: isolate serum → titre mode → titrated antigens full-opacity & titre-coloured,
-untitrated faded; same in coverage. (Status: spec'd, handed to Agent-SELECT, not yet done.)
+untitrated faded; same in coverage. (Status: DONE — implemented in `state.js` via
+`_serumScope()` + the titration branches in `emphasis()`/`pointEmphasis()`; gated on
+`colorBy ∈ {coverage, titre}` and `isolatedSerum()`, keying titration off
+`logged[a.i][serum.i] != null`.)
