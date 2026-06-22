@@ -426,7 +426,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // range is inset by a date-label band top and bottom (the tree fills that full range, the
     // title sits top-left within the top band). When there's no matrix, only the title needs
     // a small top band.
-    const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0) ? 0.055 * height : 0.0;
+    const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0) ? 0.045 * height : 0.0; // shallow band: AD's date pair is compact
     const double top_reserve = bottom_reserve > 0.0 ? bottom_reserve : (params.title.empty() ? 0.0 : 0.035 * height);
 
     // --- vertical (shared) + tree horizontal transforms ---
@@ -631,13 +631,14 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double sample_len = pdf.text_size("May 24", slot_fs).first;
         const double bottom_anchor_y = clockwise ? bottom + slot_fs * 0.6 : bottom + bottom_reserve * 0.9;
         const double top_anchor_y = clockwise ? top - sample_len - 2.0 : top - 2.0;
-        // AD draws the MONTH token top-anchored (outer edge of the date band) and the YEAR token
-        // bottom-anchored (just next to the matrix) as two separate tokens, so the years line up
-        // in a row adjacent to the matrix. Clockwise text reads downward from its anchor.
+        // AD draws month and year as a COMPACT PAIR near the matrix: the year token sits adjacent
+        // to the matrix edge and the month token one token-length + a small inter-line gap further
+        // out (month directly above year in the top band, below year in the bottom band). The
+        // years thus line up in a row by the matrix, the months a row just outside it. Clockwise
+        // text reads downward from its anchor (token occupies [anchor, anchor + text_width]).
         const double month_w = pdf.text_size("Sep", slot_fs).first;
         const double year_w = pdf.text_size("24", slot_fs).first;
-        const double band_top = top - top_reserve * 0.92;        // outer edge of the top date band
-        const double band_bottom = bottom + bottom_reserve * 0.92; // outer edge of the bottom date band
+        const double pair_gap = slot_fs * 0.35;                  // normal inter-line gap
         for (std::size_t i = 0; i < n_slots; ++i) {
             const std::string& slot_first = time_series.slots[i].first;     // "YYYY-MM-DD"
             const double lx = x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + xoff;
@@ -652,12 +653,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             if (slot_first.size() >= 7) { try { mm = std::stoi(slot_first.substr(5, 2)); } catch (...) { mm = 0; } }
             const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1] : slot_first.substr(5, 2);
             if (clockwise) {
-                // top band: month at the band's outer edge, year just above the matrix top
-                pdf.text_rotated(lx, band_top, mon, slot_fs, BLACK, 90.0);
+                // top band: year ends just above the matrix; month directly above year (tight pair)
                 pdf.text_rotated(lx, top - 2.0 - year_w, yy, slot_fs, BLACK, 90.0);
-                // bottom band: year just below the matrix, month at the band's outer edge
+                pdf.text_rotated(lx, top - 2.0 - year_w - pair_gap - month_w, mon, slot_fs, BLACK, 90.0);
+                // bottom band: year just below the matrix; month directly below year (tight pair)
                 pdf.text_rotated(lx, bottom + 2.0, yy, slot_fs, BLACK, 90.0);
-                pdf.text_rotated(lx, band_bottom - month_w, mon, slot_fs, BLACK, 90.0);
+                pdf.text_rotated(lx, bottom + 2.0 + year_w + pair_gap, mon, slot_fs, BLACK, 90.0);
             }
             else { // anticlockwise fallback: combined token
                 const std::string label = fmt::format("{} {}", mon, yy);
@@ -678,8 +679,6 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double dash_len = dash_col_w * 0.6;
         const double dash_lw = std::clamp(vstep * 0.6, 0.15, 2.5); // thin marks, AD-like white space
         const double pos_fs = std::clamp(dash_col_w * 0.5, 6.0, 11.0);
-        const double bottom = dev_y(layout.height + 0.5);
-        const double top = dev_y(0.5);
         for (std::size_t b = 0; b < params.dash_bars.size(); ++b) {
             const DashBarAAAt& bar = params.dash_bars[b];
             const double col_x = x_dash0 + (static_cast<double>(b) + 0.5) * dash_col_w;
