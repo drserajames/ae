@@ -236,7 +236,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const double lscale = (style && style->label_scale > 0.0) ? style->label_scale
                                     : (params.clades_label_scale > 0.0 ? params.clades_label_scale : 1.0);
             const int rot = style ? style->rotation_degrees : 90;
-            const double offx = style ? style->label_offset_x : 0.004;
+            const double offx = style ? style->label_offset_x : 0.002;
             const double offy = style ? style->label_offset_y : 0.0;
             clade_plan.push_back({k, std::move(kept), slot, 0, 0, longest, lscale, rot, offx, offy});
             clade_plan.back().first_v = clade_plan.back().bands.front().first_v;
@@ -531,18 +531,23 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     //     name label rotated clockwise (top-to-bottom), sized slot.width * per-clade scale. ---
     if (clade_w > 0.0 && !clade_plan.empty()) {
         const double slot_px = clade_slot_px > 0.0 ? clade_slot_px : clade_w / static_cast<double>(clade_max_slot + 2);
-        // AD arrowhead: filled triangle, base width 3px, length = width*2 (sharp). Scale gently.
-        const double ahw = std::clamp(slot_px * 0.22, 1.3, 3.0);  // arrowhead half-width
-        const double ahl = ahw * 4.0;                            // arrowhead length (sharp)
+        // Arrowhead: an ABSOLUTE size tied to page height, not slot_px, so every subtype gets the
+        // same head (H1's wide clade slot otherwise produced oversized heads vs H3). ~1.4px @1000.
+        const double ahw = std::clamp(0.0014 * height, 1.0, 2.2);  // arrowhead half-width
+        const double ahl = ahw * 3.5;                             // arrowhead length (sharp)
         const double line_to = ts_w > 0.0 ? x_ts0 : x_clade0;    // grey lines start at the matrix (AD horizontal_line)
         for (const auto& plan : clade_plan) {
             const Clade& clade = clade_sections[plan.rank];
             const double cx = x_clade0 + slot_px * (static_cast<double>(plan.slot) + 1.0); // AD pos_x
-            const double clade_fs = std::clamp(slot_px * plan.label_scale, 3.0, 20.0);      // label_size = slot.width * scale (AD)
-            // ONE arrow per clade spanning its whole extent (the AD reference shows a single
-            // bracket per clade, not one per fragment) — collapses the tiny-section clutter.
+            const double clade_fs = std::clamp(slot_px * plan.label_scale, 3.0, 14.0);      // label_size = slot.width * scale (AD), capped smaller
+            // ONE arrow per clade, spanning its LARGEST contiguous band (the AD reference brackets
+            // only the main block — not the whole first..last extent, which a stray distant
+            // section would over-stretch, e.g. H1 B(5a.1)). Collapses the tiny-section clutter too.
+            const CladeBand* main_band = &plan.bands.front();
+            for (const auto& b : plan.bands) if (b.size > main_band->size) main_band = &b;
+            const long ext_first = main_band->first_v, ext_last = main_band->last_v;
             {
-                const double y0 = dev_y(static_cast<double>(plan.first_v)), y1 = dev_y(static_cast<double>(plan.last_v));
+                const double y0 = dev_y(static_cast<double>(ext_first)), y1 = dev_y(static_cast<double>(ext_last));
                 // two faint GREY horizontal lines at the clade's top & bottom, from the matrix
                 // start across to the bracket arrow (AD horizontal_line, terminates at pos_x).
                 pdf.line(line_to, y0, cx, y0, GREY, 0.4);
@@ -557,8 +562,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 // label centred on the clade's whole vertical extent (AD vpos=middle), shifted by
                 // the per-clade offset (fractions of height); rotation 90 = clockwise (top->bottom),
                 // 0 = horizontal. Placed just right of the arrow.
-                const double center_y = dev_y(static_cast<double>(plan.first_v + plan.last_v) / 2.0) + plan.offset_y * height;
-                const double tx = cx + ahw + clade_fs * 0.45 + plan.offset_x * height;
+                const double center_y = dev_y(static_cast<double>(ext_first + ext_last) / 2.0) + plan.offset_y * height;
+                const double tx = cx + ahw + clade_fs * 0.2 + plan.offset_x * height; // just right of the arrow, not crossing the spine/rules
                 if (plan.rotation == 0) {
                     pdf.text(tx, center_y + clade_fs * 0.32, name, clade_fs, BLACK, /*center=*/false); // horizontal
                 }
@@ -576,8 +581,24 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double slot_w = ts_w / static_cast<double>(n_slots);
         const double top = dev_y(0.5);
         const double bottom = dev_y(layout.height + 0.5);
-        for (std::size_t i = 0; i <= n_slots; ++i) // separators
-            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, GREY, 0.3);
+        for (std::size_t i = 0; i <= n_slots; ++i) // separators (AD draws these a medium grey)
+            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, GREY50, 0.35);
+        // hz-section separators across the matrix (AD HzSections::add_separators_to_time_series:
+        // a grey rule above each section's first leaf and below its last leaf). Drawn behind the
+        // dashes, spanning the time-series matrix only.
+        if (!params.hz_sections.empty()) {
+            std::unordered_map<std::string, double> name_y;
+            name_y.reserve(layout.leaves.size());
+            for (const auto& ln : layout.leaves)
+                name_y.emplace(ln.name, ln.y);
+            const double hz_x1 = x_ts0 + ts_w;
+            for (const auto& section : params.hz_sections) {
+                if (const auto it = name_y.find(section.first); it != name_y.end())
+                    pdf.line(x_ts0, dev_y(it->second - 0.5), hz_x1, dev_y(it->second - 0.5), GREY, 0.4);
+                if (const auto it = name_y.find(section.last); it != name_y.end())
+                    pdf.line(x_ts0, dev_y(it->second + 0.5), hz_x1, dev_y(it->second + 0.5), GREY, 0.4);
+            }
+        }
         const double dash_w = std::clamp(vstep * 0.5, 0.15, 2.5); // thin marks (AD line_width 0.1) -> more white space
         for (const auto& node : layout.leaves) {
             const Leaf& leaf = tree.leaf(node_index_t{node.node});
@@ -607,28 +628,42 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double angle = clockwise ? 90.0 : -90.0;
         // perpendicular offset to centre the text band in the slot; the sign flips with rotation
         const double xoff = clockwise ? -slot_fs * 0.35 : slot_fs * 0.35;
-        // reading anchors: clockwise reads downward (start high), anticlockwise reads upward.
-        // Keep BOTH the top and bottom labels TIGHT to the matrix (AD): the top label ends just
-        // above the first row (anchor = top - its length), the bottom starts just below.
         const double sample_len = pdf.text_size("May 24", slot_fs).first;
         const double bottom_anchor_y = clockwise ? bottom + slot_fs * 0.6 : bottom + bottom_reserve * 0.9;
         const double top_anchor_y = clockwise ? top - sample_len - 2.0 : top - 2.0;
+        // AD draws the MONTH token top-anchored (outer edge of the date band) and the YEAR token
+        // bottom-anchored (just next to the matrix) as two separate tokens, so the years line up
+        // in a row adjacent to the matrix. Clockwise text reads downward from its anchor.
+        const double month_w = pdf.text_size("Sep", slot_fs).first;
+        const double year_w = pdf.text_size("24", slot_fs).first;
+        const double band_top = top - top_reserve * 0.92;        // outer edge of the top date band
+        const double band_bottom = bottom + bottom_reserve * 0.92; // outer edge of the bottom date band
         for (std::size_t i = 0; i < n_slots; ++i) {
             const std::string& slot_first = time_series.slots[i].first;     // "YYYY-MM-DD"
-            std::string label;
-            if (yearly) {
-                label = slot_first.substr(0, 4);
-            }
-            else {
-                const std::string yy = slot_first.size() >= 4 ? slot_first.substr(2, 2) : std::string{};
-                int mm = 0;
-                if (slot_first.size() >= 7) { try { mm = std::stoi(slot_first.substr(5, 2)); } catch (...) { mm = 0; } }
-                const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1] : slot_first.substr(5, 2);
-                label = fmt::format("{} {}", mon, yy);
-            }
             const double lx = x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + xoff;
-            pdf.text_rotated(lx, bottom_anchor_y, label, slot_fs, BLACK, angle);
-            pdf.text_rotated(lx, top_anchor_y, label, slot_fs, BLACK, angle);
+            if (yearly) {
+                const std::string yy4 = slot_first.substr(0, 4);
+                pdf.text_rotated(lx, bottom_anchor_y, yy4, slot_fs, BLACK, angle);
+                pdf.text_rotated(lx, top_anchor_y, yy4, slot_fs, BLACK, angle);
+                continue;
+            }
+            const std::string yy = slot_first.size() >= 4 ? slot_first.substr(2, 2) : std::string{};
+            int mm = 0;
+            if (slot_first.size() >= 7) { try { mm = std::stoi(slot_first.substr(5, 2)); } catch (...) { mm = 0; } }
+            const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1] : slot_first.substr(5, 2);
+            if (clockwise) {
+                // top band: month at the band's outer edge, year just above the matrix top
+                pdf.text_rotated(lx, band_top, mon, slot_fs, BLACK, 90.0);
+                pdf.text_rotated(lx, top - 2.0 - year_w, yy, slot_fs, BLACK, 90.0);
+                // bottom band: year just below the matrix, month at the band's outer edge
+                pdf.text_rotated(lx, bottom + 2.0, yy, slot_fs, BLACK, 90.0);
+                pdf.text_rotated(lx, band_bottom - month_w, mon, slot_fs, BLACK, 90.0);
+            }
+            else { // anticlockwise fallback: combined token
+                const std::string label = fmt::format("{} {}", mon, yy);
+                pdf.text_rotated(lx, bottom_anchor_y, label, slot_fs, BLACK, angle);
+                pdf.text_rotated(lx, top_anchor_y, label, slot_fs, BLACK, angle);
+            }
         }
     }
 
@@ -706,27 +741,25 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                     }
                 }
             }
-            // legend at the bottom: each position+aa label in its colour, stacked, reading
-            // upward. AD draws each label in the leaf's ACTUAL colour (colors.get(aa)) — so for a
-            // pos bar with a known aa, recolour the swatch from aa_color (the resolved map); fall
-            // back to the .tal label colour otherwise. (Bare position number when no legend.)
+            // legend at the TOP of each dash-bar column (in the top-reserve band, above the
+            // matrix) and HORIZONTAL: each position+aa label stacked, in its resolved aa colour
+            // (AD draws each label in colors.get(aa); h3_aabar_legend_top). Fall back to the .tal
+            // label colour, or a bare position number when no legend is present.
             const double leg_fs = std::clamp(dash_col_w * 0.42, 5.0, 9.0);
             if (!bar.legend.empty()) {
-                double ly = bottom + bottom_reserve * 0.96;
+                double ly = vmargin + leg_fs;                                       // top of the band, read downward
                 for (const auto& item : bar.legend) {
                     Color c = BLACK;
                     const auto resolved = item.aa ? aa_color.find(item.aa) : aa_color.end();
                     if (resolved != aa_color.end())
                         c = resolved->second;                                       // actual draw colour (AD)
                     else { try { if (!item.color.empty()) c = Color{item.color}; } catch (const std::exception&) {} }
-                    pdf.text_rotated(col_x + leg_fs * 0.35, ly, item.text, leg_fs, c, -90.0);
-                    ly -= pdf.text_size(item.text, leg_fs).first + leg_fs * 0.5;
+                    pdf.text(col_x, ly, item.text, leg_fs, c, /*center=*/true);
+                    ly += leg_fs * 1.25;
                 }
             }
             else if (bar.pos >= 1) {
-                const std::string pos_label = fmt::format("{}", bar.pos);
-                pdf.text_rotated(col_x + pos_fs * 0.35, bottom + bottom_reserve * 0.9, pos_label, pos_fs, BLACK, -90.0);
-                pdf.text_rotated(col_x + pos_fs * 0.35, top - 2.0, pos_label, pos_fs, BLACK, -90.0);
+                pdf.text(col_x, vmargin + pos_fs, fmt::format("{}", bar.pos), pos_fs, BLACK, /*center=*/true);
             }
         }
     }
@@ -766,7 +799,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const auto found = pos.find(idx);
         if (found == pos.end())
             continue; // node hidden / not in layout
-        const double label_fs = label.size > 0.0 ? label.size * height : font_size;
+        const double label_fs = label.size > 0.0 ? label.size * height * 0.85 : font_size; // ~0.85x to match AD vaccine-label size
         Color color = BLACK;
         if (!label.color.empty()) {
             try { color = Color{label.color}; } catch (const std::exception&) { }

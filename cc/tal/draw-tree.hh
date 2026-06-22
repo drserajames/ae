@@ -43,7 +43,7 @@ namespace ae::tal
         int rotation_degrees{90};              // label rotation (90 = clockwise / top-to-bottom, 0 = horizontal)
         double section_inclusion_tolerance{0.0}; // merge sections whose gap (leaf indices) <= this (AD make_sections)
         double section_exclusion_tolerance{0.0}; // drop sections whose size (leaves) <= this
-        double label_offset_x{0.004};          // label offset, fractions of height (AD label.offset default {0.004,0})
+        double label_offset_x{0.002};          // label offset, fractions of height (just right of the arrow)
         double label_offset_y{0.0};
     };
 

@@ -114,7 +114,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                     .rotation_degrees = static_cast<int>(get_double(entry["rotation_degrees"], 90.0)),
                     .section_inclusion_tolerance = get_double(entry["section_inclusion_tolerance"], 0.0),
                     .section_exclusion_tolerance = get_double(entry["section_exclusion_tolerance"], 0.0),
-                    .label_offset_x = entry["label_offset"].is_array() && entry["label_offset"].array().size() == 2 ? get_double(entry["label_offset"].array()[0], 0.004) : 0.004,
+                    .label_offset_x = entry["label_offset"].is_array() && entry["label_offset"].array().size() == 2 ? get_double(entry["label_offset"].array()[0], 0.002) : 0.002,
                     .label_offset_y = entry["label_offset"].is_array() && entry["label_offset"].array().size() == 2 ? get_double(entry["label_offset"].array()[1], 0.0) : 0.0});
         }
     }
