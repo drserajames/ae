@@ -186,7 +186,8 @@ plots raw layout coords).
 {
   "i": 3, "name": "...", "x": 0.1, "y": 0.2,   // x/y null if not positioned
   "norm": "THAILAND/8/2022",   // [v3] join key, normalised like antigens (F1)
-  "homologous": 0,             // [v3] index of the antigen sharing this norm, or null (F1)
+  "homologous": [0, 1, 304],   // [v9 #4] ALL antigen indices sharing this norm (egg+cell of the strain); [] if none
+  "homologous0": 0,            // [v9 #4] scalar back-compat alias = first homologous index, or null
   "passage": "SIAT1",          // [v6 #6] raw serum passage string (str(serum.passage()))
   "serum_id": "A9824",         // [v6 #6] serum.serum_id()
   "serum_species": "",         // [v6 #6] serum.serum_species() ("" if unset)
@@ -197,6 +198,12 @@ plots raw layout coords).
   }
 }
 ```
+
+> **`homologous` [v9 #4]** is now a **list** — a serum can have several homologous
+> antigens (e.g. the egg and cell passages of its strain; 14/26 H3-vidrl sera do).
+> Serum-circle / coverage consumers should fold over all of them (min radius, or
+> per-antigen), not just the first. `homologous0` keeps the old scalar (first index,
+> or null) for anything not yet migrated.
 
 ---
 

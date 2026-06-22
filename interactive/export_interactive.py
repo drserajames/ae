@@ -447,18 +447,20 @@ def load_chart(label, path, fallback, clade_acc, cont_acc, stats, clade_style="a
         nv = sum(1 for a in antigens if a["new"] == 2)
         print(f"[new] {label}: new=1 (vs report) {nr}, new=2 (vs VCM) {nv}", file=sys.stderr)
 
-    norm_to_first_ag = {}
+    norm_to_ags = {}
     for a in antigens:
-        norm_to_first_ag.setdefault(a["norm"], a["i"])
+        norm_to_ags.setdefault(a["norm"], []).append(a["i"])
     circles = serum_circle_data(proj, ns)            # F3, indexed by serum_no
     sera = []
     for j in range(ns):
         sr = ch.serum(j)
         x, y = xy(lay[na + j])
         snorm = norm_chart_name(sr.name())
+        homs = norm_to_ags.get(snorm, [])            # #4: all homologous (egg+cell of strain)
         sera.append({"i": j, "name": sr.name(), "x": x, "y": y,
                      "norm": snorm,
-                     "homologous": norm_to_first_ag.get(snorm),  # ag index or null
+                     "homologous": homs,                         # #4 all ag indices sharing norm
+                     "homologous0": homs[0] if homs else None,   # scalar alias (back-compat; first)
                      "passage": str(sr.passage()),               # #6
                      "serum_id": sr.serum_id(),                  # #6
                      "serum_species": sr.serum_species(),        # #6
