@@ -1,0 +1,4 @@
+# Generated viewers embed real WHO surveillance data inline — never commit them
+# to the ae repo. Outputs belong in the report folder (see README), not here.
+data/*
+!data/.gitkeep

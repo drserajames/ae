@@ -1,0 +1,139 @@
+#! /usr/bin/env python3 -B
+"""
+0do — build the interactive tree + antigenic-map viewer(s) for the seasonal report.
+
+Commands:
+  ./0do                 list commands
+  ./0do all             every subtype, all five WHO CCs (one HTML per subtype)
+  ./0do h3              H3 HI, all five WHO CCs in one switchable file
+  ./0do h1              H1, all centres
+  ./0do bvic            B/Victoria, all centres
+  ./0do h3-hi-vidrl     a single centre  (<subtype>-<lab>)
+  ./0do h3-hint-neut    H3 CDC-HINT + neut (Crick/NIID/VIDRL) in one file; CNIC dropped
+  ./0do <cmd> open      build, then open the result in the browser
+
+Outputs go to <SSM>/interactive/ (with the report data, never the repo).
+Override the report dir with the SSM env var. The export itself runs under
+arm64 / Python-3.10 via run.sh; this driver only assembles the arguments.
+
+All three subtypes link and build. B/Victoria uses the manually-built ASR tree
+(bvic.asr.after-2021.tjz) so branch-AA / colour-by-AA work; the bare-"B/" antigen
+prefix is normalised in the exporter. B/Yamagata is absent entirely: it has
+neither charts nor a tree in this report.
+"""
+
+import sys, os, subprocess
+from pathlib import Path
+
+# ======================================================================
+
+SSM = Path(os.environ.get("SSM", Path.home() / "AC/eu/ac/results/ssm/2026-0223-ssm"))
+OUT = SSM / "interactive"
+HERE = Path(__file__).resolve().parent
+LABS = ["cdc", "cnic", "crick", "niid", "vidrl"]   # the five WHO Collaborating Centres
+
+class BuildError(Exception):
+    "An export failed; reported cleanly (no traceback) and aborts the run."
+
+# Per-subtype recipe.  slug -> output/command prefix; dir -> chart dir pattern (per lab).
+SUBTYPES = {
+    "h3":   {"slug": "h3-hi", "tree": "h3.asr.after-2021.tjz",   "subtype": "A(H3N2)", "assay": "HI",
+             "dir": "h3-hi-guinea-pig-{lab}"},
+    "h1":   {"slug": "h1",    "tree": "h1.asr.after-2021.tjz",   "subtype": "A(H1N1)", "assay": "HI",
+             "dir": "h1-{lab}"},
+    "bvic": {"slug": "bvic",  "tree": "bvic.asr.after-2021.tjz", "subtype": "BV",      "assay": "HI",
+             "dir": "bvic-{lab}"},
+}
+
+# Hand-picked multi-chart viewers (mixed assays / chosen centres) — explicit
+# (dropdown-label, chart-dir) pairs rather than the uniform per-subtype recipe.
+COMBOS = {
+    "h3-hint-neut": {"tree": "h3.asr.after-2021.tjz", "subtype": "A(H3N2)", "assay": "HINT+neut",
+                     "out": "h3-hint-neut-all-centres.html",
+                     "charts": [("cdc-hint", "h3-hint-cdc"), ("crick-neut", "h3-neut-crick"),
+                                ("niid-neut", "h3-neut-niid"), ("vidrl-neut", "h3-neut-vidrl")]},
+}
+
+# ======================================================================
+
+def export(key: str, labs: list[str], open_after: bool) -> None:
+    "Run run.sh for one subtype over the given centres; one centre => single-centre file."
+    cfg = SUBTYPES[key]
+    single = len(labs) == 1
+    out = OUT / (f"{cfg['slug']}-{labs[0]}.html" if single else f"{cfg['slug']}-all-centres.html")
+    OUT.mkdir(parents=True, exist_ok=True)
+
+    cmd = [str(HERE / "run.sh"), "--tree", str(SSM / "tree" / cfg["tree"])]
+    for lab in labs:
+        cmd += ["--chart", f"{lab}={SSM / cfg['dir'].format(lab=lab) / 'styled.ace'}"]
+    cmd += ["--subtype", cfg["subtype"], "--assay", cfg["assay"], "--out", str(out)]
+
+    print(f">>> {key}: {'single centre ' + labs[0] if single else 'all centres'} -> {out.name}")
+    if subprocess.call(cmd) != 0:
+        raise BuildError(f"{key}: export failed (see output above)")
+    if open_after:
+        subprocess.check_call(["open", str(out)])
+
+# ----------------------------------------------------------------------
+
+def export_combo(name: str, open_after: bool) -> None:
+    "Build one viewer from an explicit list of (dropdown-label, chart-dir) pairs."
+    c = COMBOS[name]
+    out = OUT / c["out"]
+    OUT.mkdir(parents=True, exist_ok=True)
+
+    cmd = [str(HERE / "run.sh"), "--tree", str(SSM / "tree" / c["tree"])]
+    for label, cdir in c["charts"]:
+        cmd += ["--chart", f"{label}={SSM / cdir / 'styled.ace'}"]
+    cmd += ["--subtype", c["subtype"], "--assay", c["assay"], "--out", str(out)]
+
+    print(f">>> {name}: {len(c['charts'])} charts -> {out.name}")
+    if subprocess.call(cmd) != 0:
+        raise BuildError(f"{name}: export failed (see output above)")
+    if open_after:
+        subprocess.check_call(["open", str(out)])
+
+# ----------------------------------------------------------------------
+
+def all(open_after: bool) -> None:
+    "Every subtype, all five WHO CCs (one HTML per subtype). Aborts if any subtype fails."
+    for key in SUBTYPES:
+        export(key, LABS, open_after=False)
+    if open_after:
+        subprocess.check_call(["open", str(OUT)])
+
+# Build the command table: `all`, one per subtype (all centres), one per subtype+lab.
+COMMANDS = {"all": all}
+for _key, _cfg in SUBTYPES.items():
+    COMMANDS[_key] = (lambda o, key=_key: export(key, LABS, o))
+    for _lab in LABS:
+        COMMANDS[f"{_cfg['slug']}-{_lab}"] = (lambda o, key=_key, lab=_lab: export(key, [lab], o))
+for _name in COMBOS:
+    COMMANDS[_name] = (lambda o, name=_name: export_combo(name, o))
+
+# ======================================================================
+
+def usage() -> None:
+    print(__doc__.strip())
+    print("\nAvailable commands:\n  " + "\n  ".join(sorted(COMMANDS)))
+
+def main() -> None:
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        usage()
+        sys.exit(0)
+    name, *rest = args
+    open_after = "open" in rest
+    cmd = COMMANDS.get(name)
+    if cmd is None:
+        print(f"unknown command: {name!r}\n", file=sys.stderr)
+        usage()
+        sys.exit(1)
+    try:
+        cmd(open_after)
+    except BuildError as err:
+        print(f">>> {err}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
