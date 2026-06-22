@@ -194,8 +194,12 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                             const std::string cond = get_string(aa_arr[m]); // "156N" -> pos 156, aa 'N'
                             std::size_t p = 0;
                             while (p < cond.size() && std::isdigit(static_cast<unsigned char>(cond[p]))) ++p;
-                            if (p > 0 && p < cond.size())
-                                conds.push_back(AaCondition{std::stoi(cond.substr(0, p)), cond[p]});
+                            if (p > 0 && p < cond.size()) {
+                                try {
+                                    conds.push_back(AaCondition{std::stoi(cond.substr(0, p)), cond[p]});
+                                }
+                                catch (const std::exception&) {} // pathologically long position digits — skip the condition
+                            }
                         }
                     }
                     if (!conds.empty())

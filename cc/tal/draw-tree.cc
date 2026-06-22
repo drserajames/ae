@@ -670,7 +670,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const std::string yy = slot_first.size() >= 4 ? slot_first.substr(2, 2) : std::string{};
             int mm = 0;
             if (slot_first.size() >= 7) { try { mm = std::stoi(slot_first.substr(5, 2)); } catch (...) { mm = 0; } }
-            const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1] : slot_first.substr(5, 2);
+            const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1]
+                                     : (slot_first.size() >= 7 ? slot_first.substr(5, 2) : std::string{});
             if (clockwise) {
                 // top band: year ends just above the matrix; month directly above year (tight pair)
                 pdf.text_rotated(lx, top - 2.0 - year_w, yy, slot_fs, BLACK, 90.0);
@@ -718,11 +719,11 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 std::sort(ranked.begin(), ranked.end(), [](const auto& l, const auto& r) { return l.second > r.second; });
                 for (std::size_t r = 0; r < ranked.size(); ++r)
                     aa_color[ranked[r].first] = freq_palette[std::min(r, freq_palette.size() - 1)]; // frequency fallback
-                for (const auto& [aa, color_string] : bar.colors_by_aa) {                          // explicit override
+                aa_color['X'] = GREY;                                                               // AD: X -> grey (default, before explicit overrides)
+                for (const auto& [aa, color_string] : bar.colors_by_aa) {                          // explicit override (wins over the X default)
                     if (color_string == "transparent" || color_string == "TRANSPARENT") { hide_aa.insert(aa); aa_color.erase(aa); continue; }
                     try { aa_color[aa] = Color{color_string}; } catch (const std::exception&) {}
                 }
-                aa_color['X'] = GREY;                                                               // AD: X -> grey
                 for (const auto& node : layout.leaves) {
                     const Leaf& leaf = tree.leaf(node_index_t{node.node});
                     if (leaf.aa.size() <= pos0)
