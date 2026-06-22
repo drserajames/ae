@@ -156,6 +156,23 @@
     stressBar(colKey, Colour.stressPerScale(), "Σ error² ÷ titre count");
   }
 
+  // F1 (v10) colour key: log2(titre/10) vs the selected serum, sequential gradient.
+  function titreLegend(colKey) {
+    const s = Colour.coverageSerum();
+    if (!s) { footnoteInto(colKey, "select a serum (double-click its square) to colour by titre"); return; }
+    const sc = Colour.titreScale();
+    if (sc.min == null) { footnoteInto(colKey, "no titres against this serum"); return; }
+    const bar = document.createElement("div"); bar.className = "lg";
+    bar.innerHTML =
+      `${fmtStress(sc.min)} <span style="display:inline-block;width:130px;height:11px;border:1px solid rgba(0,0,0,.25);` +
+      `border-radius:2px;vertical-align:-1px;background:linear-gradient(to right,${sc.stops.join(",")})"></span> ${fmtStress(sc.max)}`;
+    colKey.appendChild(bar);
+    const g = document.createElement("div"); g.className = "lg";
+    g.innerHTML = `<span class="sw" style="background:${Colour.unmatched()}"></span>untitrated`;
+    colKey.appendChild(g);
+    footnoteInto(colKey, `log₂(titre/10) vs ${s.name}`);
+  }
+
   // F1 colour key: viridis gradient over the collection-date window, oldest →
   // newest (anchored at the page-generation date), with the dates labelled.
   function timeLegend(colKey) {
@@ -206,7 +223,8 @@
     const titleByMode = {
       clade: "Clade", continent: "Continent",
       aa: "AA " + (Colour.aaPositions().join("+") || "position?"),
-      stress: "Stress", stressn: "Stress / titre", time: "Collection date", coverage: "Serum coverage",
+      stress: "Stress", stressn: "Stress / titre", time: "Collection date",
+      coverage: "Serum coverage", titre: "Titre",
     };
     const colKey = section(titleByMode[State.colorBy] || "Colour");
 
@@ -216,6 +234,8 @@
       stressLegend(colKey);
     } else if (State.colorBy === "stressn") {
       stressnLegend(colKey);
+    } else if (State.colorBy === "titre") {
+      titreLegend(colKey);
     } else if (State.colorBy === "time") {
       timeLegend(colKey);
     } else if (State.colorBy === "coverage") {
@@ -396,16 +416,37 @@
     return { wrap, input };
   }
 
-  // F3: serum-coverage fill depends on which serum is selected, but a selection
-  // change only triggers panel refresh() (class toggles), not a re-fill. So when in
-  // coverage mode and the selected serum changes, re-render both panels + legend.
-  let lastCovSerum = undefined;
+  // F1: the "titre" colour option only makes sense for ONE serum, so add it when a
+  // single serum is resolved (like coverage's active condition) and remove it
+  // otherwise — falling back to clade if that mode was active.
+  function syncTitreOption() {
+    const sel = document.getElementById("colorBy");
+    if (!sel) return;
+    const has = Colour.hasTitre();
+    const opt = Array.prototype.find.call(sel.options, o => o.value === "titre");
+    if (has && !opt) {
+      addOption(sel, "titre", "titre");
+    } else if (!has && opt) {
+      opt.remove();
+      if (State.colorBy === "titre") {              // mode no longer valid → fall back
+        State.setColorBy("clade"); sel.value = "clade";
+        IV.Tree.render(); IV.Map.render(); renderLegend();
+      }
+    }
+  }
+
+  // F3/F1: serum-coverage fill and titre colour depend on which serum is selected,
+  // but a selection change only triggers panel refresh() (class toggles), not a
+  // re-fill. So keep the titre option in sync and, when in coverage/titre mode and
+  // the serum changes, re-render both panels + legend.
+  let lastSerum = undefined;
   State.subscribe(() => {
-    if (State.colorBy !== "coverage") { lastCovSerum = undefined; return; }
+    syncTitreOption();
+    if (State.colorBy !== "coverage" && State.colorBy !== "titre") { lastSerum = undefined; return; }
     const s = Colour.coverageSerum();
     const id = s ? s.i : null;
-    if (id !== lastCovSerum) {
-      lastCovSerum = id;
+    if (id !== lastSerum) {
+      lastSerum = id;
       IV.Tree.render(); IV.Map.render(); renderLegend();
     }
   });

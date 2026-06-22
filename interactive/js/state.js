@@ -226,24 +226,60 @@ window.IV = window.IV || {};
     // the clade cycle — a front category pops while the rest fade. A point can be
     // in several categories (e.g. an egg reference antigen). "serum" matches only
     // serum glyphs (resolved by kind in pointEmphasis), so it has no tree tips.
-    MARKERS: ["reference", "vaccine", "serum", "egg", "reassortant"],
+    MARKERS: ["reference", "vaccine", "serum", "egg", "cell", "reassortant"],
     cycleMarker(cat) { return State.cycleAttr("marker", cat); },
     markerMode(cat) { return State.attrMode("marker", cat); },
     markerZRank(cat) { return State.attrZRank("marker", cat); },
+    // #4 (v10): passage category is STRICT on the authoritative `pt` — egg = only
+    // pt==='egg', cell = only pt==='cell', reassortant = only pt==='reassortant'.
+    // No regex / passage-string fallback (that over-matches cell↔egg).
+    _passCat(pt) { return pt === "egg" || pt === "cell" || pt === "reassortant" ? pt : null; },
+    // Marker categories for ONE exact antigen (used by pointEmphasis on map/grid,
+    // which carry the antigen index). Per-antigen, so a cell antigen never inherits
+    // its egg same-name sibling's "egg" (#4).
+    _markersOfAntigen(i) {
+      const ch = IV.DATA && IV.DATA.charts[State.chartIdx];
+      const list = ch && ch.antigens;
+      if (!list) return null;
+      const a = (list[i] && list[i].i === i) ? list[i] : list.find(x => x.i === i);
+      if (!a) return null;
+      const arr = [];
+      if (a.ref) arr.push("reference");
+      if (a.vac) arr.push("vaccine");
+      const pc = State._passCat(a.pt); if (pc) arr.push(pc);
+      return arr;
+    },
+    // Marker categories for a NORM (the tree, which has no per-antigen index):
+    // ref/vaccine aggregate over the strain's antigens, but the passage category is
+    // the TREE TIP's own passage (strict per tip — not aggregated across siblings).
     _markerCache: null,
-    _markersOfNorm(norm) {                 // antigen marker categories for a norm
+    _markersOfNorm(norm) {
       if (!State._markerCache) {
-        const m = Object.create(null), d = IV.DATA;
-        if (d) (d.charts || []).forEach(ch => (ch.antigens || []).forEach(a => {
-          if (!a.norm) return;
-          const arr = m[a.norm] || (m[a.norm] = []);
-          const add = c => { if (arr.indexOf(c) < 0) arr.push(c); };
-          if (a.ref) add("reference");
-          if (a.vac) add("vaccine");
-          if (a.pt === "egg") add("egg");
-          if (a.pt === "reassortant") add("reassortant");
-        }));
-        State._markerCache = m;
+        const acc = Object.create(null), d = IV.DATA;
+        const get = n => acc[n] || (acc[n] = { ref: false, vac: false, pass: null });
+        if (d) {
+          (d.charts || []).forEach(ch => (ch.antigens || []).forEach(a => {
+            if (!a.norm) return;
+            const e = get(a.norm);
+            if (a.ref) e.ref = true;
+            if (a.vac) e.vac = true;
+          }));
+          (function walk(n) {
+            if (!n) return;
+            if (!(n.children && n.children.length)) {
+              if (n.norm && n.passage) { const e = get(n.norm); if (!e.pass) e.pass = n.passage; }
+            } else n.children.forEach(walk);
+          })(d.tree);
+        }
+        const out = Object.create(null);
+        for (const n in acc) {
+          const e = acc[n], arr = [];
+          if (e.ref) arr.push("reference");
+          if (e.vac) arr.push("vaccine");
+          const pc = State._passCat(e.pass); if (pc) arr.push(pc);
+          out[n] = arr;
+        }
+        State._markerCache = out;
       }
       return State._markerCache[norm] || null;
     },

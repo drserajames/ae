@@ -70,10 +70,12 @@
   let timeChart = -1;
 
   // ---- F3: serum-coverage colouring (active when a serum is selected) ---------
-  const COV_PINK = "#ff1493";          // titrated ≥ (homologous − 2 log2) outline
+  const COV_PINK = "#FFC0CB";          // #3: report-addendum "pink" (was #ff1493, too bright)
+  const COV_W = { pink: 1.5, black: 2.5 };  // #1: thin outlines (black still > pink)
   let covSig = null;                   // chart|serumIdx signature for the cache
   let covSerum = null;                 // the selected serum (active chart) or null
   let covThreshold = null;             // log2(homologous/10) − 2 for that serum
+  let titreMin = null, titreMax = null;   // F1: log2(titre/10) range vs the serum
 
   const Colour = {
     init(bundle) {
@@ -173,7 +175,7 @@
     // >4-fold (thicker, to flag the poorly-covered ones).
     hasCoverage() { const ch = IV.DATA && IV.DATA.charts[State.chartIdx]; return !!(ch && ch.logged && ch.sera && ch.sera.length); },
     coverageSerum() { ensureCoverage(); return covSerum; },
-    coverageWidths() { return { pink: 3, black: 4.5 }; },
+    coverageWidths() { return { pink: COV_W.pink, black: COV_W.black }; },
     // #7 (v9): returns the pink/black coverage outline for a titrated antigen
     // whenever a coverage serum is resolved (the isolated serum). NO colorBy gate —
     // the caller (map.js) applies it both in the `coverage` colour mode AND whenever
@@ -185,8 +187,18 @@
       const titer = titerOf(a.i);
       if (titer == null) return null;             // untitrated → no outline (it dims)
       const pink = covThreshold != null && titer >= covThreshold;   // ≤4-fold of homologous
-      return pink ? { stroke: COV_PINK, width: 3 } : { stroke: "#000", width: 4.5 };
+      return pink ? { stroke: COV_PINK, width: COV_W.pink } : { stroke: "#000", width: COV_W.black };
     },
+    // ---- F1 (v10): colour by log2(titre/10) vs the selected serum ------------
+    // Only meaningful when a single serum is resolved (coverageSerum()). Reuses the
+    // sequential gradient (SEQ, like stress) over the titre range against that serum.
+    hasTitre() { ensureCoverage(); return !!covSerum && titreMin != null; },
+    titreColor(titer) {
+      if (titer == null || titreMin == null) return UNMATCHED;
+      const span = titreMax - titreMin;
+      return seqColor(span > 0 ? (titer - titreMin) / span : 0.5);
+    },
+    titreScale() { ensureCoverage(); return { min: titreMin, max: titreMax, stops: SEQ.slice() }; },
     // true when coverage mode is showing and `norm`'s antigen was NOT titrated by the
     // selected serum — State.emphasis() folds this in so untitrated points dim (v7).
     coverageDim(norm) {
@@ -211,6 +223,7 @@
         case "time": { ensureTime(); return timeColorOf(lf.date); }
         // v7: bright clade colour for all; untitrated tips recede via emphasis dim
         case "coverage": { ensureCoverage(); return covSerum ? (lf.clade ? (cladeColor[lf.clade] || UNMATCHED) : UNMATCHED) : UNMATCHED; }
+        case "titre": { ensureCoverage(); return covSerum ? Colour.titreColor(titreByNorm(lf.norm)) : UNMATCHED; }
         default: return lf.clade ? (cladeColor[lf.clade] || UNMATCHED) : UNMATCHED;
       }
     },
@@ -223,6 +236,7 @@
         case "stressn": { ensureStress(); const s = stressPerByAg[a.i]; return s == null ? UNMATCHED : Colour.stressPerColor(s); }
         case "time": { ensureTime(); return timeColorOf(a.date); }
         case "coverage": { ensureCoverage(); return covSerum ? (a.clade ? (cladeColor[a.clade] || UNMATCHED) : UNMATCHED) : UNMATCHED; }
+        case "titre": { ensureCoverage(); return covSerum ? Colour.titreColor(titerOf(a.i)) : UNMATCHED; }
         default: return a.clade ? (cladeColor[a.clade] || UNMATCHED) : UNMATCHED;
       }
     },
@@ -372,12 +386,32 @@
       }
       covThreshold = (ht == null) ? null : ht - 2;
     }
+    // F1: log2(titre/10) range over antigens titrated by this serum (for the gradient)
+    titreMin = titreMax = null;
+    if (serum && ch.logged) {
+      for (let i = 0; i < ch.antigens.length; i++) {
+        const row = ch.logged[i];
+        const v = row ? row[serum.i] : null;
+        if (v == null) continue;
+        if (titreMin == null || v < titreMin) titreMin = v;
+        if (titreMax == null || v > titreMax) titreMax = v;
+      }
+    }
   }
   // logged titer of antigen index `ai` against the selected serum (null = untitrated)
   function titerOf(ai) {
     const ch = IV.DATA.charts[State.chartIdx];
     const lr = ch.logged && ch.logged[ai];
     return lr ? lr[covSerum.i] : null;
+  }
+  // best (highest) logged titre over a norm's antigens vs the serum (for tree tips)
+  function titreByNorm(norm) {
+    const ch = IV.DATA.charts[State.chartIdx];
+    const idxs = ch.norm_to_ag && ch.norm_to_ag[norm];
+    if (!idxs || !idxs.length) return null;
+    let best = null;
+    for (const ai of idxs) { const t = titerOf(ai); if (t != null && (best == null || t > best)) best = t; }
+    return best;
   }
 
   // interpolate the SEQ stops at t in [0,1] -> "#rrggbb"
