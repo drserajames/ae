@@ -438,11 +438,14 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const auto dev_y = [&](double vertical_offset) { return vmargin + top_reserve + (vertical_offset - 0.5) * vstep; };
 
     const double line_width = std::clamp(vstep * 0.5, 0.2, 3.0);
-    // AD renders the tree branches as thin hairlines — about the stroke weight of the tip
-    // strain-name glyphs at zoom, NOT the fat bars `line_width` produced. A dedicated weight
-    // for the three tree-edge draws only (leaf edge, inode edge, vertical connector); clade
-    // arrows/spines, time-series separators, hz-lines and dash marks keep their own widths.
-    const double tree_line_width = std::clamp(vstep * 0.15, 0.1, 0.6);
+    // AD draws tree branches at vertical_step()*0.5 with NO lower floor, so a branch is always
+    // half the row pitch and white gaps remain between adjacent leaves. A fixed floor (e.g. 0.1)
+    // is fatal here: for these dense report trees vstep is ~0.01pt, so a floor forces the line
+    // ~10x the row pitch and adjacent leaf edges merge into solid black blocks (burying the tip
+    // names). Match AD: half the pitch, capped only at the top, no meaningful floor. Used for the
+    // three tree-edge draws only (leaf edge, inode edge, vertical connector); clade arrows/spines,
+    // time-series separators, hz-lines and dash marks keep their own widths.
+    const double tree_line_width = std::min(vstep * 0.5, 1.0);
     const double font_size = std::clamp(vstep * 0.8, 3.0, 14.0);
 
     ae::draw::CairoPdf pdf{output, width, height};
@@ -557,10 +560,17 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 // start across to the bracket arrow (AD horizontal_line, terminates at pos_x).
                 pdf.line(line_to, y0, cx, y0, GREY, 0.4);
                 pdf.line(line_to, y1, cx, y1, GREY, 0.4);
-                // vertical double-arrow spine with FILLED triangular heads (AD double_arrow)
-                pdf.line(cx, y0, cx, y1, BLACK, 0.6);
-                pdf.filled_triangle(cx, y0, cx - ahw, y0 + ahl, cx + ahw, y0 + ahl, BLACK); // top head (up)
-                pdf.filled_triangle(cx, y1, cx - ahw, y1 - ahl, cx + ahw, y1 - ahl, BLACK); // bottom head (down)
+                // vertical double-arrow spine with FILLED triangular heads (AD double_arrow).
+                // The spine runs only between the two arrowhead BASES, so the tips are pure
+                // triangle apexes with no line poking through to the point. For a band shorter
+                // than two full heads the head length is capped to half the band so the two heads
+                // meet base-to-base at the centre (points still at the extremes), instead of
+                // overlapping into an inward-pointing bowtie; no spine is drawn in that case.
+                const double head_len = std::min(ahl, (y1 - y0) * 0.5);
+                if (y1 - head_len > y0 + head_len)
+                    pdf.line(cx, y0 + head_len, cx, y1 - head_len, BLACK, 0.6);
+                pdf.filled_triangle(cx, y0, cx - ahw, y0 + head_len, cx + ahw, y0 + head_len, BLACK); // top head (up)
+                pdf.filled_triangle(cx, y1, cx - ahw, y1 - head_len, cx + ahw, y1 - head_len, BLACK); // bottom head (down)
             }
             {
                 const std::string name = clade_display_for(clade.name);
@@ -586,11 +596,13 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double slot_w = ts_w / static_cast<double>(n_slots);
         const double top = dev_y(0.5);
         const double bottom = dev_y(layout.height + 0.5);
-        for (std::size_t i = 0; i <= n_slots; ++i) // separators (AD draws these a medium grey)
-            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, GREY50, 0.35);
+        // Grey horizontal rules must sit BEHIND the vertical slot separators (AD draws the
+        // verticals on top). So emit the hz-section separators FIRST, then the verticals over
+        // them. (The per-clade top/bottom grey rules are already emitted earlier, in the clades
+        // block above, so they too render behind these verticals.)
         // hz-section separators across the matrix (AD HzSections::add_separators_to_time_series:
-        // a grey rule above each section's first leaf and below its last leaf). Drawn behind the
-        // dashes, spanning the time-series matrix only.
+        // a grey rule above each section's first leaf and below its last leaf), spanning the
+        // time-series matrix only.
         if (!params.hz_sections.empty()) {
             std::unordered_map<std::string, double> name_y;
             name_y.reserve(layout.leaves.size());
@@ -604,6 +616,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                     pdf.line(x_ts0, dev_y(it->second + 0.5), hz_x1, dev_y(it->second + 0.5), GREY, 0.4);
             }
         }
+        for (std::size_t i = 0; i <= n_slots; ++i) // vertical separators, drawn OVER the horizontals (AD medium grey)
+            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, GREY50, 0.35);
         const double dash_w = std::clamp(vstep * 0.5, 0.15, 2.5); // thin marks (AD line_width 0.1) -> more white space
         for (const auto& node : layout.leaves) {
             const Leaf& leaf = tree.leaf(node_index_t{node.node});
@@ -750,8 +764,14 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             // (AD draws each label in colors.get(aa); h3_aabar_legend_top). Fall back to the .tal
             // label colour, or a bare position number when no legend is present.
             const double leg_fs = std::clamp(dash_col_w * 0.42, 5.0, 9.0);
+            // The legend sits just ABOVE the bar top (AD), not at the very top of the page — the
+            // old vmargin anchor left a big gap (the date-label band). Anchor the block so its last
+            // label ends a small gap above the bar top (= dev_y(0.5)), then draw downward as before.
+            const double bar_top = dev_y(0.5);
+            const double leg_gap = leg_fs * 0.6;
             if (!bar.legend.empty()) {
-                double ly = vmargin + leg_fs;                                       // top of the band, read downward
+                const double block_height = static_cast<double>(bar.legend.size()) * leg_fs * 1.25;
+                double ly = std::max(vmargin + leg_fs, bar_top - block_height - leg_gap); // clamp so it never runs off the top
                 for (const auto& item : bar.legend) {
                     Color c = BLACK;
                     const auto resolved = item.aa ? aa_color.find(item.aa) : aa_color.end();
@@ -763,7 +783,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 }
             }
             else if (bar.pos >= 1) {
-                pdf.text(col_x, vmargin + pos_fs, fmt::format("{}", bar.pos), pos_fs, BLACK, /*center=*/true);
+                pdf.text(col_x, bar_top - leg_gap - pos_fs * 0.5, fmt::format("{}", bar.pos), pos_fs, BLACK, /*center=*/true);
             }
         }
     }
