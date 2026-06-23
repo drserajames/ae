@@ -1018,67 +1018,78 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             if (!params.title.empty()) mark_box(gx0, gy0, 0.18 * width, mrca_fs * 1.6);
             for (const auto& b : text_label_boxes) mark_box(b[0], b[1], b[2] - b[0], b[3] - b[1]);
 
-            // Phase 1 — boxes. Place each label in the LOCAL whitespace just LEFT of its branch
-            // and (by preference) a touch BELOW it — the nearest free spot, so the leader is SHORT
-            // (short local leaders rarely reach far enough to cross one another). Boxes never
-            // overlap (box_free + mark_box). Processed in branch-y order for deterministic phase 2.
-            std::sort(anchors.begin(), anchors.end(), [](const Anchor& a, const Anchor& b) { return a.ny < b.ny; });
-            const double gap0 = mrca_fs * 0.35; // small gap so the leader hugs the label
-            const int MV = std::min(GY, 200);
-            for (const auto& a : anchors) {
-                const double fs = a.fs, lineh = fs * 1.18, th = a.nlines * lineh, tw = a.tw, mid_x = a.mid_x, mid_y = a.ny;
-                double bx = std::max(gx0, mid_x - gap0 - tw), by = std::clamp(mid_y + fs * 0.2, gy0, gy1 - th), bc = 1e18;
-                for (int vo = 0; vo <= MV; ++vo) {
-                    for (int dir = 1; dir >= -1; dir -= 2) { // search downward first, then upward
-                        if (vo == 0 && dir == -1) continue;
-                        const double ry = dir > 0 ? mid_y + vo * cell : mid_y - th - vo * cell;
-                        if (ry < gy0 || ry + th > gy1) continue;
-                        for (int sd = 0; sd < 2; ++sd) { // 0 = left of branch (preferred), 1 = right (still left of tips)
-                            for (int ho = 0; ho <= GX; ++ho) {
-                                const double rx = sd == 0 ? mid_x - gap0 - tw - ho * cell : mid_x + gap0 + ho * cell;
-                                if (sd == 0 ? rx < gx0 : rx + tw > gx1) break;
-                                if (!box_free(rx, ry, tw, th)) continue;
-                                const double cost = std::hypot(mid_x - (rx + tw * 0.5), mid_y - (ry + th * 0.5)) + (dir < 0 ? th * 2.0 : 0.0) + (sd == 1 ? tw * 1.5 : 0.0) + ho * cell * 0.1;
-                                if (cost < bc) { bc = cost; bx = rx; by = ry; }
-                                break; // nearest free x at this row/side
-                            }
-                        }
+            // --- non-greedy global label placement ---
+            // For each label, enumerate candidate boxes in the local whitespace AROUND its branch
+            // (clear of tree ink, never right of the tips), over many directions and a range of
+            // leader lengths. Then assign labels to candidates by coordinate descent over a GLOBAL
+            // cost = leader length + mild left/down bias + heavy penalties for label-label overlap
+            // and leader-leader crossing. Allowing longer leaders and re-choosing each label
+            // against the others (non-greedy) reproduces AD's hand layout far better than a greedy
+            // nearest-free scan (which collapsed dense trees into a crossing-prone left column).
+            const double PI = 3.14159265358979323846;
+            struct Cand { double x0, y0, x1, y1, cx, cy, base; };
+            const auto attach_pt = [](double ax, double ay, double x0, double y0, double x1, double y1, double& cx, double& cy) {
+                const double bx = (x0 + x1) * 0.5, by = (y0 + y1) * 0.5, ddx = ax - bx, ddy = ay - by;
+                if (std::abs(ddy) >= std::abs(ddx)) { cx = bx; cy = ddy < 0.0 ? y0 : y1; } // branch above -> top-middle, below -> bottom-middle
+                else { cy = by; cx = ddx < 0.0 ? x0 : x1; }                                 // ~level -> facing side
+            };
+            std::vector<std::vector<Cand>> cands(anchors.size());
+            const double rmax = 0.24 * height; // leaders may be moderately long if that avoids crossings
+            for (std::size_t i = 0; i < anchors.size(); ++i) {
+                const double fs = anchors[i].fs, lineh = fs * 1.18, th = anchors[i].nlines * lineh, tw = anchors[i].tw;
+                const double ax = anchors[i].mid_x, ay = anchors[i].ny;
+                for (double r = mrca_fs * 0.7; r <= rmax; r += mrca_fs * 0.7) {
+                    const int na = 20;
+                    for (int k = 0; k < na; ++k) {
+                        const double ang = -PI + (2.0 * PI) * k / na;
+                        const double cxr = ax + r * std::cos(ang), cyr = ay + r * std::sin(ang);
+                        const double x0 = cxr - tw * 0.5, y0 = cyr - th * 0.5;
+                        if (x0 + tw > gx1) continue;             // never right of the tips
+                        if (!box_free(x0, y0, tw, th)) continue; // clear of tree ink / strain labels / title
+                        double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);
+                        double base = std::hypot(ax - cx, ay - cy);   // leader length
+                        if (cxr > ax) base += (cxr - ax) * 1.0;       // prefer the AD-style left of the branch
+                        if (cyr < ay) base += (ay - cyr) * 0.5;       // prefer at/below the branch
+                        cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, base});
                     }
                 }
-                mark_box(bx, by, tw, th);
-                done.push_back({mid_x, mid_y, bx, by, fs, bx, bx + tw, by, by + th, bx, by, a.nlines, a.text, a.color});
-            }
-            // Phase 2 — leaders. Every box is now reserved in occ; route each leader to the branch
-            // and pick the attach point (top/bottom/left/right middle, slope-preferred) whose line
-            // crosses nothing — no other box, no tree ink, no earlier leader. Mark the chosen
-            // leader into occ so later leaders avoid it too.
-            const auto seg_mark = [&](double xa, double ya, double xb, double yb) {
-                const double len = std::hypot(xb - xa, yb - ya);
-                const int n = std::max(4, static_cast<int>(len / (cell * 0.5)));
-                for (int i = 0; i <= n; ++i) { const double t = static_cast<double>(i) / n; occ[static_cast<std::size_t>(row(ya + (yb - ya) * t)) * GX + col(xa + (xb - xa) * t)] = 1; }
-            };
-            const auto leader_bad = [&](double xa, double ya, double xb, double yb, const Placed& self) {
-                const double len = std::hypot(xb - xa, yb - ya);
-                const int n = std::max(4, static_cast<int>(len / (cell * 0.5)));
-                for (int i = 0; i <= n; ++i) {
-                    const double t = static_cast<double>(i) / n, x = xa + (xb - xa) * t, y = ya + (yb - ya) * t;
-                    if (std::hypot(x - xa, y - ya) < cell * 2.0) continue;                  // near the branch (wedge base)
-                    if (x >= self.x0 && x <= self.x1 && y >= self.y0 && y <= self.y1) continue; // its own box
-                    if (occ[static_cast<std::size_t>(row(y)) * GX + col(x)]) return true;
+                if (cands[i].empty()) { // dense fallback: clamp just left of the branch
+                    const double x0 = std::clamp(ax - mrca_fs - tw, gx0, gx1 - tw), y0 = std::clamp(ay - th * 0.5, gy0, gy1 - th);
+                    double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);
+                    cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, std::hypot(ax - cx, ay - cy)});
                 }
-                return false;
+                std::sort(cands[i].begin(), cands[i].end(), [](const Cand& a, const Cand& b) { return a.base < b.base; });
+                if (cands[i].size() > 56) cands[i].resize(56);
+            }
+            const auto segs_cross = [](double ax, double ay, double bx, double by, double cx, double cy, double dx, double dy) {
+                const auto o = [](double px, double py, double qx, double qy, double rx, double ry) { const double v = (qy - py) * (rx - qx) - (qx - px) * (ry - qy); return v < 0.0 ? -1 : (v > 0.0 ? 1 : 0); };
+                return o(ax, ay, bx, by, cx, cy) != o(ax, ay, bx, by, dx, dy) && o(cx, cy, dx, dy, ax, ay) != o(cx, cy, dx, dy, bx, by);
             };
-            struct AP { double x, y; };
-            for (auto& p : done) {
-                const double bcx = (p.x0 + p.x1) * 0.5, bcy = (p.y0 + p.y1) * 0.5, ddx = p.nx - bcx, ddy = p.ny - bcy;
-                const AP top{bcx, p.y0}, bot{bcx, p.y1}, lef{p.x0, bcy}, rig{p.x1, bcy};
-                std::array<AP, 4> order;
-                if (std::abs(ddy) >= std::abs(ddx)) order = ddy < 0.0 ? std::array<AP, 4>{{top, lef, rig, bot}} : std::array<AP, 4>{{bot, lef, rig, top}};
-                else order = ddx < 0.0 ? std::array<AP, 4>{{lef, top, bot, rig}} : std::array<AP, 4>{{rig, top, bot, lef}};
-                AP chosen = order[0];
-                for (const auto& ap : order) { if (!leader_bad(p.nx, p.ny, ap.x, ap.y, p)) { chosen = ap; break; } }
-                p.cx = chosen.x; p.cy = chosen.y;
-                seg_mark(p.nx, p.ny, chosen.x, chosen.y);
+            std::vector<int> choice(anchors.size(), 0);
+            const double W_OVL = 1.0e6, W_CROSS = 3.0 * height; // overlap ~forbidden; crossing strongly penalised
+            const auto total_for = [&](std::size_t i, int ci) {
+                const Cand& a = cands[i][ci];
+                double c = a.base;
+                for (std::size_t j = 0; j < anchors.size(); ++j) {
+                    if (j == i) continue;
+                    const Cand& b = cands[j][choice[j]];
+                    if (a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1) c += W_OVL;
+                    if (segs_cross(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy)) c += W_CROSS;
+                }
+                return c;
+            };
+            for (int pass = 0; pass < 16; ++pass) { // coordinate descent: re-choose each label vs the others until stable
+                bool improved = false;
+                for (std::size_t i = 0; i < anchors.size(); ++i) {
+                    int best = choice[i]; double bestc = total_for(i, best);
+                    for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) { const double c = total_for(i, ci); if (c < bestc - 1e-6) { bestc = c; best = ci; } }
+                    if (best != choice[i]) { choice[i] = best; improved = true; }
+                }
+                if (!improved) break;
+            }
+            for (std::size_t i = 0; i < anchors.size(); ++i) {
+                const Cand& c = cands[i][choice[i]];
+                done.push_back({anchors[i].mid_x, anchors[i].ny, c.x0, c.y1, anchors[i].fs, c.x0, c.x1, c.y0, c.y1, c.cx, c.cy, anchors[i].nlines, anchors[i].text, anchors[i].color});
             }
         }
         else {
