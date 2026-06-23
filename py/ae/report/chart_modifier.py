@@ -70,6 +70,7 @@ class ChartModifier (conference_data_base.ConferenceData):
         for clade_style_name, clade_style_data in self.semantic_styles_clades().items():
             # print(f">>>> {clade_style_name} {clade_style_data}", file=sys.stderr)
             semantic.clade.style(chart=self.chart, style_name=clade_style_name, data=clade_style_data, legend_style=self.legend_style(), priority=back_clades_priority,
+                                 antigen_fill_opacity=self.antigen_fill_opacity(),
                                  ) # mark_sequenced={"fill": "yellow", "outline": "red", "rais": True})
             back_clades_priority += 10
         clades_priority = self.style_priority("clades")
@@ -116,7 +117,7 @@ class ChartModifier (conference_data_base.ConferenceData):
         self.populate_with_prestyles()
         self.add_serology_style()
         semantic.older_than.style(chart=self.chart, priority=self.style_priority("-o6m-grey"))
-        semantic.continent.style(chart=self.chart, priority=self.style_priority("-continent"))
+        semantic.continent.style(chart=self.chart, priority=self.style_priority("-continent"), antigen_fill_opacity=self.antigen_fill_opacity())
         semantic.pale.style(chart=self.chart, priority=self.style_priority("-pale"))
         self.style_new_compared_to(chart=self.chart, number_of_previous_charts=len(self.previous_charts()), first_priority=self.style_priority("-new"))
         semantic.time_series.style(chart=self.chart, time_series=self.time_series(),

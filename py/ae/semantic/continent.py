@@ -1,6 +1,7 @@
 import sys
 import ae_backend
 from ae.utils.org import org_table_to_dict
+from .clade import with_opacity
 
 # ======================================================================
 
@@ -60,7 +61,7 @@ sContinentStyle = {
         """)
     }
 
-def style(chart: ae_backend.chart_v3.Chart, name: str = "-continent", test_only: bool = True, raise_: bool = False, style_type: str = "normal", priority: int = 1000) -> set[str]:
+def style(chart: ae_backend.chart_v3.Chart, name: str = "-continent", test_only: bool = True, raise_: bool = False, style_type: str = "normal", priority: int = 1000, antigen_fill_opacity: float = 1.0) -> set[str]:
     style = chart.styles()[name]
     style.priority = priority
     if test_only:
@@ -68,7 +69,7 @@ def style(chart: ae_backend.chart_v3.Chart, name: str = "-continent", test_only:
     else:
         reference_selector = {}
     for modifier in sContinentStyle[style_type]:
-        style.add_modifier(selector={"C9": modifier["continent"], **reference_selector}, fill=modifier["color"], outline="black", raise_=raise_, only="antigens")
+        style.add_modifier(selector={"C9": modifier["continent"], **reference_selector}, fill=with_opacity(modifier["color"], antigen_fill_opacity), outline="black", raise_=raise_, only="antigens")
     return set([name])
 
 # ======================================================================
