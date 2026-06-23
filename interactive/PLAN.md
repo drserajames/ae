@@ -384,3 +384,30 @@ untitrated faded; same in coverage. (Status: DONE — implemented in `state.js` 
 `_serumScope()` + the titration branches in `emphasis()`/`pointEmphasis()`; gated on
 `colorBy ∈ {coverage, titre}` and `isolatedSerum()`, keying titration off
 `logged[a.i][serum.i] != null`.)
+
+# v12 — titre-mode fixes (done, commit 57fdebc)
+
+Four issues raised against the `titre` colour mode + the pan button:
+
+1. **Other sera faded.** In titre mode the isolated-serum emphasis dimmed every serum but
+   the selected one. Fix (`state.js` `pointEmphasis` + `map.js` `serumColour`): in titre
+   mode the OTHER sera stay full-opacity and are painted **black** (their strain colour is
+   meaningless when colouring by titre-vs-the-selected-serum), so the user can see them and
+   double-click to switch the titre serum. The selected serum keeps the blue `.sel` ring.
+   (`serumKeep` in the isolated branch, gated `kind==="serum" && colorBy==="titre"`.)
+2. **Legend range drifted per serum.** The titre gradient/legend range was recomputed over
+   the selected serum's titres, so it rescaled on every switch. Fix (`colour.js`
+   `ensureTitreRange()`): the range is now **GLOBAL** over the whole chart (every antigen ×
+   serum), cached per chart, so it's identical for every serum and titres are comparable
+   across them. `titreColor`/`titreScale`/`hasTitre` use the global range; the old per-serum
+   `titreMin/titreMax` in `ensureCoverage` were removed.
+3. **Pan-button arrows off-centre.** The inline `<svg>` icon sat on the text baseline →
+   rode high-and-left in the 26×26 button. Fix (`map.js`): flex-centre the button.
+4. **New since report/VCM did nothing under titre.** The isolated-serum emphasis branch
+   returned early and never reached the `_coreEmphasis` new-since keep layer. Fix
+   (`state.js`): in the serum-scoped branch, when `_newActive()` the titrated foreground is
+   narrowed to **titrated AND new** (`_newMatch`). Also benefits `coverage` (same path).
+
+Verify (headless-Chrome/CDP): titre range stable `[2,9]` across two different sera; 0/25
+other sera dimmed and 26/26 painted black; new-since dims 183/265 titrated; pan btn
+`display:flex`. (Status: DONE — pushed to `drserajames/ae-interactive`, draft PR #6 → main.)

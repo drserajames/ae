@@ -262,6 +262,13 @@ contracts that feature modules build on (rather than re-deriving) are:
   `State.coverageSerum() → {i,norm}|null` / `State.coverageTitrated(norm)` (these stay
   **coverage-only**, for the pink ≤4-fold / black >4-fold outline consumers); `titre`
   reuses the same titration but its fill comes from `Colour` (F1, independent of dim).
+  **v12 refinements (don't regress):** in `titre` mode the OTHER sera are kept
+  full-opacity and painted **black** (`map.js serumColour`) so the user can switch the
+  titre serum — only the rest of the points follow titration dimming; the titre
+  gradient/legend range is **GLOBAL over the whole chart** (`Colour.ensureTitreRange()`),
+  identical for every serum (NOT per-serum), so titres are comparable across sera; and the
+  new-since toggle narrows the titrated foreground to **titrated AND new** under both
+  serum-scoped modes (the isolated branch now consults `_newActive()`/`_newMatch()`).
   **F2 legend cycle (per-attribute z-order tri-state):** generalises the v3 clade
   cycle to whichever attribute colorBy selects — `clade`, `continent`, or `aa`
   value. The legend (Agent-COLOUR) calls `State.cycleActive(value)` on the active
