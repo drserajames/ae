@@ -21,6 +21,12 @@ class ConferenceData(dirs.VcmDirs):
         "datetime.date of the meeting"
         raise NotImplementedError("override in the report's conference_data.py")
 
+    def antigen_fill_opacity(self) -> float:
+        """Opacity (0..1) for antigen *fill* colours on the maps; outlines stay
+        solid, sera unaffected. Default 1.0 = fully opaque (previous behaviour).
+        Override in a report's conference_data.py to relieve overplotting."""
+        return 1.0
+
     def time_series(self):
         "ae.utils.time_series.TimeSeriesRange covering the report window"
         raise NotImplementedError("override in the report's conference_data.py")
