@@ -84,13 +84,18 @@ def discover_prefixes(report_dir) -> list[str]:
 DEFAULT_OUTPUT_SUBDIR = "sp/pdfs-ae"
 
 
-def make_one(report_dir, prefix: str, *, tree_infix: str = "asr.after-2021", tal_infix: str = "after-2021",
+# Tree-file infix per subtype (AD sp/0do: h1/h3 trees are .asr.after-2021, B trees .after-2021).
+TREE_INFIX = {"h1": "asr.after-2021", "h3": "asr.after-2021", "bvic": "after-2021", "byam": "after-2021"}
+
+
+def make_one(report_dir, prefix: str, *, tree_infix: Optional[str] = None, tal_infix: str = "after-2021",
              chart_name: str = "styled.ace", output_subdir: str = DEFAULT_OUTPUT_SUBDIR, title: Optional[str] = None,
              map_width: float = 800.0, defines: Optional[dict] = None) -> Path:
     """Build one signature page for `prefix`, returning the output PDF path."""
     report_dir = Path(report_dir)
     subtype = SUBTYPE[parse_prefix(prefix)[0]][0]
-    tree = report_dir / "tree" / f"{subtype}.{tree_infix}.tjz"
+    infix = tree_infix or TREE_INFIX.get(subtype, "asr.after-2021")  # per-subtype default
+    tree = report_dir / "tree" / f"{subtype}.{infix}.tjz"
     tal = report_dir / "tree" / f"{subtype}.{tal_infix}.tal"
     chart = report_dir / prefix / chart_name
     for needed in (tree, tal, chart):
@@ -98,26 +103,38 @@ def make_one(report_dir, prefix: str, *, tree_infix: str = "asr.after-2021", tal
             raise SignaturePageError(f"{prefix}: missing {needed}")
     out_dir = report_dir / output_subdir
     out_dir.mkdir(parents=True, exist_ok=True)
-    output = out_dir / f"{prefix}.{tree_infix}.sp.pdf"
+    output = out_dir / f"{prefix}.{infix}.sp.pdf"
     return make_section_signature_page(tree, chart, tal, output, page_title=title or title_for(prefix),
                                        map_width=map_width, defines=defines)
 
 
-def make_all(report_dir, prefixes: Optional[list[str]] = None, **kwargs) -> dict[str, object]:
+def make_all(report_dir, prefixes: Optional[list[str]] = None, retries: int = 1, **kwargs) -> dict[str, object]:
     """Build signature pages for `prefixes` (default: all discovered). Returns
     ``{prefix: output_path_or_exception}`` and never aborts the whole run on one
-    failure (mirrors AD building each lab independently)."""
+    failure (mirrors AD building each lab independently). Each lab is retried up to
+    `retries` times on a transient kateri stall (a fresh kateri instance per try)."""
     report_dir = Path(report_dir)
     prefixes = prefixes or discover_prefixes(report_dir)
     results: dict[str, object] = {}
     for prefix in prefixes:
-        try:
-            out = make_one(report_dir, prefix, **kwargs)
-            print(f"[sigp] {prefix} -> {out}", file=sys.stderr)
-            results[prefix] = out
-        except Exception as err:  # keep going; record the failure
-            print(f"[sigp] {prefix} FAILED: {err}", file=sys.stderr)
-            results[prefix] = err
+        last_err = None
+        for attempt in range(retries + 1):
+            try:
+                out = make_one(report_dir, prefix, **kwargs)
+                print(f"[sigp] {prefix} -> {out}" + (f" (attempt {attempt + 1})" if attempt else ""), file=sys.stderr)
+                results[prefix] = out
+                break
+            except SignaturePageError as err:  # transient (e.g. kateri stall) — retry
+                last_err = err
+                print(f"[sigp] {prefix} attempt {attempt + 1} failed: {err}", file=sys.stderr)
+            except Exception as err:  # input/path error — don't retry
+                last_err = err
+                break
+        else:
+            pass
+        if prefix not in results:
+            print(f"[sigp] {prefix} FAILED: {last_err}", file=sys.stderr)
+            results[prefix] = last_err
     return results
 
 
@@ -126,7 +143,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("report_dir", help="report working dir (e.g. ac/results/ssm/2026-0223-ssm)")
     parser.add_argument("--prefix", action="append", dest="prefixes", metavar="PREFIX",
                         help="per-lab chart dir to render (repeatable; default: all discovered)")
-    parser.add_argument("--tree-infix", default="asr.after-2021", help="tree basename infix (default asr.after-2021)")
+    parser.add_argument("--tree-infix", default=None,
+                        help="tree basename infix (default: per subtype — h1/h3 asr.after-2021, B after-2021)")
     parser.add_argument("--tal-infix", default="after-2021", help=".tal basename infix (default after-2021)")
     parser.add_argument("--output-subdir", default=DEFAULT_OUTPUT_SUBDIR,
                         help=f"output dir under report_dir (default {DEFAULT_OUTPUT_SUBDIR}; "

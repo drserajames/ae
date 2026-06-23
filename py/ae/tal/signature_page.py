@@ -281,7 +281,7 @@ def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 80
 
 
 def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *, width: float = 800.0,
-                                   connect_timeout: float = 90.0) -> list:
+                                   connect_timeout: float = 90.0, map_timeout: float = 60.0) -> list:
     """Render one antigenic-map PDF per named style in `chart`, in a single kateri
     session (chart sent once; `set_style`+`pdf` looped). `chart` is an
     `ae_backend.chart_v3.Chart` already carrying the section styles (built by
@@ -324,7 +324,12 @@ def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *
             K.communicator.send_chart(chart)
             paths = []
             for i, name in enumerate(style_names):
-                pdf_bytes = await K.communicator.get_pdf(style=name, width=width)
+                # Per-map timeout: kateri occasionally stalls mid-session; fail this render
+                # fast (the report driver then moves on to the next lab) rather than hang.
+                try:
+                    pdf_bytes = await asyncio.wait_for(K.communicator.get_pdf(style=name, width=width), timeout=map_timeout)
+                except asyncio.TimeoutError:
+                    raise SignaturePageError(f"kateri stalled rendering map {i} ({name}) after {map_timeout:.0f}s")
                 out = out_dir / f"map-{i:02d}.pdf"
                 out.write_bytes(pdf_bytes)
                 paths.append(out)
@@ -334,6 +339,11 @@ def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *
             server.close()
             if direct is not None and direct.returncode is None:
                 direct.terminate()
+            elif app_bundle is not None:
+                # the GUI app was launched detached via `open`, so quit() may not reach a
+                # stalled instance; kill the one bound to our (unique) socket so a lingering
+                # window can't block the next render (the cascade that fails a driver run).
+                subprocess.run(["pkill", "-f", socket_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             shutil.rmtree(socket_dir, ignore_errors=True)
 
     return asyncio.run(_run())
