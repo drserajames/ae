@@ -937,9 +937,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         // AD draws these small, grey (all-nodes label colour grey30) and MONOSPACE, with a
         // tether (leader line) to the branch. Slightly smaller than before to match AD.
         const double mrca_fs = 0.0095 * height; // AD draw-aa-transitions default label scale ~0.01
-        struct Placed { double nx, ny, tx, ty, fs, x0, x1, y0, y1; std::string text; Color color; };
+        struct Placed { double nx, ny, tx, ty, fs, x0, x1, y0, y1, cx, cy; int nlines; std::string text; Color color; };
+        // split an aa-transition label into its substitutions (one per line) so doubles/triples
+        // stack vertically (AD style); the box is then max-token-wide and nlines tall.
+        const auto split_ws = [](const std::string& s) { std::vector<std::string> out; std::string cur; for (char c : s) { if (c == ' ') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } } else cur += c; } if (!cur.empty()) out.push_back(cur); if (out.empty()) out.push_back(s); return out; };
         // resolve each curated label to its anchor (the MRCA branch point) + text metrics
-        struct Anchor { double nx, ny, mid_x, fs, tw, off_x, off_y; std::string text; Color color; };
+        struct Anchor { double nx, ny, mid_x, fs, tw, off_x, off_y; int nlines; std::string text; Color color; };
         std::vector<Anchor> anchors;
         for (const auto& label : params.mrca_labels) {
             const auto fi = leaf_by_name.find(label.first);
@@ -960,8 +963,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const double nx = dev_x(found->second.first), ny = dev_y(found->second.second); // branch (node) point
             double mid_x = nx; // tether target = the MIDDLE of the node's horizontal edge (AD)
             { node_index_t self{*node}; if (*self != root) { const auto pp = pos.find(*tree.parent(self)); if (pp != pos.end()) mid_x = 0.5 * (dev_x(pp->second.first) + nx); } }
-            const double tw = pdf.text_size(label.text, fs).first;
-            anchors.push_back({nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, label.text, color});
+            const auto toks = split_ws(label.text);
+            double tw = 0.0;
+            for (const auto& t : toks) tw = std::max(tw, pdf.text_size(t, fs).first);
+            anchors.push_back({nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color});
         }
 
         std::vector<Placed> done;
@@ -974,9 +979,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             // left side and a short tether), reserving each placed box so labels never overlap.
             const double gx0 = margin, gx1 = dev_x(max_cum);                 // tree band (left of the matrix)
             const double gy0 = vmargin + top_reserve, gy1 = height - vmargin - bottom_reserve;
-            const double cell = std::max(mrca_fs * 0.6, 1.0);
-            const int GX = std::clamp(static_cast<int>((gx1 - gx0) / cell), 1, 1200);
-            const int GY = std::clamp(static_cast<int>((gy1 - gy0) / cell), 1, 1600);
+            const double cell = std::max(mrca_fs * 0.33, 0.6); // fine grid: find the small inter-clade whitespace pockets near branches
+            const int GX = std::clamp(static_cast<int>((gx1 - gx0) / cell), 1, 2600);
+            const int GY = std::clamp(static_cast<int>((gy1 - gy0) / cell), 1, 3400);
             std::vector<unsigned char> occ(static_cast<std::size_t>(GX) * static_cast<std::size_t>(GY), 0);
             const auto col = [&](double x) { return std::clamp(static_cast<int>((x - gx0) / (gx1 - gx0) * GX), 0, GX - 1); };
             const auto row = [&](double y) { return std::clamp(static_cast<int>((y - gy0) / (gy1 - gy0) * GY), 0, GY - 1); };
@@ -1013,59 +1018,67 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             if (!params.title.empty()) mark_box(gx0, gy0, 0.18 * width, mrca_fs * 1.6);
             for (const auto& b : text_label_boxes) mark_box(b[0], b[1], b[2] - b[0], b[3] - b[1]);
 
-            // Per-label placement: each label goes just LEFT of its branch and, by preference,
-            // BELOW it (downward-sloping tether). We take the nearest free spot whose tether to
-            // the branch midpoint crosses no already-placed tether or label box, so leader lines
-            // never touch. `tlines` is a second grid holding the placed tethers + label boxes;
-            // tethers may cross tree ink (unavoidable) but not each other.
-            std::vector<unsigned char> tlines(static_cast<std::size_t>(GX) * static_cast<std::size_t>(GY), 0);
-            const auto seg_each = [&](double xa, double ya, double xb, double yb, auto&& fn) {
-                const double len = std::hypot(xb - xa, yb - ya);
-                const int n = std::max(2, static_cast<int>(len / (cell * 0.5)) + 1);
-                for (int i = 0; i <= n; ++i) { const double t = static_cast<double>(i) / n; fn(row(ya + (yb - ya) * t), col(xa + (xb - xa) * t)); }
-            };
-            const auto seg_hits = [&](double xa, double ya, double xb, double yb) { bool h = false; seg_each(xa, ya, xb, yb, [&](int r, int c) { if (tlines[static_cast<std::size_t>(r) * GX + c]) h = true; }); return h; };
-            const auto seg_mark = [&](double xa, double ya, double xb, double yb) { seg_each(xa, ya, xb, yb, [&](int r, int c) { tlines[static_cast<std::size_t>(r) * GX + c] = 1; }); };
-            const auto attach = [](double mid_x, double mid_y, double rx, double ry, double tw, double fs, double& cx, double& cy) {
-                const double cmidx = rx + tw * 0.5, cmidy = ry + fs * 0.5, ddx = mid_x - cmidx, ddy = mid_y - cmidy;
-                if (std::abs(ddy) >= std::abs(ddx)) { cx = cmidx; cy = ddy < 0.0 ? ry : ry + fs; } // branch above -> top, below -> bottom
-                else { cy = cmidy; cx = ddx < 0.0 ? rx : rx + tw; }                                 // ~level -> facing side
-            };
+            // Phase 1 — boxes. Place each label in the LOCAL whitespace just LEFT of its branch
+            // and (by preference) a touch BELOW it — the nearest free spot, so the leader is SHORT
+            // (short local leaders rarely reach far enough to cross one another). Boxes never
+            // overlap (box_free + mark_box). Processed in branch-y order for deterministic phase 2.
             std::sort(anchors.begin(), anchors.end(), [](const Anchor& a, const Anchor& b) { return a.ny < b.ny; });
-            const double gap0 = mrca_fs * 0.5;
+            const double gap0 = mrca_fs * 0.35; // small gap so the leader hugs the label
             const int MV = std::min(GY, 200);
-            // find the nearest free box LEFT of and (by preference) BELOW the branch. When
-            // avoid_tethers, also require the tether not to cross a placed tether/label.
-            const auto find_spot = [&](double mid_x, double mid_y, double tw, double fs, bool avoid_tethers, double& out_rx, double& out_ry) -> bool {
-                double bc = 1e18; bool found = false;
+            for (const auto& a : anchors) {
+                const double fs = a.fs, lineh = fs * 1.18, th = a.nlines * lineh, tw = a.tw, mid_x = a.mid_x, mid_y = a.ny;
+                double bx = std::max(gx0, mid_x - gap0 - tw), by = std::clamp(mid_y + fs * 0.2, gy0, gy1 - th), bc = 1e18;
                 for (int vo = 0; vo <= MV; ++vo) {
-                    for (int dir = 1; dir >= -1; dir -= 2) { // downward first, then upward
+                    for (int dir = 1; dir >= -1; dir -= 2) { // search downward first, then upward
                         if (vo == 0 && dir == -1) continue;
-                        const double ry = dir > 0 ? mid_y + vo * cell : mid_y - fs - vo * cell;
-                        for (int ho = 0; ho <= GX; ++ho) {
-                            const double rx = mid_x - gap0 - tw - ho * cell; // left of the branch only
-                            if (rx < gx0) break;
-                            if (!box_free(rx, ry, tw, fs)) continue;
-                            if (avoid_tethers) { double cx, cy; attach(mid_x, mid_y, rx, ry, tw, fs, cx, cy); if (seg_hits(mid_x, mid_y, cx, cy)) continue; }
-                            const double cost = std::hypot(mid_x - (rx + tw * 0.5), mid_y - (ry + fs * 0.5)) + (dir < 0 ? fs * 4.0 : 0.0) + ho * cell * 0.1;
-                            if (cost < bc) { bc = cost; out_rx = rx; out_ry = ry; found = true; }
-                            break; // nearest free x at this row
+                        const double ry = dir > 0 ? mid_y + vo * cell : mid_y - th - vo * cell;
+                        if (ry < gy0 || ry + th > gy1) continue;
+                        for (int sd = 0; sd < 2; ++sd) { // 0 = left of branch (preferred), 1 = right (still left of tips)
+                            for (int ho = 0; ho <= GX; ++ho) {
+                                const double rx = sd == 0 ? mid_x - gap0 - tw - ho * cell : mid_x + gap0 + ho * cell;
+                                if (sd == 0 ? rx < gx0 : rx + tw > gx1) break;
+                                if (!box_free(rx, ry, tw, th)) continue;
+                                const double cost = std::hypot(mid_x - (rx + tw * 0.5), mid_y - (ry + th * 0.5)) + (dir < 0 ? th * 2.0 : 0.0) + (sd == 1 ? tw * 1.5 : 0.0) + ho * cell * 0.1;
+                                if (cost < bc) { bc = cost; bx = rx; by = ry; }
+                                break; // nearest free x at this row/side
+                            }
                         }
                     }
                 }
-                return found;
+                mark_box(bx, by, tw, th);
+                done.push_back({mid_x, mid_y, bx, by, fs, bx, bx + tw, by, by + th, bx, by, a.nlines, a.text, a.color});
+            }
+            // Phase 2 — leaders. Every box is now reserved in occ; route each leader to the branch
+            // and pick the attach point (top/bottom/left/right middle, slope-preferred) whose line
+            // crosses nothing — no other box, no tree ink, no earlier leader. Mark the chosen
+            // leader into occ so later leaders avoid it too.
+            const auto seg_mark = [&](double xa, double ya, double xb, double yb) {
+                const double len = std::hypot(xb - xa, yb - ya);
+                const int n = std::max(4, static_cast<int>(len / (cell * 0.5)));
+                for (int i = 0; i <= n; ++i) { const double t = static_cast<double>(i) / n; occ[static_cast<std::size_t>(row(ya + (yb - ya) * t)) * GX + col(xa + (xb - xa) * t)] = 1; }
             };
-            for (const auto& a : anchors) {
-                const double tw = a.tw, fs = a.fs, mid_x = a.mid_x, mid_y = a.ny;
-                double rx = std::max(gx0, mid_x - gap0 - tw), ry = std::min(gy1 - fs, mid_y + fs * 0.3);
-                if (!find_spot(mid_x, mid_y, tw, fs, true, rx, ry)) // prefer a non-crossing tether...
-                    find_spot(mid_x, mid_y, tw, fs, false, rx, ry); // ...but never overlap a box
-                const double tx = rx, y0 = ry, ty = y0 + fs;
-                mark_box(tx, y0, tw, fs); // reserve the box for later label boxes
-                for (int r = row(y0); r <= row(y0 + fs); ++r) for (int c = col(tx); c <= col(tx + tw); ++c) tlines[static_cast<std::size_t>(r) * GX + c] = 1; // and for later tethers
-                double cx, cy; attach(mid_x, mid_y, tx, y0, tw, fs, cx, cy);
-                seg_mark(mid_x, mid_y, cx, cy);
-                done.push_back({mid_x, mid_y, tx, ty, fs, tx, tx + tw, y0, ty, a.text, a.color});
+            const auto leader_bad = [&](double xa, double ya, double xb, double yb, const Placed& self) {
+                const double len = std::hypot(xb - xa, yb - ya);
+                const int n = std::max(4, static_cast<int>(len / (cell * 0.5)));
+                for (int i = 0; i <= n; ++i) {
+                    const double t = static_cast<double>(i) / n, x = xa + (xb - xa) * t, y = ya + (yb - ya) * t;
+                    if (std::hypot(x - xa, y - ya) < cell * 2.0) continue;                  // near the branch (wedge base)
+                    if (x >= self.x0 && x <= self.x1 && y >= self.y0 && y <= self.y1) continue; // its own box
+                    if (occ[static_cast<std::size_t>(row(y)) * GX + col(x)]) return true;
+                }
+                return false;
+            };
+            struct AP { double x, y; };
+            for (auto& p : done) {
+                const double bcx = (p.x0 + p.x1) * 0.5, bcy = (p.y0 + p.y1) * 0.5, ddx = p.nx - bcx, ddy = p.ny - bcy;
+                const AP top{bcx, p.y0}, bot{bcx, p.y1}, lef{p.x0, bcy}, rig{p.x1, bcy};
+                std::array<AP, 4> order;
+                if (std::abs(ddy) >= std::abs(ddx)) order = ddy < 0.0 ? std::array<AP, 4>{{top, lef, rig, bot}} : std::array<AP, 4>{{bot, lef, rig, top}};
+                else order = ddx < 0.0 ? std::array<AP, 4>{{lef, top, bot, rig}} : std::array<AP, 4>{{rig, top, bot, lef}};
+                AP chosen = order[0];
+                for (const auto& ap : order) { if (!leader_bad(p.nx, p.ny, ap.x, ap.y, p)) { chosen = ap; break; } }
+                p.cx = chosen.x; p.cy = chosen.y;
+                seg_mark(p.nx, p.ny, chosen.x, chosen.y);
             }
         }
         else {
@@ -1074,7 +1087,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             for (const auto& a : anchors) {
                 const double tx = a.nx + a.off_x * width;
                 const double ty = a.ny + a.off_y * height + a.fs * 0.3;
-                placed.push_back({a.nx, a.ny, tx, ty, a.fs, tx, tx + a.tw, ty - a.fs, ty, a.text, a.color});
+                placed.push_back({a.nx, a.ny, tx, ty, a.fs, tx, tx + a.tw, ty - a.fs, ty, tx, ty - a.fs * 0.5, a.nlines, a.text, a.color});
             }
             std::sort(placed.begin(), placed.end(), [](const Placed& a, const Placed& b) { return a.y0 < b.y0; });
             for (auto& p : placed) {
@@ -1092,16 +1105,14 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             }
         }
         for (const auto& p : done) {
-            // tether to the MIDDLE of the branch (p.nx,p.ny); the attach point on the text box
-            // depends on the slope (AD): branch above the label -> line slopes down -> top-middle;
-            // branch below -> slopes up -> bottom-middle; ~level -> the side facing the branch.
-            const double cmidx = (p.x0 + p.x1) * 0.5, cmidy = (p.y0 + p.y1) * 0.5;
-            const double ddx = p.nx - cmidx, ddy = p.ny - cmidy;
-            double cx, cy;
-            if (std::abs(ddy) >= std::abs(ddx)) { cx = cmidx; cy = ddy < 0.0 ? p.y0 : p.y1; } // top / bottom middle
-            else { cy = cmidy; cx = ddx < 0.0 ? p.x0 : p.x1; }                                 // middle left / right
-            pdf.line(p.nx, p.ny, cx, cy, GREY, 0.3);
-            pdf.text(p.tx, p.ty, p.text, p.fs, p.color, /*center=*/false, /*monospace=*/true);
+            // leader to the branch midpoint (p.nx,p.ny); attach point (p.cx,p.cy) chosen above.
+            if (std::abs(p.cx - p.nx) > p.fs * 0.4 || std::abs(p.cy - p.ny) > p.fs * 0.4)
+                pdf.line(p.nx, p.ny, p.cx, p.cy, GREY, 0.3);
+            // stacked text: one substitution per line, top-to-bottom within the box
+            const double lineh = p.fs * 1.18;
+            const auto toks = split_ws(p.text);
+            for (std::size_t i = 0; i < toks.size(); ++i)
+                pdf.text(p.x0, p.y0 + static_cast<double>(i) * lineh + p.fs * 0.85, toks[i], p.fs, p.color, /*center=*/false, /*monospace=*/true);
         }
     }
 
