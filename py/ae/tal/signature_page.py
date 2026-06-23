@@ -252,6 +252,7 @@ def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 80
     async def _run() -> bytes:
         socket_dir = tempfile.mkdtemp(prefix="kateri-sock-")
         socket_name = os.path.join(socket_dir, "kateri.sock")
+        K.communicator.reset()  # singleton reused across sessions — clear stale writer so the connect-wait works
         server = await asyncio.start_unix_server(K.communicator.connected, socket_name)
         direct = None
         try:
@@ -307,6 +308,7 @@ def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *
     async def _run() -> list:
         socket_dir = tempfile.mkdtemp(prefix="kateri-sock-")
         socket_name = os.path.join(socket_dir, "kateri.sock")
+        K.communicator.reset()  # singleton reused across sessions — clear stale writer so the connect-wait works
         server = await asyncio.start_unix_server(K.communicator.connected, socket_name)
         direct = None
         try:

@@ -69,6 +69,19 @@ class Communicator:
         self.expected = []
         self._command_id: int = 0
 
+    def reset(self):
+        """Clear per-session connection state. `communicator` is a module-level singleton reused
+        across kateri sessions (e.g. one signature-page render per lab in a single driver process,
+        each its own `asyncio.run`). `connected()` sets `self.writer` but the previous session's
+        teardown — `quit()` then loop close — is not guaranteed to null it before the next session
+        starts. A leftover `self.writer` makes `is_connected()` report True immediately, so the next
+        session skips its connect-wait and sends the chart/pdf commands to the dead writer → the new
+        kateri instance sits idle and the render stalls at map 0. Call this before each session so the
+        connect-wait actually waits for the new kateri to connect."""
+        self.writer = None
+        self.expected = []
+        self._command_id = 0
+
     def send_ace(self, filename: Path):
         self._send(b"CHRT", subprocess.check_output(["decat", str(filename)]))
 
