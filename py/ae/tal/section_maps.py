@@ -62,7 +62,7 @@ INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.5, "size": 7}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
-MAP_TITLE_SIZE = 22  # kateri px; AD's in-map "{prefix}. {label} {aa}" title (apples-to-apples tuned)
+MAP_TITLE_SIZE = 16  # kateri px; AD's in-map "{prefix}. {label} {aa}" is a small sans title
 
 
 # ======================================================================
