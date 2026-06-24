@@ -1150,13 +1150,6 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 if (r + 1 < static_cast<int>(n)) { const std::size_t nb = ordA[r + 1]; c += static_cast<long>(WA * std::abs(ang(i, ci) - ang(nb, choice[nb]))); }
                 return c;
             };
-            const auto cost = [&]() -> long {
-                long c = 0;
-                for (std::size_t i = 0; i < n; ++i) c += static_cast<long>(cands[i][choice[i]].base);
-                for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) c += static_cast<long>(pconf(i, choice[i], j, choice[j])) * WC + static_cast<long>(inv(i, choice[i], j, choice[j])) * WO;
-                for (int k = 0; k + 1 < static_cast<int>(n); ++k) { const std::size_t a = ordA[k], b = ordA[k + 1]; c += static_cast<long>(WA * std::abs(ang(a, choice[a]) - ang(b, choice[b]))); }
-                return c;
-            };
             std::uint32_t rng = 2463534242u;
             const auto rnd = [&](int mm) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return static_cast<int>(rng % static_cast<std::uint32_t>(mm)); };
             const auto conf_i = [&](std::size_t i, int ci) { int c = 0; for (std::size_t j = 0; j < n; ++j) if (j != i) c += pconf(i, ci, j, choice[j]); return c; };
@@ -1165,13 +1158,18 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const auto inv_total = [&]() { int c = 0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) c += inv(i, choice[i], j, choice[j]); return c; };
             const auto soft_i = [&](std::size_t i, int ci) { double s = 0.0; for (std::size_t j = 0; j < n; ++j) if (j != i) s += psoft(i, ci, j, choice[j]); return s; };
             const auto soft_total = [&]() { double s = 0.0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) s += psoft(i, choice[i], j, choice[j]); return s; };
+            const auto base_total = [&]() { double b = 0.0; for (std::size_t i = 0; i < n; ++i) b += cands[i][choice[i]].base; return b; };
             // Phase-A objective (double): hard conflicts dominate, then the SOFT penetration gradient
             // (this is the key change — it lets a move that merely *reduces* interference win, so the
             // search flows toward feasibility instead of stalling on a flat all-or-nothing landscape),
-            // then branch-y order, then leader length.
+            // then branch-y order, then leader length. Note: each candidate eval here is O(n) (conf_i +
+            // soft_i scan all labels), so Phase A is ~O(restarts · iters · n² · candidates) — fine for
+            // the few-dozen labels a signature page carries, but quadratic in label count.
             const double WSOFT = 5000.0;
             const auto acost_i = [&](std::size_t i, int ci) -> double { return static_cast<double>(conf_i(i, ci)) * 1.0e6 + soft_i(i, ci) * WSOFT + static_cast<double>(inv_i(i, ci)) * static_cast<double>(WO) + static_cast<double>(cands[i][ci].base); };
-            const auto scoreA = [&]() -> double { return static_cast<double>(conf_total()) * 1.0e6 + soft_total() * WSOFT + static_cast<double>(inv_total()) * static_cast<double>(WO); };
+            // scoreA tracks which restart to keep; it carries the same terms as acost_i (including the
+            // leader-length base) so the best-layout tracker and the per-label descent agree.
+            const auto scoreA = [&]() -> double { return static_cast<double>(conf_total()) * 1.0e6 + soft_total() * WSOFT + static_cast<double>(inv_total()) * static_cast<double>(WO) + base_total(); };
             // PHASE A — find a CONFLICT-FREE layout, and among those prefer one in branch-y ORDER
             // (ordered labels over ordered branches cannot cross, so order both fixes #5 and removes
             // the otherwise-stubborn crossings). Score = conflicts >> inversions >> leader length;
@@ -1181,6 +1179,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             int stale = 0;
             for (int restart = 0; restart <= 400; ++restart) {
                 if (restart > 0) for (std::size_t i = 0; i < n; ++i) choice[i] = rnd(std::min<int>(28, static_cast<int>(cands[i].size())));
+                bool restart_improved = false;
                 for (int iter = 0; iter < 60; ++iter) {
                     bool improved = false;
                     for (std::size_t i = 0; i < n; ++i) {
@@ -1189,10 +1188,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                         if (bc != choice[i]) { choice[i] = bc; improved = true; }
                     }
                     const double s = scoreA();
-                    if (s < best_scoreA) { best_scoreA = s; best = choice; }
+                    if (s < best_scoreA) { best_scoreA = s; best = choice; restart_improved = true; }
                     if (!improved) break;
                 }
-                if (best_scoreA < 1.0e6) { if (++stale >= 120) break; } // conflict-free reached; keep refining a while, then stop
+                // Once a conflict-free layout exists, stop after 120 consecutive restarts find nothing
+                // better (a true stall counter — reset whenever a restart improves the best layout).
+                if (best_scoreA < 1.0e6) { stale = restart_improved ? 0 : stale + 1; if (stale >= 120) break; }
             }
             choice = best; // fewest conflicts (zero if feasible), then least interference, then order
             // PHASE A2 — pairwise (2-opt) repair. A pair that conflicts only with each other can't be
@@ -1268,7 +1269,6 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 }
                 if (!improved) break;
             }
-            (void)cost;
             for (std::size_t i = 0; i < n; ++i) {
                 const Cand& c = cands[i][choice[i]];
                 done.push_back({anchors[i].mid_x, anchors[i].ny, c.x0, c.y1, anchors[i].fs, c.x0, c.x1, c.y0, c.y1, c.cx, c.cy, anchors[i].nlines, anchors[i].text, anchors[i].color});
