@@ -257,10 +257,10 @@ def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 80
         direct = None
         try:
             if app_bundle is not None:  # macOS GUI app — launch via `open` for an Aqua session
-                opener = await asyncio.create_subprocess_exec("open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name)
+                opener = await asyncio.create_subprocess_exec("open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name, "--headless")
                 await opener.wait()
             else:  # non-bundle / non-macOS build — launch directly
-                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name)
+                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name, "--headless")
             waited = 0.0
             while not K.communicator.is_connected():
                 if waited >= connect_timeout:
@@ -313,10 +313,10 @@ def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *
         direct = None
         try:
             if app_bundle is not None:
-                opener = await asyncio.create_subprocess_exec("open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name)
+                opener = await asyncio.create_subprocess_exec("open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name, "--headless")
                 await opener.wait()
             else:
-                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name)
+                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name, "--headless")
             waited = 0.0
             while not K.communicator.is_connected():
                 if waited >= connect_timeout:
