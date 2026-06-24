@@ -1069,10 +1069,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                         if (x0 + tw > ax - gapL) continue;                                       // box must sit LEFT of the branch (#3,#5)
                         if (!box_free(x0 - pad, y0 - pad, tw + 2.0 * pad, th + 2.0 * pad)) continue; // clear of tree ink, with margin (#6)
                         double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);       // mid-right attach (#4,#5)
-                        double base = std::hypot(ax - cx, ay - cy);                              // leader length
+                        double base = std::hypot(ax - cx, ay - cy) * 2.2;                        // leader length, weighted: prefer SHORT leaders (#3) and, by keeping labels near their branch, branch-y order (#5)
                         const double dyl = std::abs(ay - cy);
-                        if (dyl < fs * 1.3) base += (fs * 1.3 - dyl) * 3.0;                       // avoid near-HORIZONTAL leaders (#1)
-                        if (cyr < ay) base += (ay - cyr) * 0.3;                                   // mildly prefer at/below the branch
+                        if (dyl < fs * 1.6) base += (fs * 1.6 - dyl) * 4.5;                       // avoid near-HORIZONTAL leaders (#4)
+                        if (cy < ay) base += (ay - cy) * 0.8;                                     // prefer the label BELOW the branch -> leader slopes up-right, bottom-left to top-right (#4)
                         cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, base});
                     }
                 }
@@ -1085,13 +1085,14 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 if (cands[i].size() > 56) cands[i].resize(56);
             }
             const std::size_t n = anchors.size();
-            const double m = mrca_fs * 0.18; // min separation between label boxes (#7)
+            const double m = mrca_fs * 0.18;  // min separation between label boxes (#7)
+            const double mt = mrca_fs * 0.07; // small clearance leaders keep from other text (#1,#2) — kept tiny so dense trees stay feasible
             const auto pconf = [&](std::size_t i, int ci, std::size_t j, int cj) -> int {
                 const Cand& a = cands[i][ci]; const Cand& b = cands[j][cj]; int c = 0;
                 if (a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - m < b.y1 && b.y0 - m < a.y1) ++c;                          // box overlap (+ margin)
                 if (segs_cross(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy)) ++c; // leader crossing
-                if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0, b.y0, b.x1, b.y1)) ++c;                      // i's leader over j's text
-                if (seg_box(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0, a.y0, a.x1, a.y1)) ++c;                      // j's leader over i's text
+                if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0 - mt, b.y0 - mt, b.x1 + mt, b.y1 + mt)) ++c;  // i's leader over (or grazing) j's text (#1,#2)
+                if (seg_box(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0 - mt, a.y0 - mt, a.x1 + mt, a.y1 + mt)) ++c;  // j's leader over (or grazing) i's text (#1,#2)
                 return c;
             };
             const auto inv = [&](std::size_t i, int ci, std::size_t j, int cj) -> int { // labels out of branch-y order? (#2)
@@ -1105,7 +1106,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             std::vector<int> rankA(n);
             for (int k = 0; k < static_cast<int>(n); ++k) rankA[ordA[k]] = k;
             const auto ang = [&](std::size_t i, int ci) { const Cand& a = cands[i][ci]; return std::atan2(anchors[i].ny - a.cy, anchors[i].mid_x - a.cx); };
-            const long WC = 1000000L, WO = 600L, WA = 130L; // conflicts >> vertical order > adjacent-angle ~ leader length
+            const long WC = 1000000L, WO = 1100L, WA = 130L; // conflicts >> vertical order > adjacent-angle ~ leader length
             std::vector<int> choice(n, 0), best(n, 0);
             const auto icost = [&](std::size_t i, int ci) -> long {
                 long c = static_cast<long>(cands[i][ci].base);
@@ -1124,27 +1125,47 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             };
             std::uint32_t rng = 2463534242u;
             const auto rnd = [&](int mm) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return static_cast<int>(rng % static_cast<std::uint32_t>(mm)); };
-            // local search minimising (conflicts, then vertical-order inversions, then leader length);
-            // random restarts escape local minima. Keep the best layout seen.
-            long best_cost = cost(), prev_best = best_cost;
-            int stale = 0;
-            for (int restart = 0; restart <= 260; ++restart) {
+            const auto conf_i = [&](std::size_t i, int ci) { int c = 0; for (std::size_t j = 0; j < n; ++j) if (j != i) c += pconf(i, ci, j, choice[j]); return c; };
+            const auto conf_total = [&]() { int c = 0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) c += pconf(i, choice[i], j, choice[j]); return c; };
+            // PHASE A — find a CONFLICT-FREE layout. Minimise conflicts only (leader length as a faint
+            // tie-break); aesthetics are off here so the search isn't pulled into infeasible clusters.
+            // Random restarts escape local minima. This is what reliably reaches zero on dense trees.
+            best = choice;
+            int best_conf = conf_total();
+            for (int restart = 0; restart <= 600 && best_conf > 0; ++restart) {
                 if (restart > 0) for (std::size_t i = 0; i < n; ++i) choice[i] = rnd(std::min<int>(28, static_cast<int>(cands[i].size())));
-                for (int iter = 0; iter < 45; ++iter) {
+                for (int iter = 0; iter < 50; ++iter) {
                     bool improved = false;
                     for (std::size_t i = 0; i < n; ++i) {
-                        int bc = choice[i]; long bv = icost(i, bc);
-                        for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) { const long v = icost(i, ci); if (v < bv) { bv = v; bc = ci; } }
+                        int bc = choice[i]; long bv = static_cast<long>(conf_i(i, bc)) * WC + static_cast<long>(cands[i][bc].base);
+                        for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) { const long v = static_cast<long>(conf_i(i, ci)) * WC + static_cast<long>(cands[i][ci].base); if (v < bv) { bv = v; bc = ci; } }
                         if (bc != choice[i]) { choice[i] = bc; improved = true; }
                     }
-                    const long c = cost();
-                    if (c < best_cost) { best_cost = c; best = choice; }
-                    if (!improved) break;
+                    const int t = conf_total();
+                    if (t < best_conf) { best_conf = t; best = choice; }
+                    if (best_conf == 0 || !improved) break;
                 }
-                if (best_cost < prev_best) { prev_best = best_cost; stale = 0; } else ++stale;
-                if (best_cost < WC && stale >= 30) break; // 0 conflicts reached and no further improvement -> stop
             }
-            choice = best;
+            choice = best; // fewest conflicts found (zero if feasible)
+            // PHASE B — refine aesthetics (vertical order, up-right slope, short & near-parallel leaders)
+            // WITHOUT ever reintroducing a conflict: a label may only move to a candidate that has no
+            // more conflicts (vs the others' current positions) than it has now, so global conflicts
+            // never increase. Iterate to a local optimum of the full cost.
+            for (int iter = 0; iter < 200; ++iter) {
+                bool improved = false;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const int cur = choice[i], cur_cf = conf_i(i, cur);
+                    int bc = cur; long bv = icost(i, cur);
+                    for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) {
+                        if (conf_i(i, ci) > cur_cf) continue; // never increase this label's conflicts
+                        const long v = icost(i, ci);
+                        if (v < bv) { bv = v; bc = ci; }
+                    }
+                    if (bc != cur) { choice[i] = bc; improved = true; }
+                }
+                if (!improved) break;
+            }
+            (void)cost;
             for (std::size_t i = 0; i < n; ++i) {
                 const Cand& c = cands[i][choice[i]];
                 done.push_back({anchors[i].mid_x, anchors[i].ny, c.x0, c.y1, anchors[i].fs, c.x0, c.x1, c.y0, c.y1, c.cx, c.cy, anchors[i].nlines, anchors[i].text, anchors[i].color});
