@@ -150,8 +150,11 @@ reference is a valid target for these).
 - **Serum→section dedup** uses the first owning leaf in draw order; AD ranks candidate leaves
   by passage/reassortant match quality before taking the front. Differs only for sera that
   match multiple leaves across sections.
-- **Viewport** reuses the chart's `-reset` (clades-map) viewport for every section map (one
-  shared scale). AD calls `calculate_viewport` per map but also shares one; close enough.
+- **Viewport**: the section maps pass **no** viewport and let **kateri auto-fit/centre** each
+  map, so the antigen cluster fills the cell like AD. (The chart's `-reset` viewport is
+  off-centre for sig pages, and AD's `sp.mapi` viewport is in AD's *oriented* coordinate frame
+  — the chart kateri receives is un-oriented, so that viewport leaves the map empty. Verified
+  apples-to-apples: auto-fit frames the map like AD's.)
 - **Section count / grid columns** differ from a given AD reference PDF when the `.tal` has
   evolved (e.g. current H1 `.tal` = 6 shown sections → 2×3; the 2025 reference had 9 → 3×3).
   This is correct for the current data, not a coupling defect.

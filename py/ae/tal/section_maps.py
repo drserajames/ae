@@ -375,15 +375,41 @@ def reset_viewport_from_ace(ace_path) -> Optional[list[float]]:
     return report_styles_from_ace(ace_path)[0]
 
 
-def viewport_from_layout(chart) -> list[float]:
-    """Square viewport covering all points, as a fallback."""
+def viewport_from_mapi(mapi_path) -> Optional[list[float]]:
+    """AD's per-lab **signature-page viewport** from a ``sp.mapi`` file
+    (``loc:viewport`` → ``{"N":"viewport","abs":[x,y,size]}``), as ``[x,y,w,h]``.
+    This is the viewport AD's report computed for the sig-page maps (kateri
+    auto-fit), so each map's antigen cluster fills the cell like AD's — unlike the
+    chart's ``-reset`` (clades-map) viewport, which is off-centre for sig pages."""
+    try:
+        mapi = json.loads(Path(mapi_path).read_text())
+    except Exception:
+        return None
+    for key, value in mapi.items():
+        if "viewport" in key and isinstance(value, list):
+            for entry in value:
+                if isinstance(entry, dict) and entry.get("N") == "viewport" and isinstance(entry.get("abs"), list):
+                    abs_ = entry["abs"]
+                    if len(abs_) >= 3:
+                        return [float(abs_[0]), float(abs_[1]), float(abs_[2]), float(abs_[2])]
+    return None
+
+
+def viewport_from_layout(chart, pad: float = 1.0) -> list[float]:
+    """A square viewport covering all points, in the chart's **raw** layout frame.
+
+    Only a rough fallback: kateri applies the projection's transformation (rotation/flip)
+    before drawing, so this raw-frame box is off-centre on a transformed chart. The section
+    maps instead pass **no** viewport and let kateri auto-fit/centre each map (which fills
+    the cell like AD) — see `build_section_styles`."""
     layout = chart.projection(0).layout()
     xs, ys = [], []
     for coords in layout:
-        if coords and coords[0] == coords[0]:  # not NaN
+        if coords and len(coords) >= 2 and coords[0] == coords[0] and coords[1] == coords[1]:  # not NaN
             xs.append(coords[0])
             ys.append(coords[1])
-    pad = 1.0
+    if not xs:
+        return [-7.5, -7.5, 15.0, 15.0]
     cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
     span = max(max(xs) - min(xs), max(ys) - min(ys)) + 2 * pad
     return [cx - span / 2, cy - span / 2, span, span]
@@ -477,7 +503,8 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         name = f"sigsec-{si:02d}"
         style = chart.styles()[name]
         style.priority = base_priority + si
-        style.viewport(*viewport)
+        if viewport:  # else let kateri auto-fit/centre the map (fills the cell like AD)
+            style.viewport(*viewport)
         style.legend.shown = False
         # base: all points light grey (grey88), white outline (no visible border), small
         style.add_modifier(only="antigens", **BASE_ANTIGEN)

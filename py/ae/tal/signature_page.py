@@ -477,7 +477,8 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
 
 
 def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int] = None, map_width: float = 800.0,
-                                viewport: Optional[Sequence[float]] = None, page_title: Optional[str] = None,
+                                viewport: Optional[Sequence[float]] = None, mapi: Optional[os.PathLike] = None,
+                                page_title: Optional[str] = None,
                                 tree_caption: Optional[str] = None, defines: Optional[dict] = None,
                                 serum_circles: bool = False, serum_circle_fold: float = 2.0,
                                 keep_temp: bool = False) -> Path:
@@ -517,9 +518,13 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         leaf_names = SM.leaf_names_from_taldraw(tree, names_settings, TAL_DRAW, tmpdir)
         match = SM.match_leaf_names(leaf_names, chart_obj)
         section_prefixes = SM.assign_prefixes(sections, match)  # A/B/C in tree order (AD set_prefix)
-        reset_vp, available_styles = SM.report_styles_from_ace(chart)
+        _, available_styles = SM.report_styles_from_ace(chart)
         vaccine_marks = SM.vaccine_marks_from_ace(chart)
-        vp = list(viewport) if viewport else (reset_vp or SM.viewport_from_layout(chart_obj))
+        # Viewport: an explicit arg if given, else None so kateri auto-fits/centres each map
+        # (fills the cell like AD). The chart's -reset viewport is off-centre for sig pages,
+        # and AD's sp.mapi viewport is in AD's oriented frame — neither transfers cleanly.
+        vp = list(viewport) if viewport else None
+        print(f"  [sigp] viewport: {'explicit ' + str([round(x, 2) for x in vp]) if vp else 'kateri auto-fit'}", file=_sys.stderr)
         styled = SM.build_section_styles(chart_obj, sections, match, scale, vp,
                                          available_styles=available_styles, vaccine_marks=vaccine_marks,
                                          serum_circles=serum_circles, serum_circle_fold=serum_circle_fold)
