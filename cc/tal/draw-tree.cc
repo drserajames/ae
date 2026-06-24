@@ -1273,8 +1273,11 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 const Cand& c = cands[i][choice[i]];
                 done.push_back({anchors[i].mid_x, anchors[i].ny, c.x0, c.y1, anchors[i].fs, c.x0, c.x1, c.y0, c.y1, c.cx, c.cy, anchors[i].nlines, anchors[i].text, anchors[i].color});
             }
-            { int cc = 0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) cc += pconf(i, choice[i], j, choice[j]);
-              if (cc > 0) fmt::print(stderr, ">>> aa-label placement: WARNING — {} residual conflicts (overlaps/crossings) could not be removed\n", cc); }
+            { int cc = 0;
+              for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) {
+                  const int c = pconf(i, choice[i], j, choice[j]);
+                  if (c > 0) { cc += c; fmt::print(stderr, ">>> aa-label placement: residual conflict — '{}' (y={:.0f}%) vs '{}' (y={:.0f}%)\n", anchors[i].text, 100.0 * (cands[i][choice[i]].y0 + cands[i][choice[i]].y1) * 0.5 / height, anchors[j].text, 100.0 * (cands[j][choice[j]].y0 + cands[j][choice[j]].y1) * 0.5 / height); } }
+              if (cc > 0) fmt::print(stderr, ">>> aa-label placement: WARNING — {} residual conflict(s) (overlaps/crossings) could not be removed\n", cc); }
         }
         else {
             // legacy: honour each label's manual offset, then nudge overlaps downward
