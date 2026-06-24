@@ -165,10 +165,11 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
     rows = math.ceil(len(maps) / cols)
     paper_w, paper_h = paper_mm
     title_mm = 9.0 if page_title else 0.0
-    # leave generous vertical headroom: the minipage[t] baseline + inter-row glue add ~10-15mm
-    # of overhead beyond the nominal cell heights, which otherwise spills to a 2nd page.
-    avail_h = paper_h - 2.0 * margin_mm - title_mm - 16.0
-    row_overhead = 7.0 if any(caps) else 3.0
+    # Vertical headroom for the minipage[t] baseline + inter-row glue (else the grid spills to
+    # a 2nd page). Square maps are height-bounded to the cell, so auto_width can pack tighter
+    # (bigger cells → wider grid → page aspect closer to AD) than the fixed-paper path.
+    avail_h = paper_h - 2.0 * margin_mm - title_mm - (10.0 if auto_width else 6.0)
+    row_overhead = 7.0 if any(caps) else (1.5 if auto_width else 3.0)
     col_gap_mm, panel_gap_mm = 2.0, 5.0
     if auto_width:
         # AD-like: fix the page HEIGHT, give each map a fixed square cell (rows fill the
@@ -179,6 +180,10 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
         grid_w_mm = cols * cell_mm + (cols - 1) * col_gap_mm
         paper_w = 2.0 * margin_mm + tree_w_mm + panel_gap_mm + grid_w_mm
         tree_w_frac = tree_w_mm / (paper_w - 2.0 * margin_mm)
+        # Tighten the page HEIGHT to the content (avail_h + margins + a little glue headroom)
+        # instead of the full input paper_h, so the aspect approaches AD's 1+tree_aspect ratio
+        # rather than carrying ~20mm of wasted vertical margin.
+        paper_h = avail_h + 2.0 * margin_mm + 8.0
     else:
         # Fixed paper: size each cell to fit both the right panel's width and the height.
         right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
