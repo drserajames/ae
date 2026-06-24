@@ -356,7 +356,7 @@ def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *
                 # Per-map timeout: kateri occasionally stalls mid-session; fail this render
                 # fast (the report driver then moves on to the next lab) rather than hang.
                 try:
-                    pdf_bytes = await asyncio.wait_for(K.communicator.get_pdf(style=name, width=width), timeout=map_timeout)
+                    pdf_bytes = await asyncio.wait_for(K.communicator.get_pdf(style=name, width=width, square=True), timeout=map_timeout)
                 except asyncio.TimeoutError:
                     raise SignaturePageError(f"kateri stalled rendering map {i} ({name}) after {map_timeout:.0f}s")
                 out = out_dir / f"map-{i:02d}.pdf"
