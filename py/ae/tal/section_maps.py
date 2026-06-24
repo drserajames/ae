@@ -62,7 +62,7 @@ INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.5, "size": 19}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
-MAP_TITLE_SIZE = 44  # kateri px; AD's in-map "{prefix}. {label} {aa}" title (~3x measured vs AD)
+MAP_TITLE_SIZE = 20  # kateri px; small enough to sit ABOVE the first horizontal gridline (AD)
 
 
 # ======================================================================
@@ -538,6 +538,6 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         style.plot_title.text.font_face = "helvetica"
         style.plot_title.text.font_weight = "normal"
         style.plot_title.box.origin = "tl"
-        style.plot_title.box.offset(8, 8)
+        style.plot_title.box.offset(6, 3)  # hard into the corner; sits in the band above gridline 1
         results.append({"name": name, "title": section_title(section), "n_antigens": len(ag_idx), "n_sera": len(sr_idx)})
     return results
