@@ -361,6 +361,21 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double margin = 0.03 * width;
     const double drawable_w = width - 2.0 * margin;
     const double gap = 0.012 * width;
+    // Reserve extra WHITESPACE to the left of the tree for the auto-placed aa-transition labels
+    // (they need room to sit beside their — mostly backbone — branches with short, non-crossing
+    // leaders). Sized to the widest single substitution (labels stack one per line) + breathing
+    // room. The tree is shifted right by this; labels are NOT confined to a rigid column.
+    double aa_left = 0.0;
+    if (params.mrca_labels_auto_place && !params.mrca_labels.empty()) {
+        std::size_t maxlen = 0;
+        for (const auto& l : params.mrca_labels) {
+            std::size_t cur = 0, best = 0;
+            for (char c : l.text) { if (c == ' ') { best = std::max(best, cur); cur = 0; } else ++cur; }
+            maxlen = std::max(maxlen, std::max(best, cur));
+        }
+        const double fs = 0.0095 * height;
+        aa_left = static_cast<double>(maxlen) * fs * 0.62 + fs * 3.0; // estimate + generous breathing room
+    }
     // hz-section marker: the AD sig page draws the section letters (A/B/C) + brackets in a
     // column on the RIGHT, adjacent to the maps (hz_section_labels). The old left reserve
     // (used only to inset the matrix separators) stays when no right marker is drawn.
@@ -387,9 +402,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double dash_w = static_cast<double>(params.dash_bars.size()) * dash_col_w;
     const int n_right = (label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0) + (dash_w > 0.0)
                         + (grey_dash_w > 0.0) + (hz_marker_w > 0.0);
-    const double tree_w = drawable_w - hz_w - label_w - clade_w - ts_w - dash_w - grey_dash_w - hz_marker_w - gap * n_right;
+    const double tree_w = drawable_w - aa_left - hz_w - label_w - clade_w - ts_w - dash_w - grey_dash_w - hz_marker_w - gap * n_right;
 
-    double cursor = margin + tree_w;
+    double cursor = margin + aa_left + tree_w;
     double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0}, x_dash0{0.0}, x_grey0{0.0}, x_hzmark0{0.0};
     if (params.clades_before_time_series) {
         // AD layout-with-maps order (left→right past the tree): labels, clades, time-series
@@ -450,7 +465,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double max_cum = layout.max_cumulative > 0.0 ? layout.max_cumulative : 1.0;
     const double vstep = (height - 2.0 * vmargin - top_reserve - bottom_reserve) / height_units;
     const double hstep = tree_w / max_cum;
-    const auto dev_x = [&](double cumulative) { return margin + hz_w + cumulative * hstep; };
+    const auto dev_x = [&](double cumulative) { return margin + aa_left + hz_w + cumulative * hstep; };
     const auto dev_y = [&](double vertical_offset) { return vmargin + top_reserve + (vertical_offset - 0.5) * vstep; };
 
     const double line_width = std::clamp(vstep * 0.5, 0.2, 3.0);
@@ -1018,28 +1033,32 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             if (!params.title.empty()) mark_box(gx0, gy0, 0.18 * width, mrca_fs * 1.6);
             for (const auto& b : text_label_boxes) mark_box(b[0], b[1], b[2] - b[0], b[3] - b[1]);
 
-            // --- non-greedy global label placement ---
-            // For each label, enumerate candidate boxes in the local whitespace AROUND its branch
-            // (clear of tree ink, never right of the tips), over many directions and a range of
-            // leader lengths. Then assign labels to candidates by coordinate descent over a GLOBAL
-            // cost = leader length + mild left/down bias + heavy penalties for label-label overlap
-            // and leader-leader crossing. Allowing longer leaders and re-choosing each label
-            // against the others (non-greedy) reproduces AD's hand layout far better than a greedy
-            // nearest-free scan (which collapsed dense trees into a crossing-prone left column).
+            // --- candidate search + conflict-minimising local search (finds a near-branch,
+            // crossing-free layout when one exists, as AD's hand layout proves it does) ---
             const double PI = 3.14159265358979323846;
-            struct Cand { double x0, y0, x1, y1, cx, cy, base; };
             const auto attach_pt = [](double ax, double ay, double x0, double y0, double x1, double y1, double& cx, double& cy) {
                 const double bx = (x0 + x1) * 0.5, by = (y0 + y1) * 0.5, ddx = ax - bx, ddy = ay - by;
                 if (std::abs(ddy) >= std::abs(ddx)) { cx = bx; cy = ddy < 0.0 ? y0 : y1; } // branch above -> top-middle, below -> bottom-middle
                 else { cy = by; cx = ddx < 0.0 ? x0 : x1; }                                 // ~level -> facing side
             };
+            const auto segs_cross = [](double ax, double ay, double bx, double by, double cx, double cy, double dx, double dy) {
+                const auto o = [](double px, double py, double qx, double qy, double rx, double ry) { const double v = (qy - py) * (rx - qx) - (qx - px) * (ry - qy); return v < 0.0 ? -1 : (v > 0.0 ? 1 : 0); };
+                return o(ax, ay, bx, by, cx, cy) != o(ax, ay, bx, by, dx, dy) && o(cx, cy, dx, dy, ax, ay) != o(cx, cy, dx, dy, bx, by);
+            };
+            const auto seg_box = [&](double x0, double y0, double x1, double y1, double bx0, double by0, double bx1, double by1) {
+                const auto inside = [&](double x, double y) { return x >= bx0 && x <= bx1 && y >= by0 && y <= by1; };
+                if (inside(x0, y0) || inside(x1, y1)) return true;
+                return segs_cross(x0, y0, x1, y1, bx0, by0, bx1, by0) || segs_cross(x0, y0, x1, y1, bx1, by0, bx1, by1)
+                    || segs_cross(x0, y0, x1, y1, bx1, by1, bx0, by1) || segs_cross(x0, y0, x1, y1, bx0, by1, bx0, by0);
+            };
+            struct Cand { double x0, y0, x1, y1, cx, cy, base; };
             std::vector<std::vector<Cand>> cands(anchors.size());
-            const double rmax = 0.24 * height; // leaders may be moderately long if that avoids crossings
+            const double rmax = 0.35 * height;
             for (std::size_t i = 0; i < anchors.size(); ++i) {
                 const double fs = anchors[i].fs, lineh = fs * 1.18, th = anchors[i].nlines * lineh, tw = anchors[i].tw;
                 const double ax = anchors[i].mid_x, ay = anchors[i].ny;
-                for (double r = mrca_fs * 0.7; r <= rmax; r += mrca_fs * 0.7) {
-                    const int na = 20;
+                for (double r = mrca_fs * 0.7; r <= rmax; r += mrca_fs * 0.55) {
+                    const int na = 24;
                     for (int k = 0; k < na; ++k) {
                         const double ang = -PI + (2.0 * PI) * k / na;
                         const double cxr = ax + r * std::cos(ang), cyr = ay + r * std::sin(ang);
@@ -1047,50 +1066,61 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                         if (x0 + tw > gx1) continue;             // never right of the tips
                         if (!box_free(x0, y0, tw, th)) continue; // clear of tree ink / strain labels / title
                         double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);
-                        double base = std::hypot(ax - cx, ay - cy);   // leader length
-                        if (cxr > ax) base += (cxr - ax) * 1.0;       // prefer the AD-style left of the branch
-                        if (cyr < ay) base += (ay - cyr) * 0.5;       // prefer at/below the branch
+                        double base = std::hypot(ax - cx, ay - cy);
+                        if (cxr > ax) base += (cxr - ax) * 1.2;  // prefer the AD-style left of the branch
+                        if (cyr < ay) base += (ay - cyr) * 0.4;  // mildly prefer at/below the branch
                         cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, base});
                     }
                 }
-                if (cands[i].empty()) { // dense fallback: clamp just left of the branch
+                if (cands[i].empty()) {
                     const double x0 = std::clamp(ax - mrca_fs - tw, gx0, gx1 - tw), y0 = std::clamp(ay - th * 0.5, gy0, gy1 - th);
                     double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);
                     cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, std::hypot(ax - cx, ay - cy)});
                 }
                 std::sort(cands[i].begin(), cands[i].end(), [](const Cand& a, const Cand& b) { return a.base < b.base; });
-                if (cands[i].size() > 56) cands[i].resize(56);
+                if (cands[i].size() > 48) cands[i].resize(48);
             }
-            const auto segs_cross = [](double ax, double ay, double bx, double by, double cx, double cy, double dx, double dy) {
-                const auto o = [](double px, double py, double qx, double qy, double rx, double ry) { const double v = (qy - py) * (rx - qx) - (qx - px) * (ry - qy); return v < 0.0 ? -1 : (v > 0.0 ? 1 : 0); };
-                return o(ax, ay, bx, by, cx, cy) != o(ax, ay, bx, by, dx, dy) && o(cx, cy, dx, dy, ax, ay) != o(cx, cy, dx, dy, bx, by);
-            };
-            std::vector<int> choice(anchors.size(), 0);
-            const double W_OVL = 1.0e6, W_CROSS = 3.0 * height; // overlap ~forbidden; crossing strongly penalised
-            const auto total_for = [&](std::size_t i, int ci) {
-                const Cand& a = cands[i][ci];
-                double c = a.base;
-                for (std::size_t j = 0; j < anchors.size(); ++j) {
-                    if (j == i) continue;
-                    const Cand& b = cands[j][choice[j]];
-                    if (a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1) c += W_OVL;
-                    if (segs_cross(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy)) c += W_CROSS;
-                }
+            const std::size_t n = anchors.size();
+            const auto pconf = [&](std::size_t i, int ci, std::size_t j, int cj) -> int {
+                const Cand& a = cands[i][ci]; const Cand& b = cands[j][cj]; int c = 0;
+                if (a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1) ++c;                                          // box overlap
+                if (segs_cross(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy)) ++c; // leader crossing
+                if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0, b.y0, b.x1, b.y1)) ++c;                      // i's leader over j's text
+                if (seg_box(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0, a.y0, a.x1, a.y1)) ++c;                      // j's leader over i's text
                 return c;
             };
-            for (int pass = 0; pass < 16; ++pass) { // coordinate descent: re-choose each label vs the others until stable
-                bool improved = false;
-                for (std::size_t i = 0; i < anchors.size(); ++i) {
-                    int best = choice[i]; double bestc = total_for(i, best);
-                    for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) { const double c = total_for(i, ci); if (c < bestc - 1e-6) { bestc = c; best = ci; } }
-                    if (best != choice[i]) { choice[i] = best; improved = true; }
+            std::vector<int> choice(n, 0), best(n, 0);
+            const auto iconf = [&](std::size_t i, int ci) { int c = 0; for (std::size_t j = 0; j < n; ++j) if (j != i) c += pconf(i, ci, j, choice[j]); return c; };
+            const auto total = [&]() { int c = 0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) c += pconf(i, choice[i], j, choice[j]); return c; };
+            int best_total = total();
+            std::uint32_t rng = 2463534242u;
+            const auto rnd = [&](int m) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return static_cast<int>(rng % static_cast<std::uint32_t>(m)); };
+            // local search: each label moves to the candidate minimising (its conflicts, then leader
+            // length); random restarts escape local minima. Stops as soon as a 0-conflict layout is found.
+            for (int restart = 0; restart <= 80 && best_total > 0; ++restart) {
+                if (restart > 0) for (std::size_t i = 0; i < n; ++i) choice[i] = rnd(std::min<int>(24, static_cast<int>(cands[i].size())));
+                for (int iter = 0; iter < 50; ++iter) {
+                    bool improved = false;
+                    for (std::size_t i = 0; i < n; ++i) {
+                        int bc = choice[i]; long bv = static_cast<long>(iconf(i, bc)) * 100000L + static_cast<long>(cands[i][bc].base);
+                        for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) {
+                            const long v = static_cast<long>(iconf(i, ci)) * 100000L + static_cast<long>(cands[i][ci].base);
+                            if (v < bv) { bv = v; bc = ci; }
+                        }
+                        if (bc != choice[i]) { choice[i] = bc; improved = true; }
+                    }
+                    const int t = total();
+                    if (t < best_total) { best_total = t; best = choice; }
+                    if (best_total == 0 || !improved) break;
                 }
-                if (!improved) break;
             }
-            for (std::size_t i = 0; i < anchors.size(); ++i) {
+            choice = best;
+            for (std::size_t i = 0; i < n; ++i) {
                 const Cand& c = cands[i][choice[i]];
                 done.push_back({anchors[i].mid_x, anchors[i].ny, c.x0, c.y1, anchors[i].fs, c.x0, c.x1, c.y0, c.y1, c.cx, c.cy, anchors[i].nlines, anchors[i].text, anchors[i].color});
             }
+            if (best_total > 0) // warn only if the search could not reach a fully clean layout
+                fmt::print(stderr, ">>> aa-label placement: WARNING — {} residual conflicts (overlaps/crossings) could not be removed\n", best_total);
         }
         else {
             // legacy: honour each label's manual offset, then nudge overlaps downward
