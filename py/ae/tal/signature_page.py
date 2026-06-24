@@ -29,6 +29,7 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional, Sequence
@@ -120,12 +121,32 @@ def _latex_escape(text: str) -> str:
     return "".join(_LATEX_SPECIAL.get(ch, ch) for ch in str(text))
 
 
+def _pdf_aspect(pdf, default: float = 0.7) -> float:
+    """width/height of a PDF's first page (for sizing the tree panel). Uses pdfinfo."""
+    pdfinfo = shutil.which("pdfinfo") or "/Library/TeX/texbin/pdfinfo"
+    try:
+        out = subprocess.check_output([pdfinfo, str(pdf)], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            if line.startswith("Page size:"):
+                w, h = line.split(":", 1)[1].split("x")[:2]
+                return float(w.strip()) / float(h.strip().split()[0])
+    except Exception:
+        pass
+    return default
+
+
 def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions: Optional[Sequence[str]] = None,
                  page_title: Optional[str] = None, tree_caption: Optional[str] = None, columns: Optional[int] = None,
-                 paper_mm: tuple = (297.0, 210.0), margin_mm: float = 6.0) -> Path:
-    """Compose the tree (left) and an R×C grid of captioned antigenic maps (right) onto one
-    landscape page via `pdflatex`. This is the richer counterpart to `compose_side_by_side`:
-    it adds per-map captions, an optional page title, and a real grid (vs a 1×N stack).
+                 paper_mm: tuple = (297.0, 210.0), margin_mm: float = 6.0, frame: bool = False, sans: bool = False,
+                 auto_width: bool = False) -> Path:
+    """Compose the tree (left) and an R×C grid of antigenic maps (right) onto one landscape
+    page via `pdflatex`. The richer counterpart to `compose_side_by_side`: optional per-map
+    captions, a page title, and a real grid (vs a 1×N stack).
+
+    `frame=True` draws a thin black box around each map (matching AD's per-map border, since
+    kateri draws no border itself). `sans=True` typesets text in Helvetica to match AD.
+    For the section-map signature page, titles are drawn *inside* each map (kateri), so
+    `captions` is omitted — no text appears between maps.
 
     `columns` defaults to ceil(sqrt(n)). If `pdflatex` isn't available it falls back to
     `compose_side_by_side` (which drops the captions/title but still composes the page).
@@ -141,10 +162,35 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
     caps = list(captions or [])
     caps += [""] * (len(maps) - len(caps))  # pad to one caption per map
     cols = columns if (columns and columns > 0) else max(1, math.ceil(math.sqrt(len(maps))))
+    rows = math.ceil(len(maps) / cols)
     paper_w, paper_h = paper_mm
-    # right panel ≈ 48% of the printable width; size each cell to fit `cols` across it
-    right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
-    cell_mm = max(10.0, right_panel_mm / cols - 3.0)
+    title_mm = 9.0 if page_title else 0.0
+    # Vertical headroom for the minipage[t] baseline + inter-row glue (else the grid spills to
+    # a 2nd page). Square maps are height-bounded to the cell, so auto_width can pack tighter
+    # (bigger cells → wider grid → page aspect closer to AD) than the fixed-paper path.
+    avail_h = paper_h - 2.0 * margin_mm - title_mm - (10.0 if auto_width else 6.0)
+    row_overhead = 7.0 if any(caps) else (1.5 if auto_width else 3.0)
+    col_gap_mm, panel_gap_mm = 2.0, 5.0
+    if auto_width:
+        # AD-like: fix the page HEIGHT, give each map a fixed square cell (rows fill the
+        # height), the tree its natural width (its aspect × height), and let the page WIDTH
+        # grow with the number of map columns — so 2-col B/Vic is narrow, 4-col H3 is wide.
+        cell_mm = max(20.0, avail_h / rows - row_overhead)
+        tree_w_mm = _pdf_aspect(tree_pdf) * avail_h
+        grid_w_mm = cols * cell_mm + (cols - 1) * col_gap_mm
+        paper_w = 2.0 * margin_mm + tree_w_mm + panel_gap_mm + grid_w_mm
+        tree_w_frac = tree_w_mm / (paper_w - 2.0 * margin_mm)
+        # Tighten the page HEIGHT to the content (avail_h + margins + a little glue headroom)
+        # instead of the full input paper_h, so the aspect approaches AD's 1+tree_aspect ratio
+        # rather than carrying ~20mm of wasted vertical margin.
+        paper_h = avail_h + 2.0 * margin_mm + 8.0
+    else:
+        # Fixed paper: size each cell to fit both the right panel's width and the height.
+        right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
+        cell_mm = max(10.0, min(right_panel_mm / cols - 3.0, avail_h / rows - row_overhead))
+        tree_w_frac = 0.5
+    tree_h_frac = round(avail_h / (paper_h - 2.0 * margin_mm), 3)
+    grid_panel_frac = round((cols * cell_mm + cols * col_gap_mm + 2.0) / (paper_w - 2.0 * margin_mm), 3)
 
     work = Path(tempfile.mkdtemp(prefix="tal-grid-"))
     try:
@@ -152,12 +198,20 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
         for i, m in enumerate(maps):
             shutil.copyfile(m, str(work / f"map{i}.pdf"))
 
+        def boxed(i: int) -> str:
+            # Bound the map by BOTH the cell width and height (keepaspectratio): kateri's
+            # auto-fit maps aren't always square, so a width-only fit would make a tall map
+            # overflow the cell and spill the grid to a 2nd page.
+            img = rf"\includegraphics[width=\linewidth,height={cell_mm:.1f}mm,keepaspectratio]{{map{i}.pdf}}"
+            # AD draws a thin black border around each map; kateri draws none, so frame here.
+            return rf"\setlength{{\fboxsep}}{{0pt}}\setlength{{\fboxrule}}{{0.5pt}}\fbox{{{img}}}" if frame else img
+
         cells = []
-        for i, cap in enumerate(caps):
+        for i in range(len(maps)):
+            cap = caps[i] if i < len(caps) else ""
+            cap_tex = rf"\\[1pt]{{\footnotesize {_latex_escape(cap)}}}" if cap else ""
             cells.append(
-                rf"\begin{{minipage}}[t]{{{cell_mm:.1f}mm}}\centering"
-                rf"\includegraphics[width=\linewidth]{{map{i}.pdf}}\\[1pt]"
-                rf"{{\footnotesize {_latex_escape(cap)}}}\end{{minipage}}%"
+                rf"\begin{{minipage}}[t]{{{cell_mm:.1f}mm}}\centering{boxed(i)}{cap_tex}\end{{minipage}}%"
             )
             cells.append(r"\hspace{2mm}")
             if (i + 1) % cols == 0:  # row break
@@ -169,15 +223,17 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
 
         tex = "\n".join([
             r"\documentclass{article}",
-            rf"\usepackage[paperwidth={paper_w:.0f}mm,paperheight={paper_h:.0f}mm,margin={margin_mm:.0f}mm]{{geometry}}",
+            rf"\usepackage[paperwidth={paper_w:.0f}mm,paperheight={paper_h:.0f}mm,margin={margin_mm:.0f}mm,"
+            r"headheight=0pt,headsep=0pt,footskip=0pt]{geometry}",
             r"\usepackage{graphicx}",
+            (r"\usepackage{helvet}\renewcommand{\familydefault}{\sfdefault}" if sans else "%"),
             r"\setlength{\parindent}{0pt}\pagestyle{empty}",
             r"\begin{document}",
             title_tex + r"\noindent",
-            r"\begin{minipage}[t]{0.5\linewidth}\vspace{0pt}\centering",
-            rf"\includegraphics[width=\linewidth,height=0.9\textheight,keepaspectratio]{{tree.pdf}}{tree_cap_tex}",
+            rf"\begin{{minipage}}[t]{{{tree_w_frac:.3f}\linewidth}}\vspace{{0pt}}\centering",
+            rf"\includegraphics[width=\linewidth,height={tree_h_frac}\textheight,keepaspectratio]{{tree.pdf}}{tree_cap_tex}",
             r"\end{minipage}\hfill",
-            r"\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}\centering",
+            rf"\begin{{minipage}}[t]{{{grid_panel_frac:.3f}\linewidth}}\vspace{{0pt}}\centering",
             grid,
             r"\end{minipage}",
             r"\end{document}",
@@ -228,14 +284,15 @@ def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 80
     async def _run() -> bytes:
         socket_dir = tempfile.mkdtemp(prefix="kateri-sock-")
         socket_name = os.path.join(socket_dir, "kateri.sock")
+        K.communicator.reset()  # singleton reused across sessions — clear stale writer so the connect-wait works
         server = await asyncio.start_unix_server(K.communicator.connected, socket_name)
         direct = None
         try:
             if app_bundle is not None:  # macOS GUI app — launch via `open` for an Aqua session
-                opener = await asyncio.create_subprocess_exec("open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name)
+                opener = await asyncio.create_subprocess_exec("open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name, "--headless")
                 await opener.wait()
             else:  # non-bundle / non-macOS build — launch directly
-                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name)
+                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name, "--headless")
             waited = 0.0
             while not K.communicator.is_connected():
                 if waited >= connect_timeout:
@@ -254,6 +311,76 @@ def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 80
 
     Path(out_pdf).write_bytes(asyncio.run(_run()))
     return Path(out_pdf)
+
+
+def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *, width: float = 800.0,
+                                   connect_timeout: float = 90.0, map_timeout: float = 60.0) -> list:
+    """Render one antigenic-map PDF per named style in `chart`, in a single kateri
+    session (chart sent once; `set_style`+`pdf` looped). `chart` is an
+    `ae_backend.chart_v3.Chart` already carrying the section styles (built by
+    `ae.tal.section_maps.build_section_styles`). Returns the PDF paths in order.
+
+    This is the section<->map coupling's renderer: the per-section highlight/colour
+    lives in each style, so one kateri session emits the whole map grid."""
+    import asyncio
+
+    exe = _require("kateri", "install kateri (github.com/drserajames/kateri) or pass pre-rendered maps via --map")
+    try:
+        import ae_backend  # noqa: F401  (chart already loaded by caller, but the socket layer needs the module)
+        from ae.utils import kateri as K
+    except ImportError as err:
+        raise SignaturePageError(
+            f"the kateri section-maps path needs ae_backend ({err}); run under the Python that can import it "
+            "(arm64 python with PYTHONPATH=build)") from err
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    app_bundle = _kateri_app_bundle(exe)
+
+    async def _run() -> list:
+        socket_dir = tempfile.mkdtemp(prefix="kateri-sock-")
+        socket_name = os.path.join(socket_dir, "kateri.sock")
+        K.communicator.reset()  # singleton reused across sessions — clear stale writer so the connect-wait works
+        server = await asyncio.start_unix_server(K.communicator.connected, socket_name)
+        direct = None
+        try:
+            if app_bundle is not None:
+                opener = await asyncio.create_subprocess_exec("open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name, "--headless")
+                await opener.wait()
+            else:
+                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name, "--headless")
+            waited = 0.0
+            while not K.communicator.is_connected():
+                if waited >= connect_timeout:
+                    raise SignaturePageError(f"kateri did not connect within {connect_timeout:.0f}s")
+                await asyncio.sleep(0.1)
+                waited += 0.1
+            K.communicator.send_chart(chart)
+            paths = []
+            for i, name in enumerate(style_names):
+                # Per-map timeout: kateri occasionally stalls mid-session; fail this render
+                # fast (the report driver then moves on to the next lab) rather than hang.
+                try:
+                    pdf_bytes = await asyncio.wait_for(K.communicator.get_pdf(style=name, width=width, square=True), timeout=map_timeout)
+                except asyncio.TimeoutError:
+                    raise SignaturePageError(f"kateri stalled rendering map {i} ({name}) after {map_timeout:.0f}s")
+                out = out_dir / f"map-{i:02d}.pdf"
+                out.write_bytes(pdf_bytes)
+                paths.append(out)
+            K.communicator.quit()
+            return paths
+        finally:
+            server.close()
+            if direct is not None and direct.returncode is None:
+                direct.terminate()
+            elif app_bundle is not None:
+                # the GUI app was launched detached via `open`, so quit() may not reach a
+                # stalled instance; kill the one bound to our (unique) socket so a lingering
+                # window can't block the next render (the cascade that fails a driver run).
+                subprocess.run(["pkill", "-f", socket_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            shutil.rmtree(socket_dir, ignore_errors=True)
+
+    return asyncio.run(_run())
 
 
 def load_vaccine_names(vaccines_file, subtype: str) -> list:
@@ -335,6 +462,129 @@ def _settings_with_mark_groups(settings: Optional[str], groups, tmpdir: Path) ->
     path = tmpdir / "tree-settings.json"
     path.write_text(json.dumps(config, indent=1, ensure_ascii=False), encoding="utf-8")
     return str(path)
+
+
+def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
+                     title: Optional[str] = None, show_legend: Optional[bool] = None,
+                     drop_dash_bars: bool = False, clades_before_time_series: bool = False,
+                     matches_chart_seq_ids: Optional[Sequence[str]] = None,
+                     section_prefixes: Optional[dict] = None) -> tuple[str, Optional[int]]:
+    """Translate an acmacs-tal settings-v3 `.tal` into a tal-draw settings file.
+    Returns (settings_path, image_size_or_None). Mirrors the `--tal` handling in
+    the tal-signature-page CLI so the tree panel is rendered from the same config
+    AD uses, with sig-page overrides matching AD's `layout-with-maps`:
+
+      * `title` / `show_legend` — title drawn top-left; no aa-at-pos legend;
+      * `drop_dash_bars` — AD's sig page disables the aa `dash-bar-aa-at` columns
+        (the `155E/156N…` colour bar), so drop them;
+      * `clades_before_time_series` — AD draws the clades column to the LEFT of the
+        time-series matrix on the sig page (tree-only puts it right);
+      * `matches_chart_seq_ids` — leaves whose antigen is in the chart, drawn as
+        AD's grey `matches-chart-antigen` dash-bar.
+    """
+    from ae.tal.settings_v3 import load_tal
+
+    schema, warnings = load_tal(str(tal_path), defines or {})
+    for warning in warnings:
+        print(f"  [tal] {warning}", file=sys.stderr)
+    if title is not None:
+        schema["title"] = title
+    if show_legend is not None:
+        schema["legend"] = {"show": show_legend}
+    if drop_dash_bars:
+        schema.pop("dash_bars", None)  # remove the aa colour bar (AD's sig page has none)
+    if clades_before_time_series:
+        schema["clades_before_time_series"] = True
+        schema["hz_section_labels"] = True  # draw section letters (A/B/C) on the right, like AD
+    if matches_chart_seq_ids:
+        schema["matches_chart_seq_ids"] = list(matches_chart_seq_ids)
+    if section_prefixes and isinstance(schema.get("hz_sections"), list):
+        for hs in schema["hz_sections"]:  # AD assigns A/B/C in tree order, not the .tal "L"
+            if hs.get("first") in section_prefixes:
+                hs["prefix"] = section_prefixes[hs["first"]]
+    path = tmpdir / "tree-from-tal.json"
+    path.write_text(json.dumps(schema), encoding="utf-8")
+    size = int(schema["image_size"]) if "image_size" in schema else None
+    return str(path), size
+
+
+def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int] = None, map_width: float = 800.0,
+                                viewport: Optional[Sequence[float]] = None, mapi: Optional[os.PathLike] = None,
+                                page_title: Optional[str] = None,
+                                tree_caption: Optional[str] = None, defines: Optional[dict] = None,
+                                serum_circles: bool = False, serum_circle_fold: float = 2.0,
+                                keep_temp: bool = False) -> Path:
+    """Build a faithful signature page: the TAL tree (rendered from `tal`) on the
+    left, and on the right one antigenic map per *shown* hz-section of `tal`, each
+    highlighting that section's antigens (coloured by date) and sera over a greyed
+    base map — AD's section<->map coupling, reproduced via kateri + a PDF grid.
+
+    `tree`/`chart` are file paths; `tal` is the acmacs-tal `.tal` settings holding
+    the hz-sections and time-series window. Needs ae_backend (run under the arm64
+    Python with PYTHONPATH=build) and the kateri executable on PATH."""
+    import sys as _sys
+
+    _sys.path.insert(0, str(REPO_ROOT / "build"))
+    try:
+        import ae_backend
+    except ImportError as err:
+        raise SignaturePageError(
+            f"section signature pages need ae_backend ({err}); run under the arm64 Python with PYTHONPATH=build") from err
+    from ae.tal import section_maps as SM
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="tal-sigsec-"))
+    try:
+        sections = SM.parse_sections(tal)
+        if not sections:
+            raise SignaturePageError(f"no shown hz-sections found in {tal}")
+        window = SM.parse_time_series(tal)
+        scale = SM.DateColorScale(*window) if window else None
+        if scale is None:
+            print("  [sigp] no time-series window in .tal; antigens won't be date-coloured", file=_sys.stderr)
+
+        # Pass 1: a basic translation just to get draw-order leaf names from tal-draw
+        # (matches the rendered tree's order; avoids the libc++-hardening trap of
+        # Python tree-leaf iteration on 3.14).
+        names_settings, tal_size = _tal_to_settings(tal, tmpdir, defines)
+        chart_obj = ae_backend.chart_v3.Chart(str(chart))
+        leaf_names = SM.leaf_names_from_taldraw(tree, names_settings, TAL_DRAW, tmpdir)
+        match = SM.match_leaf_names(leaf_names, chart_obj)
+        section_prefixes = SM.assign_prefixes(sections, match)  # A/B/C in tree order (AD set_prefix)
+        _, available_styles = SM.report_styles_from_ace(chart)
+        vaccine_marks = SM.vaccine_marks_from_ace(chart)
+        # Viewport: an explicit arg if given, else None so kateri auto-fits/centres each map
+        # (fills the cell like AD). The chart's -reset viewport is off-centre for sig pages,
+        # and AD's sp.mapi viewport is in AD's oriented frame — neither transfers cleanly.
+        vp = list(viewport) if viewport else None
+        print(f"  [sigp] viewport: {'explicit ' + str([round(x, 2) for x in vp]) if vp else 'kateri auto-fit'}", file=_sys.stderr)
+        styled = SM.build_section_styles(chart_obj, sections, match, scale, vp,
+                                         available_styles=available_styles, vaccine_marks=vaccine_marks,
+                                         serum_circles=serum_circles, serum_circle_fold=serum_circle_fold)
+        for s in styled:
+            print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
+
+        map_pdfs = render_section_maps_via_kateri(chart_obj, [s["name"] for s in styled], tmpdir / "maps", width=map_width)
+
+        # Pass 2: the final tree settings with AD sig-page overrides — title top-left,
+        # no aa-at-pos legend, no aa colour-bar dash columns, clades left of the matrix,
+        # and the grey matches-chart-antigen dash-bar for leaves whose antigen is in the chart.
+        matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
+        tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
+                                            drop_dash_bars=True, clades_before_time_series=True,
+                                            matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes)
+        tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size or tal_size or 1000, settings=tree_settings)
+
+        # AD lays the section maps out 3 rows high -> columns = ceil(n / 3).
+        # No captions (titles are inside each map), a black frame per map, sans text;
+        # the page title is drawn by the tree (above), not the composite.
+        columns = math.ceil(len(map_pdfs) / 3)
+        compose_grid(tree_pdf, map_pdfs, output, captions=None,
+                     page_title=None, tree_caption=tree_caption, columns=columns, frame=True, sans=True,
+                     auto_width=True)
+        return Path(output)
+    finally:
+        if not keep_temp:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def make_signature_page(tree, output, *, maps: Sequence[os.PathLike] = (), chart=None, size: int = 1000,

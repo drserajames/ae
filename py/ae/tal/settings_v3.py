@@ -563,6 +563,10 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                         emitted_mrca = True
                     if skipped:
                         warnings.append(f"draw-aa-transitions: {skipped} per-node label(s) lacked first/last bounds — skipped")
+                if emitted_mrca:
+                    # auto-place the curated labels into whitespace (tal-draw searches; the
+                    # per-label offsets become optional hints). Default on; a .tal can opt out.
+                    schema["mrca_labels_auto_place"] = bool(cmd.get("auto-place-labels", True))
                 # AD draws the curated per-node labels OR (when no curation is given) every
                 # stored inode transition — never both. When we emitted curated MRCA labels,
                 # leaving aa_transitions.show on would flood the tree with every stored inode
@@ -577,7 +581,8 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                         aa["min_leaves"] = int(mn)
             elif name == "hz-sections":
                 schema["hz_sections"] = [
-                    {"first": s.get("first", ""), "last": s.get("last", ""), "label": s.get("label", "")}
+                    {"first": s.get("first", ""), "last": s.get("last", ""),
+                     "label": s.get("label", ""), "prefix": s.get("L", "")}  # AD "L" = section letter
                     for s in cmd.get("sections", []) if isinstance(s, dict) and s.get("show", True)
                 ]
             elif name == "dash-bar-aa-at":
