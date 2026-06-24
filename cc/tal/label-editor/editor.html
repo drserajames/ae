@@ -34,7 +34,13 @@
   /* overlay label boxes */
   .lbl rect.box { fill:#fff; stroke:#9aa3b2; stroke-width:0; vector-effect:non-scaling-stroke; }
   .lbl.pinned rect.box { stroke:var(--pin); }
-  .lbl.sel rect.box { stroke:var(--accent); }
+  .lbl.nodetext rect.box { stroke:#127a3d; }
+  .lbl.nodetext line.tether { stroke:#127a3d; }
+  .lbl.nodetext text { font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+  .lbl.sel rect.box { stroke:var(--accent); stroke-width:0; }
+  .lbl.sel rect.box, .lbl.pinned rect.box, .lbl.nodetext rect.box { stroke-width:1; }
+  .row.nodetext .dot { background:#127a3d; }
+  .row .mini.vac { background:#127a3d; }
   .lbl rect.hit { fill:transparent; cursor:grab; }
   .lbl.dragging rect.hit { cursor:grabbing; }
   .lbl text { font-family:ui-monospace,Menlo,monospace; dominant-baseline:middle; pointer-events:none; }
@@ -62,8 +68,9 @@
         <g id="masks"></g>
         <g id="labels"></g>
       </svg>
-      <div id="hint">Drag a label to reposition (pins it). Scroll = zoom, Space/right-drag = pan.
-        Double-click a label to reset it to auto. Save re-renders the PDF.</div>
+      <div id="hint">Drag any label — red = aa-transition (MRCA), green = vaccine name — to reposition.
+        Scroll = zoom, Space/right-drag = pan. Double-click an aa-label to reset it to auto.
+        <b>Save freezes the whole layout</b> (nothing re-optimises) and re-renders the PDF.</div>
     </div>
     <aside>
       <h3>Curated labels (<span id="count">0</span>)</h3>
@@ -84,7 +91,7 @@ const listEl = document.getElementById("list");
 
 let page = {width:1000, height:1000};
 let labels = [];               // working copy of sidecar labels (box edited live)
-let dirty = new Map();         // id -> {first,last,offset:[x,y],pinned}
+let changed = false;           // any label dragged/reset this session (enables Save)
 let selId = null;
 let vb = {x:0,y:0,w:1000,h:1000};
 
@@ -130,7 +137,7 @@ function boxW(l){ return l.box.x1 - l.box.x0; }
 function boxH(l){ return l.box.y1 - l.box.y0; }
 function attach(l){ return {x:l.box.x1, y:(l.box.y0+l.box.y1)/2}; }      // leader meets mid-right edge
 function recomputeOffset(l){ l.offset = { x:(l.box.x0 - l.anchor.x)/page.width, y:(l.box.y0 - l.anchor.y)/page.height }; }
-function markDirty(l){ dirty.set(l.id, {first:l.first, last:l.last, offset:[l.offset.x, l.offset.y], pinned:l.pinned}); saveBtn.disabled = dirty.size===0; }
+function markChanged(){ changed = true; saveBtn.disabled = false; }
 
 // ---- render overlay ----
 function render(){
@@ -145,7 +152,7 @@ function render(){
     l._mask = m; gMasks.appendChild(m);
 
     const g = document.createElementNS(SVGNS,"g");
-    g.setAttribute("class","lbl"+(l.pinned?" pinned":"")+(l.id===selId?" sel":""));
+    g.setAttribute("class","lbl "+l.kind+(l.pinned?" pinned":"")+(l.id===selId?" sel":""));
     g.dataset.id = l.id;
 
     const teth = document.createElementNS(SVGNS,"line");
@@ -213,7 +220,11 @@ function attachDrag(l, g){
     function up(){
       window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up);
       g.classList.remove("dragging");
-      if (l.box.x0!==ox0 || l.box.y0!==oy0){ l.pinned = true; g.classList.add("pinned"); recomputeOffset(l); markDirty(l); renderList(); }
+      if (l.box.x0!==ox0 || l.box.y0!==oy0){
+        l.moved = true;
+        if (l.kind==="mrca"){ l.pinned = true; l.autoReset = false; g.classList.add("pinned"); }
+        recomputeOffset(l); markChanged(); renderList();
+      }
     }
     window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
   });
@@ -223,10 +234,10 @@ function attachDrag(l, g){
 function select(id){ selId = id; for (const g of gLabels.children) g.classList.toggle("sel", +g.dataset.id===id); renderList(); }
 
 function resetToAuto(l){
-  l.pinned = false;
-  dirty.set(l.id, {first:l.first, last:l.last, offset:[l.offset.x, l.offset.y], pinned:false});
-  saveBtn.disabled = dirty.size===0;
-  // immediately persist + re-render so it re-flows into auto position
+  if (l.kind!=="mrca") return;            // nodetext (vaccine) labels are always offset-placed
+  l.pinned = false; l.autoReset = true; l.moved = true;
+  markChanged();
+  // immediately persist + re-render so it re-flows into an auto position among the frozen others
   save();
 }
 
@@ -236,9 +247,10 @@ function renderList(){
   document.getElementById("count").textContent = labels.length;
   for (const l of labels){
     const row = document.createElement("div");
-    row.className = "row"+(l.pinned?" pinned":"")+(l.id===selId?" sel":"");
-    row.innerHTML = `<span class="dot"></span><span class="t">${escapeHtml(l.text)}</span>`+
-      (l.pinned?`<span class="mini">pinned</span><button class="reset">auto</button>`:``);
+    row.className = "row "+l.kind+(l.pinned?" pinned":"")+(l.id===selId?" sel":"");
+    const tag = l.kind==="nodetext" ? `<span class="mini vac">vaccine</span>`
+              : (l.pinned ? `<span class="mini">pinned</span><button class="reset">auto</button>` : ``);
+    row.innerHTML = `<span class="dot"></span><span class="t">${escapeHtml(l.text)}</span>`+tag;
     row.onclick = e => { if (e.target.closest("button.reset")){ resetToAuto(l); return; } select(l.id); focusLabel(l); };
     listEl.appendChild(row);
   }
@@ -250,11 +262,11 @@ function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<
 async function load(initial){
   const data = await (await fetch("/labels.json?t="+Date.now())).json();
   page = data.page || page;
-  labels = (data.labels||[]).map(l => ({...l, box:{...l.box}, anchor:{...l.anchor}, tether:{...l.tether}, offset:{...l.offset}}));
+  labels = (data.labels||[]).map(l => ({...l, box:{...l.box}, anchor:{...l.anchor}, tether:{...l.tether}, offset:{...l.offset}, moved:false, autoReset:false}));
   document.getElementById("talname").textContent = data.tal_name || "";
   imgEl.setAttribute("href", "/backdrop.png?t="+(data.rendered_at||Date.now()));
   imgEl.setAttribute("width", page.width); imgEl.setAttribute("height", page.height);
-  dirty.clear(); saveBtn.disabled = true;
+  changed = false; saveBtn.disabled = true;
   if (initial) fit();
   render();
   const w = (data.warnings||[]);
@@ -262,20 +274,27 @@ async function load(initial){
 }
 
 async function save(){
-  if (dirty.size===0) return;
+  if (!changed) return;
   saveBtn.disabled = true; status("saving + re-rendering…");
+  // FREEZE the whole current layout: every MRCA label is pinned at its current position (so the
+  // untouched ones do NOT re-optimise / jump), except any reset-to-auto this session. NodeText
+  // (vaccine) labels are written only when moved.
+  const edits = [];
+  for (const l of labels){
+    if (l.kind==="mrca") edits.push({kind:"mrca", first:l.first, last:l.last, offset:[l.offset.x, l.offset.y], pinned: !l.autoReset});
+    else if (l.moved)    edits.push({kind:"nodetext", seq_id:l.seq_id, offset:[l.offset.x, l.offset.y]});
+  }
   try {
-    const edits = [...dirty.values()];
     const r = await fetch("/save", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({edits})});
     const data = await r.json();
     if (!r.ok){ status(data.error||"save failed", true); saveBtn.disabled=false; return; }
     // reload (re-rendered backdrop + fresh sidecar geometry)
     page = data.page || page;
-    labels = (data.labels||[]).map(l => ({...l, box:{...l.box}, anchor:{...l.anchor}, tether:{...l.tether}, offset:{...l.offset}}));
+    labels = (data.labels||[]).map(l => ({...l, box:{...l.box}, anchor:{...l.anchor}, tether:{...l.tether}, offset:{...l.offset}, moved:false, autoReset:false}));
     imgEl.setAttribute("href", "/backdrop.png?t="+(data.rendered_at||Date.now()));
-    dirty.clear(); render();
-    status(`saved ${data.saved} · ${labels.length} labels re-rendered`);
-  } catch(ex){ status(String(ex), true); saveBtn.disabled = dirty.size===0; }
+    changed = false; render();
+    status(`saved ${data.saved} · ${labels.length} labels re-rendered (layout frozen)`);
+  } catch(ex){ status(String(ex), true); saveBtn.disabled = !changed; }
 }
 saveBtn.onclick = save;
 

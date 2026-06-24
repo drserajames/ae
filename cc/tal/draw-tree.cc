@@ -951,6 +951,13 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         draw_continent_inset(pdf, box_x, box_y, box_w, box_h);
     }
 
+    // Unified geometry-sidecar rows for the WYSIWYG drag editor — BOTH the NodeText vaccine/strain
+    // labels (below) AND the curated MRCA labels (further down). Written once, after both are placed,
+    // when params.mrca_label_sidecar is set. `ax,ay` is the offset origin (box_top_left = anchor +
+    // offset*page); for NodeText `ay` is shifted up 0.7*fs so that same clean inverse holds there too.
+    struct SideRow { std::string kind, first, last, seq_id, text; double ax, ay, tx, ty, bx0, by0, bx1, by1, fs; int nlines; bool pinned; std::uint32_t color; };
+    std::vector<SideRow> side_rows;
+
     // --- positioned text labels at leaf tips (port of DrawOnTree / nodes apply.text) ---
     std::vector<std::array<double, 4>> text_label_boxes; // device boxes {x0,y0,x1,y1}; kept clear of auto-placed aa-labels
     for (const auto& [idx, label] : text_override) {
@@ -966,7 +973,16 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double tx = dev_x(found->second.first) + label.offset_x * width;
         const double ty = dev_y(found->second.second) + label.offset_y * height + label_fs * 0.3;
         pdf.text(tx, ty, label.text, label_fs, color, /*center=*/false);
-        text_label_boxes.push_back({tx, ty - label_fs, tx + pdf.text_size(label.text, label_fs).first, ty});
+        const double ntw = pdf.text_size(label.text, label_fs).first;
+        text_label_boxes.push_back({tx, ty - label_fs, tx + ntw, ty});
+        if (!params.mrca_label_sidecar.empty()) {
+            // identity = leaf seq_id; box top-left (tx, ty-fs); anchor.y = tip_y - 0.7*fs so the editor's
+            // clean inverse off = (box_top_left - anchor)/page reproduces this label's .tal offset exactly.
+            const double tipx = dev_x(found->second.first), tipy = dev_y(found->second.second);
+            side_rows.push_back({"nodetext", "", "", tree.leaf(node_index_t{idx}).name, label.text,
+                                 tipx, tipy - label_fs * 0.7, tipx, tipy,
+                                 tx, ty - label_fs, tx + ntw, ty, label_fs, 1, true, color.rgbI()});
+        }
     }
 
     // --- curated on-tree labels at MRCA(first,last) internal nodes (acmacs-tal draw-aa-transitions
@@ -1357,48 +1373,13 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 done.push_back(p);
             }
         }
-        // --- geometry sidecar for the WYSIWYG drag editor (tal-mrca-labels/1) ---
-        // Emits the page size and, per curated label, its identity ({first,last}), the branch ANCHOR
-        // (offset origin), the TETHER target (edge midpoint), the current placed BOX, and the OFFSET
-        // that reproduces that box if pinned (box_top_left = anchor + offset*page). The editor drags a
-        // box, inverts that formula to a new offset, and writes {offset,pinned:true} back to the .tal.
+        // collect curated MRCA label rows for the unified geometry sidecar (written after this block)
         if (!params.mrca_label_sidecar.empty()) {
-            const auto jstr = [](const std::string& s) {
-                std::string o; o.reserve(s.size() + 2);
-                for (char c : s) {
-                    switch (c) {
-                        case '"': o += "\\\""; break;
-                        case '\\': o += "\\\\"; break;
-                        case '\n': o += "\\n"; break;
-                        case '\r': o += "\\r"; break;
-                        case '\t': o += "\\t"; break;
-                        default: if (static_cast<unsigned char>(c) < 0x20) fmt::format_to(std::back_inserter(o), "\\u{:04x}", static_cast<unsigned>(static_cast<unsigned char>(c))); else o += c;
-                    }
-                }
-                return o;
-            };
-            std::string j;
-            fmt::format_to(std::back_inserter(j),
-                           "{{\n  \"schema\": \"tal-mrca-labels/1\",\n  \"pdf\": \"{}\",\n  \"image_size\": {},\n"
-                           "  \"page\": {{ \"width\": {:.4f}, \"height\": {:.4f} }},\n  \"auto_place\": {},\n  \"labels\": [\n",
-                           jstr(output.filename().string()), image_size, width, height,
-                           params.mrca_labels_auto_place ? "true" : "false");
-            for (std::size_t k = 0; k < done.size(); ++k) {
-                const auto& p = done[k];
+            for (const auto& p : done) {
                 const Anchor& a = anchors[p.aidx];
-                const double off_x = (p.x0 - a.nx) / width, off_y = (p.y0 - a.ny) / height;
-                fmt::format_to(std::back_inserter(j),
-                               "    {{ \"id\": {}, \"first\": \"{}\", \"last\": \"{}\", \"text\": \"{}\", \"nlines\": {}, \"pinned\": {},\n"
-                               "      \"anchor\": {{ \"x\": {:.4f}, \"y\": {:.4f} }}, \"tether\": {{ \"x\": {:.4f}, \"y\": {:.4f} }},\n"
-                               "      \"box\": {{ \"x0\": {:.4f}, \"y0\": {:.4f}, \"x1\": {:.4f}, \"y1\": {:.4f} }},\n"
-                               "      \"offset\": {{ \"x\": {:.6f}, \"y\": {:.6f} }}, \"color\": \"#{:06x}\", \"fs\": {:.4f} }}{}\n",
-                               p.aidx, jstr(a.first), jstr(a.last), jstr(a.text), a.nlines, a.pinned ? "true" : "false",
-                               a.nx, a.ny, a.mid_x, a.ny, p.x0, p.y0, p.x1, p.y1, off_x, off_y, a.color.rgbI(), a.fs,
-                               k + 1 < done.size() ? "," : "");
+                side_rows.push_back({"mrca", a.first, a.last, "", a.text,
+                                     a.nx, a.ny, a.mid_x, a.ny, p.x0, p.y0, p.x1, p.y1, a.fs, a.nlines, a.pinned, a.color.rgbI()});
             }
-            j += "  ]\n}\n";
-            std::ofstream out{params.mrca_label_sidecar};
-            out << j;
         }
 
         for (const auto& p : done) {
@@ -1415,6 +1396,50 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             for (std::size_t i = 0; i < toks.size(); ++i)
                 pdf.text(p.x0, p.y0 + (static_cast<double>(i) + 0.5) * lineh - p.fs * 0.36, toks[i], p.fs, p.color, /*center=*/false, /*monospace=*/true);
         }
+    }
+
+    // --- write the unified geometry sidecar (NodeText vaccine labels + curated MRCA labels) ---
+    // Schema "tal-mrca-labels/1": page size (device units, +y DOWN) + per label its kind, identity
+    // (mrca -> {first,last}; nodetext -> seq_id), anchor (offset origin), tether, current box, and the
+    // offset that reproduces the box (box_top_left = anchor + offset*page). The editor drags a box and
+    // writes the inverted offset back to the .tal (mrca -> per-node label.offset+pinned; nodetext ->
+    // nodes apply.text.offset). Emitted even with no MRCA labels (so vaccine-only trees still drive it).
+    if (!params.mrca_label_sidecar.empty()) {
+        const auto jstr = [](const std::string& s) {
+            std::string o; o.reserve(s.size() + 2);
+            for (char c : s) {
+                switch (c) {
+                    case '"': o += "\\\""; break;
+                    case '\\': o += "\\\\"; break;
+                    case '\n': o += "\\n"; break;
+                    case '\r': o += "\\r"; break;
+                    case '\t': o += "\\t"; break;
+                    default: if (static_cast<unsigned char>(c) < 0x20) fmt::format_to(std::back_inserter(o), "\\u{:04x}", static_cast<unsigned>(static_cast<unsigned char>(c))); else o += c;
+                }
+            }
+            return o;
+        };
+        std::string j;
+        fmt::format_to(std::back_inserter(j),
+                       "{{\n  \"schema\": \"tal-mrca-labels/1\",\n  \"pdf\": \"{}\",\n  \"image_size\": {},\n"
+                       "  \"page\": {{ \"width\": {:.4f}, \"height\": {:.4f} }},\n  \"auto_place\": {},\n  \"labels\": [\n",
+                       jstr(output.filename().string()), image_size, width, height,
+                       params.mrca_labels_auto_place ? "true" : "false");
+        for (std::size_t k = 0; k < side_rows.size(); ++k) {
+            const SideRow& r = side_rows[k];
+            const double off_x = (r.bx0 - r.ax) / width, off_y = (r.by0 - r.ay) / height;
+            fmt::format_to(std::back_inserter(j),
+                           "    {{ \"id\": {}, \"kind\": \"{}\", \"first\": \"{}\", \"last\": \"{}\", \"seq_id\": \"{}\", \"text\": \"{}\", \"nlines\": {}, \"pinned\": {},\n"
+                           "      \"anchor\": {{ \"x\": {:.4f}, \"y\": {:.4f} }}, \"tether\": {{ \"x\": {:.4f}, \"y\": {:.4f} }},\n"
+                           "      \"box\": {{ \"x0\": {:.4f}, \"y0\": {:.4f}, \"x1\": {:.4f}, \"y1\": {:.4f} }},\n"
+                           "      \"offset\": {{ \"x\": {:.6f}, \"y\": {:.6f} }}, \"color\": \"#{:06x}\", \"fs\": {:.4f} }}",
+                           k, r.kind, jstr(r.first), jstr(r.last), jstr(r.seq_id), jstr(r.text), r.nlines, r.pinned ? "true" : "false",
+                           r.ax, r.ay, r.tx, r.ty, r.bx0, r.by0, r.bx1, r.by1, off_x, off_y, r.color, r.fs);
+            j += (k + 1 < side_rows.size()) ? ",\n" : "\n";
+        }
+        j += "  ]\n}\n";
+        std::ofstream out{params.mrca_label_sidecar};
+        out << j;
     }
 
     return labels_hidden;

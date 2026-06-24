@@ -117,26 +117,49 @@ def _patch_entry_line(line: str, ox: float, oy: float, pinned: bool) -> str:
     return line
 
 
+def _patch_nodetext_line(line: str, ox: float, oy: float) -> str:
+    """Set a `nodes` apply.text.offset (the only offset on the line)."""
+    off = f"[{_num(ox)}, {_num(oy)}]"
+    if re.search(r'"offset"\s*:\s*\[', line):
+        return re.sub(r'("offset"\s*:\s*)\[[^\]]*\]', lambda m: m.group(1) + off, line, count=1)
+    # no offset yet: add one into the apply.text object, right after its "text": "..."
+    return re.sub(r'("text"\s*:\s*"[^"]*")', lambda m: m.group(1) + f', "offset": {off}', line, count=1, flags=0)
+
+
 def patch_tal(tal_path: Path, edits):
-    """Apply each {first,last,offset,pinned} edit to its matching active per-node entry."""
+    """Apply edits to the .tal. kind=="mrca" -> active per-node `label.offset`+`pinned`;
+    kind=="nodetext" -> the matching `nodes` entry's `apply.text.offset`."""
     text = Path(tal_path).read_text()
     lines = text.split("\n")
-    start, end = _active_pernode_span(lines)
+    mrca = [e for e in edits if e.get("kind", "mrca") == "mrca"]
+    nodetext = [e for e in edits if e.get("kind") == "nodetext"]
     applied = 0
-    for e in edits:
-        first, last = e["first"], e["last"]
+
+    if mrca:
+        start, end = _active_pernode_span(lines)
+        for e in mrca:
+            first, last = e["first"], e["last"]
+            ox, oy = e["offset"]
+            pinned = bool(e.get("pinned", True))
+            hit = next((i for i in range(start, end + 1)
+                        if re.search(r'"\??first"\s*:\s*"%s"' % re.escape(first), lines[i])
+                        and re.search(r'"\??last"\s*:\s*"%s"' % re.escape(last), lines[i])), None)
+            if hit is None:
+                raise RuntimeError(f"no per-node entry for first={first!r} last={last!r}")
+            lines[hit] = _patch_entry_line(lines[hit], ox, oy, pinned)
+            applied += 1
+
+    for e in nodetext:
+        seq_id = e["seq_id"]
         ox, oy = e["offset"]
-        pinned = bool(e.get("pinned", True))
-        hit = None
-        for i in range(start, end + 1):
-            if (re.search(r'"\??first"\s*:\s*"%s"' % re.escape(first), lines[i])
-                    and re.search(r'"\??last"\s*:\s*"%s"' % re.escape(last), lines[i])):
-                hit = i
-                break
+        hit = next((i for i, ln in enumerate(lines)
+                    if '"nodes"' in ln and re.search(r'"seq_id"\s*:\s*"%s"' % re.escape(seq_id), ln)
+                    and '"text"' in ln), None)
         if hit is None:
-            raise RuntimeError(f"no per-node entry for first={first!r} last={last!r}")
-        lines[hit] = _patch_entry_line(lines[hit], ox, oy, pinned)
+            raise RuntimeError(f"no nodes apply.text entry for seq_id={seq_id!r}")
+        lines[hit] = _patch_nodetext_line(lines[hit], ox, oy)
         applied += 1
+
     Path(tal_path).write_text("\n".join(lines))
     return applied
 

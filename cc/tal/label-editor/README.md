@@ -1,13 +1,21 @@
-# tal MRCA aa-transition label editor
+# tal label editor (MRCA aa-transitions + vaccine names)
 
-A small **WYSIWYG drag editor** for the curated **MRCA aa-transition labels** on a `tal-draw`
-phylogenetic tree (the `draw-aa-transitions` `per-node` set — clade-defining substitution names
-placed at MRCA nodes). An auto-placement algorithm already positions these labels into
-whitespace; this tool is for **manual touch-up** of the cases the algorithm gets ugly: drag a
-label to a prettier spot, Save, and the final `tal-draw` PDF reproduces it exactly.
+A small **WYSIWYG drag editor** for the on-tree text labels of a `tal-draw` phylogenetic tree:
 
-**Scope:** only the curated `MrcaLabel` set. It does **not** touch the dense per-branch inode
-transition labels, nor leaf `NodeText` labels.
+- **MRCA aa-transition labels** — the `draw-aa-transitions` `per-node` set (clade-defining
+  substitution names placed at MRCA nodes). Auto-placed into whitespace by default; drag to
+  touch up the ugly cases.
+- **Vaccine / strain-name labels** — the `nodes` `apply.text` (`NodeText`) labels at leaf tips.
+  Always offset-placed; drag to reposition.
+
+Drag a label to a prettier spot, Save, and the final `tal-draw` PDF reproduces it exactly.
+
+**Freeze on Save (no re-optimisation):** Save **pins the whole current MRCA layout** at its
+displayed positions — so the labels you did *not* touch do **not** jump when you pin one — and
+writes the offsets back to the `.tal`. The hand-placed result is the saved configuration.
+"Reset to auto" (double-click / list button) lets a single aa-label re-flow.
+
+**Out of scope:** the dense per-branch inode transition labels (no offset storage).
 
 ---
 
@@ -91,17 +99,24 @@ arch -arm64 /tmp/ae-py314-venv/bin/ninja -C build-py314 tal-draw
 }
 ```
 
+Each label carries `kind` (`"mrca"` | `"nodetext"`) and the right identity — `first`/`last`
+for MRCA, `seq_id` for vaccine labels. For NodeText the emitted `anchor.y` is shifted up
+`0.7*fs` so the same clean inverse holds (the renderer draws `box.y0 = tip_y + offset.y*H − 0.7*fs`).
+
 ### `.tal` write-back format
 
-The matching active `draw-aa-transitions` `per-node` entry (keyed by `{first,last}`, matching
-either `first`/`?first`) is patched **surgically** (text edit, relaxed-JSON formatting/comments
-preserved; the disabled `?per-node` block is never touched):
+Surgical text edits (relaxed-JSON formatting/comments preserved):
 
-```json
-{ "pinned": true, "name": "I140K", "label": {"offset": [-0.12, 0.02], ...}, ... }
-```
-
-"Reset to auto" sets `"pinned": false` (the offset is then ignored and the label re-flows).
+- **MRCA** → the matching active `draw-aa-transitions` `per-node` entry (keyed by `{first,last}`,
+  matching `first`/`?first`; the disabled `?per-node` block is never touched):
+  ```json
+  { "pinned": true, "name": "I140K", "label": {"offset": [-0.12, 0.02], ...}, ... }
+  ```
+  "Reset to auto" sets `"pinned": false` (offset ignored, label re-flows).
+- **NodeText** → the matching `nodes` entry's `apply.text.offset` (keyed by `seq_id`):
+  ```json
+  {"N": "nodes", "select": {"seq_id": "…"}, "apply": {"text": {"text": "A/DC/27/2023", "offset": [-0.1, 0], …}}}
+  ```
 
 ---
 
@@ -120,6 +135,20 @@ python3 server.py --tal <path/to/x.tal> --tree <path/to/x.tjz> [--out DIR] \
   the repo. Server binds `127.0.0.1` only.
 
 A browser opens on the printed URL. Drag labels, hit **Save & re-render**, repeat.
+
+### Convenience launcher in a run's `tree/` folder
+
+A `./label` script (mirroring `./0do`'s command names) can sit in an ssm run's `tree/` folder:
+
+```bash
+cd ~/AC/eu/ac/results/ssm/<run>/tree
+./label h3_small            # = h3.asr.after-2021.tjz + h3.after-2021.tal
+./label h1_small --dpi 200 --port 8760
+./label bvic_small --image-size 1000
+```
+
+Names: `h3 h3_small h3_small_156 h1 h1_small bvic bvic_small`. Extra args pass through to
+`server.py`. (One is installed in `2026-0805-tc1/tree/label`; copy it into other runs as needed.)
 
 ### Editor controls
 
