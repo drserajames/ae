@@ -1098,17 +1098,28 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 const double cyi = (cands[i][ci].y0 + cands[i][ci].y1) * 0.5, cyj = (cands[j][cj].y0 + cands[j][cj].y1) * 0.5;
                 return ((anchors[i].ny < anchors[j].ny) != (cyi < cyj)) ? 1 : 0;
             };
-            const long WC = 1000000L, WO = 600L; // conflicts dominate; then vertical order; then leader length
+            // label order down the tree (by branch-y), for the "adjacent leaders near-parallel" term (#3)
+            std::vector<std::size_t> ordA(n);
+            for (std::size_t i = 0; i < n; ++i) ordA[i] = i;
+            std::sort(ordA.begin(), ordA.end(), [&](std::size_t a, std::size_t b) { return anchors[a].ny < anchors[b].ny; });
+            std::vector<int> rankA(n);
+            for (int k = 0; k < static_cast<int>(n); ++k) rankA[ordA[k]] = k;
+            const auto ang = [&](std::size_t i, int ci) { const Cand& a = cands[i][ci]; return std::atan2(anchors[i].ny - a.cy, anchors[i].mid_x - a.cx); };
+            const long WC = 1000000L, WO = 600L, WA = 130L; // conflicts >> vertical order > adjacent-angle ~ leader length
             std::vector<int> choice(n, 0), best(n, 0);
             const auto icost = [&](std::size_t i, int ci) -> long {
                 long c = static_cast<long>(cands[i][ci].base);
                 for (std::size_t j = 0; j < n; ++j) if (j != i) c += static_cast<long>(pconf(i, ci, j, choice[j])) * WC + static_cast<long>(inv(i, ci, j, choice[j])) * WO;
+                const int r = rankA[i]; // angle similarity with the labels immediately above/below in branch order
+                if (r > 0) { const std::size_t nb = ordA[r - 1]; c += static_cast<long>(WA * std::abs(ang(i, ci) - ang(nb, choice[nb]))); }
+                if (r + 1 < static_cast<int>(n)) { const std::size_t nb = ordA[r + 1]; c += static_cast<long>(WA * std::abs(ang(i, ci) - ang(nb, choice[nb]))); }
                 return c;
             };
             const auto cost = [&]() -> long {
                 long c = 0;
                 for (std::size_t i = 0; i < n; ++i) c += static_cast<long>(cands[i][choice[i]].base);
                 for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) c += static_cast<long>(pconf(i, choice[i], j, choice[j])) * WC + static_cast<long>(inv(i, choice[i], j, choice[j])) * WO;
+                for (int k = 0; k + 1 < static_cast<int>(n); ++k) { const std::size_t a = ordA[k], b = ordA[k + 1]; c += static_cast<long>(WA * std::abs(ang(a, choice[a]) - ang(b, choice[b]))); }
                 return c;
             };
             std::uint32_t rng = 2463534242u;
@@ -1117,7 +1128,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             // random restarts escape local minima. Keep the best layout seen.
             long best_cost = cost(), prev_best = best_cost;
             int stale = 0;
-            for (int restart = 0; restart <= 140; ++restart) {
+            for (int restart = 0; restart <= 260; ++restart) {
                 if (restart > 0) for (std::size_t i = 0; i < n; ++i) choice[i] = rnd(std::min<int>(28, static_cast<int>(cands[i].size())));
                 for (int iter = 0; iter < 45; ++iter) {
                     bool improved = false;
@@ -1131,7 +1142,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                     if (!improved) break;
                 }
                 if (best_cost < prev_best) { prev_best = best_cost; stale = 0; } else ++stale;
-                if (best_cost < WC && stale >= 18) break; // 0 conflicts reached and no further improvement -> stop
+                if (best_cost < WC && stale >= 30) break; // 0 conflicts reached and no further improvement -> stop
             }
             choice = best;
             for (std::size_t i = 0; i < n; ++i) {
@@ -1168,11 +1179,15 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             // leader to the branch midpoint (p.nx,p.ny); attach point (p.cx,p.cy) chosen above.
             if (std::abs(p.cx - p.nx) > p.fs * 0.4 || std::abs(p.cy - p.ny) > p.fs * 0.4)
                 pdf.line(p.nx, p.ny, p.cx, p.cy, GREY, 0.3);
-            // stacked text: one substitution per line, top-to-bottom within the box
+            // stacked text: one substitution per line, each vertically CENTRED in its row so the
+            // glyphs fill the collision box (pdf.text anchors the glyph top at y; a cap is ~0.72*fs
+            // tall, so top = row-centre - 0.36*fs). This makes the box match the rendered text, so
+            // the mid-right attach (p.cx,p.cy = box centre) meets the text mid-height, and overlap
+            // tests are computed where the text actually is.
             const double lineh = p.fs * 1.18;
             const auto toks = split_ws(p.text);
             for (std::size_t i = 0; i < toks.size(); ++i)
-                pdf.text(p.x0, p.y0 + static_cast<double>(i) * lineh + p.fs * 0.85, toks[i], p.fs, p.color, /*center=*/false, /*monospace=*/true);
+                pdf.text(p.x0, p.y0 + (static_cast<double>(i) + 0.5) * lineh - p.fs * 0.36, toks[i], p.fs, p.color, /*center=*/false, /*monospace=*/true);
         }
     }
 
