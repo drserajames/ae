@@ -22,6 +22,7 @@ int main(int argc, char* const argv[])
         std::vector<std::string_view> positional;
         ae::tal::TreeDrawParameters params;
         std::string_view settings_file;
+        std::string mrca_sidecar; // --mrca-sidecar=PATH: write the WYSIWYG editor geometry sidecar (applied after --settings)
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg{argv[i]};
             if (arg == "--labels")
@@ -62,6 +63,8 @@ int main(int argc, char* const argv[])
                 params.ladderize = std::string{arg.substr(12)};
             else if (arg.substr(0, 11) == "--settings=")
                 settings_file = arg.substr(11);
+            else if (arg.substr(0, 15) == "--mrca-sidecar=")
+                mrca_sidecar = std::string{arg.substr(15)};
             else
                 positional.push_back(arg);
         }
@@ -81,6 +84,8 @@ int main(int argc, char* const argv[])
         double image_size = 1000.0;
         if (!settings_file.empty())
             params = ae::tal::load_draw_settings(std::filesystem::path{settings_file}, &image_size);
+        if (!mrca_sidecar.empty()) // CLI flag wins over (and survives) the settings load
+            params.mrca_label_sidecar = mrca_sidecar;
         if (positional.size() > 2)
             image_size = std::stod(std::string{positional[2]});
         const auto tree = ae::tree::load(std::filesystem::path{positional[0]});

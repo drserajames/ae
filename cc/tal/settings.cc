@@ -236,7 +236,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
             if (!entry.is_object())
                 continue;
             MrcaLabel label{.first = get_string(entry["first"]), .last = get_string(entry["last"]), .text = get_string(entry["text"]),
-                            .color = get_string(entry["color"]), .size = get_double(entry["size"], 0.0)};
+                            .color = get_string(entry["color"]), .size = get_double(entry["size"], 0.0), .pinned = get_bool(entry["pinned"])};
             if (const auto& offset = entry["offset"]; offset.is_array() && offset.array().size() == 2) {
                 label.offset_x = get_double(offset.array()[0], 0.0);
                 label.offset_y = get_double(offset.array()[1], 0.0);
@@ -246,6 +246,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         }
     }
     params.mrca_labels_auto_place = get_bool(config["mrca_labels_auto_place"]);
+    params.mrca_label_sidecar = get_string(config["mrca_label_sidecar"]);
 
     return params;
 
