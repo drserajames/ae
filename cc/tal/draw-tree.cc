@@ -1174,6 +1174,40 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 }
                 if (!any) break;
             }
+            // PHASE A3 — focused-window repair. A pair can stay in conflict because the whole local
+            // cluster is congested: relieving it needs the labels ABOVE/BELOW to lift and open a gap,
+            // which no single/pairwise move tries (lifting an innocent neighbour only raises its own
+            // cost). So re-optimise a small branch-y WINDOW around the conflict — the conflicting pair
+            // plus their neighbours — all together, with random restarts. This finds that coordinated
+            // shift. (No-op on trees already conflict-free.)
+            for (int pass = 0; pass < 8; ++pass) {
+                const int before = conf_total();
+                if (before == 0) break;
+                std::size_t pi = n, pj = n; // first remaining conflicting pair
+                for (std::size_t i = 0; i < n && pi == n; ++i) for (std::size_t j = i + 1; j < n; ++j) if (pconf(i, choice[i], j, choice[j]) > 0) { pi = i; pj = j; break; }
+                if (pi == n) break;
+                const int W = 6; // branch-order neighbours each side to free up
+                const int lo = std::max(0, std::min(rankA[pi], rankA[pj]) - W), hi = std::min(static_cast<int>(n) - 1, std::max(rankA[pi], rankA[pj]) + W);
+                std::vector<std::size_t> win; for (int r = lo; r <= hi; ++r) win.push_back(ordA[r]);
+                std::vector<int> bestwin; for (std::size_t w : win) bestwin.push_back(choice[w]);
+                int bestwc = conf_total(); // pure feasibility during repair (order is restored by Phase B)
+                for (int rs = 0; rs <= 600 && bestwc > 0; ++rs) {
+                    if (rs > 0) for (std::size_t w : win) choice[w] = rnd(static_cast<int>(cands[w].size()));
+                    for (int it = 0; it < 40; ++it) {
+                        bool imp = false;
+                        for (std::size_t w : win) {
+                            int bc = choice[w]; long bv = static_cast<long>(conf_i(w, bc)) * 1000000L + static_cast<long>(cands[w][bc].base);
+                            for (int c = 0; c < static_cast<int>(cands[w].size()); ++c) { const long v = static_cast<long>(conf_i(w, c)) * 1000000L + static_cast<long>(cands[w][c].base); if (v < bv) { bv = v; bc = c; } }
+                            if (bc != choice[w]) { choice[w] = bc; imp = true; }
+                        }
+                        const int s = conf_total();
+                        if (s < bestwc) { bestwc = s; bestwin.clear(); for (std::size_t w : win) bestwin.push_back(choice[w]); }
+                        if (bestwc == 0 || !imp) break;
+                    }
+                }
+                for (std::size_t k = 0; k < win.size(); ++k) choice[win[k]] = bestwin[k];
+                if (conf_total() >= before) break; // window couldn't improve -> give up
+            }
             // PHASE B — refine aesthetics (vertical order, up-right slope, short & near-parallel leaders)
             // WITHOUT ever reintroducing a conflict: a label may only move to a candidate that has no
             // more conflicts (vs the others' current positions) than it has now, so global conflicts
