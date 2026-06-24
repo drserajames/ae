@@ -520,14 +520,8 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
                 for slot in occupied:
                     lo, hi = scale.slot_date_range(slot)
                     style.add_modifier(selector={ag_key: True, "!D": [lo, hi]}, only="antigens", fill=scale.slot_color(slot), raise_=True)
-        # vaccine marks + on-map strain labels, on top — redraw from the report's -vaccines data
-        # (colours + label text) at AD's small sig-page sizes (mark 15, label 9; report uses 40/30).
-        for vac in vaccine_marks:
-            mod = {"only": "antigens", "size": VACCINE_SIZE, "outline": "black", "outline_width": 1.0, "raise_": True,
-                   "label": {"text": vac["text"], "size": VACCINE_LABEL_SIZE, "offset": vac.get("offset", [0, 1])}}
-            if vac.get("fill"):
-                mod["fill"] = vac["fill"]
-            style.add_modifier(selector={"!i": vac["index"]}, **mod)
+        # (AD's sig-page maps do NOT specially colour/label the vaccine antigens — they read as
+        # ordinary in-section date-coloured points — so no vaccine marks are applied here.)
         # serum circles (opt-in): empirical circle for each of the section's sera, plus a small
         # dark serum point so the circle centre is visible (AD draws these only when requested).
         if serum_circles and sr_idx:
@@ -537,10 +531,13 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
                                         priority=base_priority + 100 + si)
             style.add_modifier(parent=sc_name)
             style.add_modifier(selector={sr_key: True}, only="sera", fill="black", size=15, raise_=True)
-        # in-map title: small Helvetica, top-left — AD draws "{prefix}. {label} {aa}"
+        # in-map title: small Helvetica, hard into the top-left corner above the first gridline
+        # (AD) — kateri's default title offset is (30, 30), too far in; pull it close to the corner.
         style.plot_title.text.text = section_title(section)
         style.plot_title.text.font_size = MAP_TITLE_SIZE
         style.plot_title.text.font_face = "helvetica"
         style.plot_title.text.font_weight = "normal"
+        style.plot_title.box.origin = "tl"
+        style.plot_title.box.offset(8, 8)
         results.append({"name": name, "title": section_title(section), "n_antigens": len(ag_idx), "n_sera": len(sr_idx)})
     return results
