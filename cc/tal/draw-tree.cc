@@ -412,11 +412,11 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         // matrix, grey matches-chart dash, hz-section markers (rightmost, next to the maps).
         if (label_w > 0.0)     { cursor += gap; x_label0 = cursor;  cursor += label_w; }
         if (clade_w > 0.0)     { cursor += gap; x_clade0 = cursor;  cursor += clade_w; }
-        // hz-section markers sit just LEFT of the matrix (close to the tree) like AD's section
-        // brackets — not in the right margin by the maps.
-        if (hz_marker_w > 0.0) { cursor += gap; x_hzmark0 = cursor; cursor += hz_marker_w; }
         if (ts_w > 0.0)        { cursor += gap; x_ts0 = cursor;     cursor += ts_w; }
         if (grey_dash_w > 0.0) { cursor += gap; x_grey0 = cursor;   cursor += grey_dash_w; }
+        // hz-section markers on the RIGHT of the time series (AD), hugging the grey-dash/matrix
+        // (small gap) so the brackets sit close to the time series rather than out by the maps.
+        if (hz_marker_w > 0.0) { cursor += gap * 0.25; x_hzmark0 = cursor; cursor += hz_marker_w; }
     }
     else {
         // AD layout-tree-only order: labels, time-series matrix, clades, then aa dash-bars.
@@ -757,15 +757,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 const Color col = viridis((i + 0.5) / nseg);
                 pdf.rectangle(x_ts0 + (static_cast<double>(i) / nseg) * ts_w, key_y, ts_w / nseg + 0.6, key_h, col, 0.0, col);
             }
-            pdf.line(x_ts0, key_y, x_ts0 + ts_w, key_y, BLACK, 0.3);                     // frame: top
-            pdf.line(x_ts0, key_y + key_h, x_ts0 + ts_w, key_y + key_h, BLACK, 0.3);     // bottom
-            pdf.line(x_ts0, key_y, x_ts0, key_y + key_h, BLACK, 0.3);                     // left
-            pdf.line(x_ts0 + ts_w, key_y, x_ts0 + ts_w, key_y + key_h, BLACK, 0.3);       // right
-            const double key_fs = std::clamp(0.011 * height, 4.0, 9.0);
-            const auto ym = [](const std::string& d) { return d.size() >= 7 ? d.substr(0, 7) : d; };
-            pdf.text(x_ts0, key_y + key_h + key_fs * 1.05, ym(time_series.slots.front().first), key_fs, BLACK, false);
-            const std::string last = ym(time_series.slots.back().first);
-            pdf.text(x_ts0 + ts_w - pdf.text_size(last, key_fs).first, key_y + key_h + key_fs * 1.05, last, key_fs, BLACK, false);
+            // AD draws just the gradient bar — no bounding box, no date labels under it.
         }
     }
 
@@ -910,12 +902,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             pdf.line(spine_x - arm, y0, spine_x + arm, y0, BLACK, 0.6); // top arm
             pdf.line(spine_x - arm, y1, spine_x + arm, y1, BLACK, 0.6); // bottom arm
             if (!section.prefix.empty()) {
-                // letter at the TOP of the line, just to its right, overlapping it (small white
-                // background so it stays legible over the line).
+                // letter hard at the TOP of the line, overlapping it (sits over the line, with a
+                // tight white background so the line doesn't cut through it) — AD style.
                 const auto [tw, th] = pdf.text_size(section.prefix, label_fs);
-                const double lx = spine_x + label_fs * 0.18;
-                const double ly = y0 + th * 1.05;
-                pdf.rectangle(lx - label_fs * 0.12, ly - th * 1.05, tw + label_fs * 0.24, th * 1.25, WHITE, 0.0, WHITE);
+                const double lx = spine_x - label_fs * 0.06;  // overlaps the line
+                const double ly = y0 + th * 0.92;             // hard at the top
+                pdf.rectangle(lx - label_fs * 0.08, ly - th * 1.0, tw + label_fs * 0.16, th * 1.16, WHITE, 0.0, WHITE);
                 pdf.text(lx, ly, section.prefix, label_fs, BLACK, /*center=*/false);
             }
         }
