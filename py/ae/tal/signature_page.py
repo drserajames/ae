@@ -121,9 +121,24 @@ def _latex_escape(text: str) -> str:
     return "".join(_LATEX_SPECIAL.get(ch, ch) for ch in str(text))
 
 
+def _pdf_aspect(pdf, default: float = 0.7) -> float:
+    """width/height of a PDF's first page (for sizing the tree panel). Uses pdfinfo."""
+    pdfinfo = shutil.which("pdfinfo") or "/Library/TeX/texbin/pdfinfo"
+    try:
+        out = subprocess.check_output([pdfinfo, str(pdf)], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            if line.startswith("Page size:"):
+                w, h = line.split(":", 1)[1].split("x")[:2]
+                return float(w.strip()) / float(h.strip().split()[0])
+    except Exception:
+        pass
+    return default
+
+
 def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions: Optional[Sequence[str]] = None,
                  page_title: Optional[str] = None, tree_caption: Optional[str] = None, columns: Optional[int] = None,
-                 paper_mm: tuple = (297.0, 210.0), margin_mm: float = 6.0, frame: bool = False, sans: bool = False) -> Path:
+                 paper_mm: tuple = (297.0, 210.0), margin_mm: float = 6.0, frame: bool = False, sans: bool = False,
+                 auto_width: bool = False) -> Path:
     """Compose the tree (left) and an R×C grid of antigenic maps (right) onto one landscape
     page via `pdflatex`. The richer counterpart to `compose_side_by_side`: optional per-map
     captions, a page title, and a real grid (vs a 1×N stack).
@@ -149,20 +164,28 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
     cols = columns if (columns and columns > 0) else max(1, math.ceil(math.sqrt(len(maps))))
     rows = math.ceil(len(maps) / cols)
     paper_w, paper_h = paper_mm
-    # Size each map cell to fit BOTH the right panel's width (cols across) and the
-    # printable height (rows down, leaving room for a caption+gap per row and the
-    # optional page title) so the whole figure stays on one page.
-    right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
     title_mm = 9.0 if page_title else 0.0
-    # height available for the panels, with a safety margin so the row never spills
-    # to a 2nd page (the taller of tree/grid sets the row height)
-    avail_h = paper_h - 2.0 * margin_mm - title_mm - 6.0
-    cell_by_w = right_panel_mm / cols - 3.0
-    # per-row overhead: caption line (if any) + vertical gap; less when unframed/untitled
+    # leave generous vertical headroom: the minipage[t] baseline + inter-row glue add ~10-15mm
+    # of overhead beyond the nominal cell heights, which otherwise spills to a 2nd page.
+    avail_h = paper_h - 2.0 * margin_mm - title_mm - 16.0
     row_overhead = 7.0 if any(caps) else 3.0
-    cell_by_h = avail_h / rows - row_overhead
-    cell_mm = max(10.0, min(cell_by_w, cell_by_h))
+    col_gap_mm, panel_gap_mm = 2.0, 5.0
+    if auto_width:
+        # AD-like: fix the page HEIGHT, give each map a fixed square cell (rows fill the
+        # height), the tree its natural width (its aspect × height), and let the page WIDTH
+        # grow with the number of map columns — so 2-col B/Vic is narrow, 4-col H3 is wide.
+        cell_mm = max(20.0, avail_h / rows - row_overhead)
+        tree_w_mm = _pdf_aspect(tree_pdf) * avail_h
+        grid_w_mm = cols * cell_mm + (cols - 1) * col_gap_mm
+        paper_w = 2.0 * margin_mm + tree_w_mm + panel_gap_mm + grid_w_mm
+        tree_w_frac = tree_w_mm / (paper_w - 2.0 * margin_mm)
+    else:
+        # Fixed paper: size each cell to fit both the right panel's width and the height.
+        right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
+        cell_mm = max(10.0, min(right_panel_mm / cols - 3.0, avail_h / rows - row_overhead))
+        tree_w_frac = 0.5
     tree_h_frac = round(avail_h / (paper_h - 2.0 * margin_mm), 3)
+    grid_panel_frac = round((cols * cell_mm + cols * col_gap_mm + 2.0) / (paper_w - 2.0 * margin_mm), 3)
 
     work = Path(tempfile.mkdtemp(prefix="tal-grid-"))
     try:
@@ -171,7 +194,10 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
             shutil.copyfile(m, str(work / f"map{i}.pdf"))
 
         def boxed(i: int) -> str:
-            img = rf"\includegraphics[width=\linewidth]{{map{i}.pdf}}"
+            # Bound the map by BOTH the cell width and height (keepaspectratio): kateri's
+            # auto-fit maps aren't always square, so a width-only fit would make a tall map
+            # overflow the cell and spill the grid to a 2nd page.
+            img = rf"\includegraphics[width=\linewidth,height={cell_mm:.1f}mm,keepaspectratio]{{map{i}.pdf}}"
             # AD draws a thin black border around each map; kateri draws none, so frame here.
             return rf"\setlength{{\fboxsep}}{{0pt}}\setlength{{\fboxrule}}{{0.5pt}}\fbox{{{img}}}" if frame else img
 
@@ -192,16 +218,17 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
 
         tex = "\n".join([
             r"\documentclass{article}",
-            rf"\usepackage[paperwidth={paper_w:.0f}mm,paperheight={paper_h:.0f}mm,margin={margin_mm:.0f}mm]{{geometry}}",
+            rf"\usepackage[paperwidth={paper_w:.0f}mm,paperheight={paper_h:.0f}mm,margin={margin_mm:.0f}mm,"
+            r"headheight=0pt,headsep=0pt,footskip=0pt]{geometry}",
             r"\usepackage{graphicx}",
             (r"\usepackage{helvet}\renewcommand{\familydefault}{\sfdefault}" if sans else "%"),
             r"\setlength{\parindent}{0pt}\pagestyle{empty}",
             r"\begin{document}",
             title_tex + r"\noindent",
-            r"\begin{minipage}[t]{0.5\linewidth}\vspace{0pt}\centering",
+            rf"\begin{{minipage}}[t]{{{tree_w_frac:.3f}\linewidth}}\vspace{{0pt}}\centering",
             rf"\includegraphics[width=\linewidth,height={tree_h_frac}\textheight,keepaspectratio]{{tree.pdf}}{tree_cap_tex}",
             r"\end{minipage}\hfill",
-            r"\begin{minipage}[t]{0.48\linewidth}\vspace{0pt}\centering",
+            rf"\begin{{minipage}}[t]{{{grid_panel_frac:.3f}\linewidth}}\vspace{{0pt}}\centering",
             grid,
             r"\end{minipage}",
             r"\end{document}",
@@ -547,7 +574,8 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         # the page title is drawn by the tree (above), not the composite.
         columns = math.ceil(len(map_pdfs) / 3)
         compose_grid(tree_pdf, map_pdfs, output, captions=None,
-                     page_title=None, tree_caption=tree_caption, columns=columns, frame=True, sans=True)
+                     page_title=None, tree_caption=tree_caption, columns=columns, frame=True, sans=True,
+                     auto_width=True)
         return Path(output)
     finally:
         if not keep_temp:
