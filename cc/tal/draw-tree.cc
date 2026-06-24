@@ -1052,6 +1052,25 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 return segs_cross(x0, y0, x1, y1, bx0, by0, bx1, by0) || segs_cross(x0, y0, x1, y1, bx1, by0, bx1, by1)
                     || segs_cross(x0, y0, x1, y1, bx1, by1, bx0, by1) || segs_cross(x0, y0, x1, y1, bx0, by1, bx0, by0);
             };
+            // --- continuous geometry, for the SOFT cost (gives the search a gradient toward feasibility) ---
+            const auto pt_seg_d = [](double px, double py, double ax, double ay, double bx, double by) -> double {
+                const double dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+                double t = l2 > 0.0 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0.0; t = std::clamp(t, 0.0, 1.0);
+                return std::hypot(px - (ax + t * dx), py - (ay + t * dy));
+            };
+            const auto seg_seg_d = [&](double ax, double ay, double bx, double by, double cx, double cy, double dx, double dy) -> double {
+                if (segs_cross(ax, ay, bx, by, cx, cy, dx, dy)) return 0.0; // crossing => zero distance
+                return std::min({pt_seg_d(ax, ay, cx, cy, dx, dy), pt_seg_d(bx, by, cx, cy, dx, dy), pt_seg_d(cx, cy, ax, ay, bx, by), pt_seg_d(dx, dy, ax, ay, bx, by)});
+            };
+            const auto seg_box_len = [](double ax, double ay, double bx, double by, double bx0, double by0, double bx1, double by1) -> double {
+                double t0 = 0.0, t1 = 1.0; const double dx = bx - ax, dy = by - ay;       // Liang-Barsky clip: length of AB inside the box
+                const double p[4] = {-dx, dx, -dy, dy}, q[4] = {ax - bx0, bx1 - ax, ay - by0, by1 - ay};
+                for (int e = 0; e < 4; ++e) {
+                    if (p[e] == 0.0) { if (q[e] < 0.0) return 0.0; }
+                    else { const double r = q[e] / p[e]; if (p[e] < 0.0) { if (r > t1) return 0.0; if (r > t0) t0 = r; } else { if (r < t0) return 0.0; if (r < t1) t1 = r; } }
+                }
+                return t1 > t0 ? std::hypot(dx, dy) * (t1 - t0) : 0.0;
+            };
             struct Cand { double x0, y0, x1, y1, cx, cy, base; };
             std::vector<std::vector<Cand>> cands(anchors.size());
             const double rmax = 0.35 * height;
@@ -1099,6 +1118,21 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 const double cyi = (cands[i][ci].y0 + cands[i][ci].y1) * 0.5, cyj = (cands[j][cj].y0 + cands[j][cj].y1) * 0.5;
                 return ((anchors[i].ny < anchors[j].ny) != (cyi < cyj)) ? 1 : 0;
             };
+            // SOFT pair penalty — a CONTINUOUS measure of how badly two labels interfere (penetration
+            // depth, not yes/no). This is what lets the search "see" that one placement is closer to
+            // feasible than another, and thus take the position of other leaders/labels into account.
+            const double leadthr = mrca_fs * 0.5; // leaders nearer than this are pushed apart (0 distance == crossing)
+            const auto psoft = [&](std::size_t i, int ci, std::size_t j, int cj) -> double {
+                const Cand& a = cands[i][ci]; const Cand& b = cands[j][cj]; double pen = 0.0;
+                const double ox = std::min(a.x1, b.x1) - std::max(a.x0, b.x0) + m; // box-overlap depth (+margin)
+                const double oy = std::min(a.y1, b.y1) - std::max(a.y0, b.y0) + m;
+                if (ox > 0.0 && oy > 0.0) pen += 6.0 * (ox / mrca_fs) * (oy / mrca_fs);                                                       // penetration AREA
+                pen += 5.0 * seg_box_len(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0 - mt, b.y0 - mt, b.x1 + mt, b.y1 + mt) / mrca_fs;  // i's leader length inside j's text
+                pen += 5.0 * seg_box_len(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0 - mt, a.y0 - mt, a.x1 + mt, a.y1 + mt) / mrca_fs;  // j's leader inside i's text
+                const double d = seg_seg_d(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy);
+                if (d < leadthr) pen += 4.0 * (leadthr - d) / mrca_fs;                                                                        // leaders crossing / too close
+                return pen;
+            };
             // label order down the tree (by branch-y), for the "adjacent leaders near-parallel" term (#3)
             std::vector<std::size_t> ordA(n);
             for (std::size_t i = 0; i < n; ++i) ordA[i] = i;
@@ -1129,30 +1163,38 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const auto conf_total = [&]() { int c = 0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) c += pconf(i, choice[i], j, choice[j]); return c; };
             const auto inv_i = [&](std::size_t i, int ci) { int c = 0; for (std::size_t j = 0; j < n; ++j) if (j != i) c += inv(i, ci, j, choice[j]); return c; };
             const auto inv_total = [&]() { int c = 0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) c += inv(i, choice[i], j, choice[j]); return c; };
+            const auto soft_i = [&](std::size_t i, int ci) { double s = 0.0; for (std::size_t j = 0; j < n; ++j) if (j != i) s += psoft(i, ci, j, choice[j]); return s; };
+            const auto soft_total = [&]() { double s = 0.0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) s += psoft(i, choice[i], j, choice[j]); return s; };
+            // Phase-A objective (double): hard conflicts dominate, then the SOFT penetration gradient
+            // (this is the key change — it lets a move that merely *reduces* interference win, so the
+            // search flows toward feasibility instead of stalling on a flat all-or-nothing landscape),
+            // then branch-y order, then leader length.
+            const double WSOFT = 5000.0;
+            const auto acost_i = [&](std::size_t i, int ci) -> double { return static_cast<double>(conf_i(i, ci)) * 1.0e6 + soft_i(i, ci) * WSOFT + static_cast<double>(inv_i(i, ci)) * static_cast<double>(WO) + static_cast<double>(cands[i][ci].base); };
+            const auto scoreA = [&]() -> double { return static_cast<double>(conf_total()) * 1.0e6 + soft_total() * WSOFT + static_cast<double>(inv_total()) * static_cast<double>(WO); };
             // PHASE A — find a CONFLICT-FREE layout, and among those prefer one in branch-y ORDER
             // (ordered labels over ordered branches cannot cross, so order both fixes #5 and removes
             // the otherwise-stubborn crossings). Score = conflicts >> inversions >> leader length;
             // random restarts escape local minima. This reliably reaches zero on dense trees.
             best = choice;
-            const auto scoreA = [&]() -> long { return static_cast<long>(conf_total()) * 1000000L + static_cast<long>(inv_total()) * 1000L; };
-            long best_scoreA = scoreA();
+            double best_scoreA = scoreA();
             int stale = 0;
-            for (int restart = 0; restart <= 1500; ++restart) {
+            for (int restart = 0; restart <= 400; ++restart) {
                 if (restart > 0) for (std::size_t i = 0; i < n; ++i) choice[i] = rnd(std::min<int>(28, static_cast<int>(cands[i].size())));
                 for (int iter = 0; iter < 60; ++iter) {
                     bool improved = false;
                     for (std::size_t i = 0; i < n; ++i) {
-                        int bc = choice[i]; long bv = static_cast<long>(conf_i(i, bc)) * 1000000L + static_cast<long>(inv_i(i, bc)) * 1000L + static_cast<long>(cands[i][bc].base);
-                        for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) { const long v = static_cast<long>(conf_i(i, ci)) * 1000000L + static_cast<long>(inv_i(i, ci)) * 1000L + static_cast<long>(cands[i][ci].base); if (v < bv) { bv = v; bc = ci; } }
+                        int bc = choice[i]; double bv = acost_i(i, bc);
+                        for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) { const double v = acost_i(i, ci); if (v < bv) { bv = v; bc = ci; } }
                         if (bc != choice[i]) { choice[i] = bc; improved = true; }
                     }
-                    const long s = scoreA();
+                    const double s = scoreA();
                     if (s < best_scoreA) { best_scoreA = s; best = choice; }
                     if (!improved) break;
                 }
-                if (best_scoreA < 1000000L) { if (++stale >= 120) break; } // conflict-free reached; keep refining order a while, then stop
+                if (best_scoreA < 1.0e6) { if (++stale >= 120) break; } // conflict-free reached; keep refining a while, then stop
             }
-            choice = best; // fewest conflicts (zero if feasible), best order among those
+            choice = best; // fewest conflicts (zero if feasible), then least interference, then order
             // PHASE A2 — pairwise (2-opt) repair. A pair that conflicts only with each other can't be
             // fixed by single-label moves (moving one re-conflicts the other); try moving BOTH together
             // to a combination that leaves each conflict-free against everyone.
@@ -1191,7 +1233,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 std::vector<std::size_t> win; for (int r = lo; r <= hi; ++r) win.push_back(ordA[r]);
                 std::vector<int> bestwin; for (std::size_t w : win) bestwin.push_back(choice[w]);
                 int bestwc = conf_total(); // pure feasibility during repair (order is restored by Phase B)
-                for (int rs = 0; rs <= 600 && bestwc > 0; ++rs) {
+                for (int rs = 0; rs <= 250 && bestwc > 0; ++rs) {
                     if (rs > 0) for (std::size_t w : win) choice[w] = rnd(static_cast<int>(cands[w].size()));
                     for (int it = 0; it < 40; ++it) {
                         bool imp = false;
