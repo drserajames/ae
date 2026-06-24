@@ -54,11 +54,11 @@ WHITE = "#ffffff"
 # Small AD-like sizes (kateri px), tuned by eye against the AD reference. AD's data values
 # are test 3 / ref 5 / serum 5 / in-section 5 / vaccine 15; kept small here so the grid maps
 # read like AD's rather than the report's full-size maps (reset 20 / vaccine 40).
-BASE_ANTIGEN = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 4}
-REF_ANTIGEN_SIZE = 6
-BASE_SERUM = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 5}
+BASE_ANTIGEN = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 13}
+REF_ANTIGEN_SIZE = 18
+BASE_SERUM = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 14}
 INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE, "outline_width": 0.5}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.5, "size": 7}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.5, "size": 19}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
@@ -536,7 +536,7 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
             semantic.serum_circle.style(chart, style_name=sc_name, sera=list(sr_idx), fold=serum_circle_fold,
                                         priority=base_priority + 100 + si)
             style.add_modifier(parent=sc_name)
-            style.add_modifier(selector={sr_key: True}, only="sera", fill="black", size=6, raise_=True)
+            style.add_modifier(selector={sr_key: True}, only="sera", fill="black", size=15, raise_=True)
         # in-map title: small Helvetica, top-left — AD draws "{prefix}. {label} {aa}"
         style.plot_title.text.text = section_title(section)
         style.plot_title.text.font_size = MAP_TITLE_SIZE
