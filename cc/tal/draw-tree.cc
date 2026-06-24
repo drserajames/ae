@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -411,9 +412,11 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         // matrix, grey matches-chart dash, hz-section markers (rightmost, next to the maps).
         if (label_w > 0.0)     { cursor += gap; x_label0 = cursor;  cursor += label_w; }
         if (clade_w > 0.0)     { cursor += gap; x_clade0 = cursor;  cursor += clade_w; }
+        // hz-section markers sit just LEFT of the matrix (close to the tree) like AD's section
+        // brackets — not in the right margin by the maps.
+        if (hz_marker_w > 0.0) { cursor += gap; x_hzmark0 = cursor; cursor += hz_marker_w; }
         if (ts_w > 0.0)        { cursor += gap; x_ts0 = cursor;     cursor += ts_w; }
         if (grey_dash_w > 0.0) { cursor += gap; x_grey0 = cursor;   cursor += grey_dash_w; }
-        if (hz_marker_w > 0.0) { cursor += gap; x_hzmark0 = cursor; cursor += hz_marker_w; }
     }
     else {
         // AD layout-tree-only order: labels, time-series matrix, clades, then aa dash-bars.
@@ -457,8 +460,15 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // range is inset by a date-label band top and bottom (the tree fills that full range, the
     // title sits top-left within the top band). When there's no matrix, only the title needs
     // a small top band.
-    const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0) ? 0.045 * height : 0.0; // shallow band: AD's date pair is compact
-    const double top_reserve = bottom_reserve > 0.0 ? bottom_reserve : (params.title.empty() ? 0.0 : 0.035 * height);
+    // Signature pages (hz_section_labels) extend the matrix UP toward the maps (small top band)
+    // and reserve a deeper BOTTOM band for the date-colour key (#4) under the matrix; standalone
+    // trees keep the symmetric date-label bands.
+    const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0)
+        ? (params.hz_section_labels ? 0.075 * height : 0.045 * height)
+        : 0.0;
+    const double top_reserve = (ts_w > 0.0 || dash_w > 0.0)
+        ? (params.hz_section_labels ? 0.022 * height : 0.045 * height)
+        : (params.title.empty() ? 0.0 : 0.035 * height);
 
     // --- vertical (shared) + tree horizontal transforms ---
     const double height_units = layout.height > 0.0 ? layout.height : 1.0;
@@ -730,6 +740,33 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 pdf.text_rotated(lx, top_anchor_y, label, slot_fs, BLACK, angle);
             }
         }
+
+        // --- date-colour key (#4, AD): a horizontal viridis gradient under the matrix, keying the
+        //     date→colour scale used to colour antigens in the section maps. Sig pages only. ---
+        if (params.hz_section_labels) {
+            // viridis quadratic-bezier gradient (anchors #440154, #40ffff, #fde725), per-term trunc
+            const auto viridis = [](double t) -> Color {
+                const double u = 1.0 - t;
+                const auto ch = [&](int a, int b, int c) { return static_cast<int>(u * u * a + 2.0 * u * t * b + t * t * c); };
+                return Color{static_cast<unsigned>((ch(0x44, 0x40, 0xfd) << 16) | (ch(0x01, 0xff, 0xe7) << 8) | ch(0x54, 0xff, 0x25))};
+            };
+            const double key_y = height - 0.040 * height;   // below the bottom date labels
+            const double key_h = 0.013 * height;
+            const int nseg = 72;
+            for (int i = 0; i < nseg; ++i) {
+                const Color col = viridis((i + 0.5) / nseg);
+                pdf.rectangle(x_ts0 + (static_cast<double>(i) / nseg) * ts_w, key_y, ts_w / nseg + 0.6, key_h, col, 0.0, col);
+            }
+            pdf.line(x_ts0, key_y, x_ts0 + ts_w, key_y, BLACK, 0.3);                     // frame: top
+            pdf.line(x_ts0, key_y + key_h, x_ts0 + ts_w, key_y + key_h, BLACK, 0.3);     // bottom
+            pdf.line(x_ts0, key_y, x_ts0, key_y + key_h, BLACK, 0.3);                     // left
+            pdf.line(x_ts0 + ts_w, key_y, x_ts0 + ts_w, key_y + key_h, BLACK, 0.3);       // right
+            const double key_fs = std::clamp(0.011 * height, 4.0, 9.0);
+            const auto ym = [](const std::string& d) { return d.size() >= 7 ? d.substr(0, 7) : d; };
+            pdf.text(x_ts0, key_y + key_h + key_fs * 1.05, ym(time_series.slots.front().first), key_fs, BLACK, false);
+            const std::string last = ym(time_series.slots.back().first);
+            pdf.text(x_ts0 + ts_w - pdf.text_size(last, key_fs).first, key_y + key_h + key_fs * 1.05, last, key_fs, BLACK, false);
+        }
     }
 
     // --- dash-bar-aa-at columns: per-leaf dash coloured by the amino acid at a position ---
@@ -856,11 +893,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         name_y.reserve(layout.leaves.size());
         for (const auto& ln : layout.leaves)
             name_y.emplace(ln.name, ln.y);
-        // AD HzSectionMarker::draw: the bracket is a "]" — spine on the RIGHT (adjacent to the
-        // maps), top/bottom arms extending LEFT across the column toward the matrix.
-        const double spine_x = x_hzmark0 + hz_marker_w * 0.88;  // spine near the right edge
-        const double arm_left = x_hzmark0;                      // arms reach left across the column
-        const double label_fs = std::clamp(hz_marker_w * 0.5, 6.0, 14.0);
+        // AD section marker: a vertical line (with short top/bottom arms, like a double-arrow)
+        // spanning the section, the section LETTER at the TOP just to the RIGHT of the line,
+        // overlapping it. The line sits near the tree (left) side of the column.
+        const double spine_x = x_hzmark0 + hz_marker_w * 0.18;  // line near the LEFT (tree side)
+        const double arm = hz_marker_w * 0.10;                  // short arms (arrowhead-ish)
+        const double label_fs = std::clamp(hz_marker_w * 0.62, 7.0, 16.0);
         for (const auto& section : params.hz_sections) {
             const auto itf = name_y.find(section.first), itl = name_y.find(section.last);
             if (itf == name_y.end() || itl == name_y.end())
@@ -868,17 +906,17 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             double y0 = dev_y(itf->second - 0.5), y1 = dev_y(itl->second + 0.5);
             if (y0 > y1)
                 std::swap(y0, y1);
-            pdf.line(spine_x, y0, spine_x, y1, BLACK, 0.6);     // spine (right)
-            pdf.line(arm_left, y0, spine_x, y0, BLACK, 0.6);    // top arm (extends left)
-            pdf.line(arm_left, y1, spine_x, y1, BLACK, 0.6);    // bottom arm (extends left)
+            pdf.line(spine_x, y0, spine_x, y1, BLACK, 0.6);            // section line
+            pdf.line(spine_x - arm, y0, spine_x + arm, y0, BLACK, 0.6); // top arm
+            pdf.line(spine_x - arm, y1, spine_x + arm, y1, BLACK, 0.6); // bottom arm
             if (!section.prefix.empty()) {
-                // section letter, vertically centred on the section and horizontally in the
-                // middle of the column, over a small white box so it stays legible (AD).
-                const double cy = (y0 + y1) / 2.0;
+                // letter at the TOP of the line, just to its right, overlapping it (small white
+                // background so it stays legible over the line).
                 const auto [tw, th] = pdf.text_size(section.prefix, label_fs);
-                const double lx = (arm_left + spine_x) / 2.0 - tw / 2.0;
-                pdf.rectangle(lx - label_fs * 0.15, cy - th * 0.6, tw + label_fs * 0.3, th * 1.2, WHITE, 0.0, WHITE);
-                pdf.text(lx, cy + th * 0.4, section.prefix, label_fs, BLACK, /*center=*/false);
+                const double lx = spine_x + label_fs * 0.18;
+                const double ly = y0 + th * 1.05;
+                pdf.rectangle(lx - label_fs * 0.12, ly - th * 1.05, tw + label_fs * 0.24, th * 1.25, WHITE, 0.0, WHITE);
+                pdf.text(lx, ly, section.prefix, label_fs, BLACK, /*center=*/false);
             }
         }
     }
@@ -952,12 +990,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         // AD draws these small, grey (all-nodes label colour grey30) and MONOSPACE, with a
         // tether (leader line) to the branch. Slightly smaller than before to match AD.
         const double mrca_fs = 0.0095 * height; // AD draw-aa-transitions default label scale ~0.01
-        struct Placed { double nx, ny, tx, ty, fs, x0, x1, y0, y1, cx, cy; int nlines; std::string text; Color color; };
+        struct Placed { double nx, ny, tx, ty, fs, x0, x1, y0, y1, cx, cy; int nlines; std::string text; Color color; int aidx{-1}; };
         // split an aa-transition label into its substitutions (one per line) so doubles/triples
         // stack vertically (AD style); the box is then max-token-wide and nlines tall.
         const auto split_ws = [](const std::string& s) { std::vector<std::string> out; std::string cur; for (char c : s) { if (c == ' ') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } } else cur += c; } if (!cur.empty()) out.push_back(cur); if (out.empty()) out.push_back(s); return out; };
         // resolve each curated label to its anchor (the MRCA branch point) + text metrics
-        struct Anchor { double nx, ny, mid_x, fs, tw, off_x, off_y; int nlines; std::string text; Color color; };
+        struct Anchor { double nx, ny, mid_x, fs, tw, off_x, off_y; int nlines; std::string text; Color color; bool pinned; std::string first, last; };
         std::vector<Anchor> anchors;
         for (const auto& label : params.mrca_labels) {
             const auto fi = leaf_by_name.find(label.first);
@@ -981,7 +1019,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const auto toks = split_ws(label.text);
             double tw = 0.0;
             for (const auto& t : toks) tw = std::max(tw, pdf.text_size(t, fs).first);
-            anchors.push_back({nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color});
+            anchors.push_back({nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color, label.pinned, label.first, label.last});
         }
 
         std::vector<Placed> done;
@@ -1076,8 +1114,24 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const double rmax = 0.35 * height;
             const double gapL = mrca_fs * 0.45; // min gap between the label's right edge and the branch
             const double pad = mrca_fs * 0.3;   // clearance kept clear of tree ink around each label
+            // PINNED labels (user dragged them in the WYSIWYG editor) are NOT auto-placed: each sits at
+            // its authored offset (box top-left = node point + offset*page — the editor's exact inverse)
+            // and is RESERVED in the occupancy grid up-front, so the auto search for the remaining labels
+            // routes around it (and the pairwise conflict terms keep their leaders/boxes off it too).
+            for (std::size_t i = 0; i < anchors.size(); ++i) {
+                if (!anchors[i].pinned) continue;
+                const double lineh = anchors[i].fs * 1.18, th = anchors[i].nlines * lineh, tw = anchors[i].tw;
+                const double x0 = anchors[i].nx + anchors[i].off_x * width, y0 = anchors[i].ny + anchors[i].off_y * height;
+                mark_box(x0 - pad, y0 - pad, tw + 2.0 * pad, th + 2.0 * pad);
+            }
             for (std::size_t i = 0; i < anchors.size(); ++i) {
                 const double fs = anchors[i].fs, lineh = fs * 1.18, th = anchors[i].nlines * lineh, tw = anchors[i].tw;
+                if (anchors[i].pinned) {
+                    // one fixed candidate at the authored offset; mid-right attach (same as the auto attach).
+                    const double x0 = anchors[i].nx + anchors[i].off_x * width, y0 = anchors[i].ny + anchors[i].off_y * height;
+                    cands[i].push_back({x0, y0, x0 + tw, y0 + th, x0 + tw, (2.0 * y0 + th) * 0.5, 0.0});
+                    continue;
+                }
                 const double ax = anchors[i].mid_x, ay = anchors[i].ny;
                 for (double r = mrca_fs * 0.7; r <= rmax; r += mrca_fs * 0.5) {
                     const int na = 28;
@@ -1271,7 +1325,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             }
             for (std::size_t i = 0; i < n; ++i) {
                 const Cand& c = cands[i][choice[i]];
-                done.push_back({anchors[i].mid_x, anchors[i].ny, c.x0, c.y1, anchors[i].fs, c.x0, c.x1, c.y0, c.y1, c.cx, c.cy, anchors[i].nlines, anchors[i].text, anchors[i].color});
+                done.push_back({anchors[i].mid_x, anchors[i].ny, c.x0, c.y1, anchors[i].fs, c.x0, c.x1, c.y0, c.y1, c.cx, c.cy, anchors[i].nlines, anchors[i].text, anchors[i].color, static_cast<int>(i)});
             }
             { int cc = 0;
               for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) {
@@ -1282,10 +1336,11 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         else {
             // legacy: honour each label's manual offset, then nudge overlaps downward
             std::vector<Placed> placed;
-            for (const auto& a : anchors) {
+            for (std::size_t i = 0; i < anchors.size(); ++i) {
+                const auto& a = anchors[i];
                 const double tx = a.nx + a.off_x * width;
                 const double ty = a.ny + a.off_y * height + a.fs * 0.3;
-                placed.push_back({a.nx, a.ny, tx, ty, a.fs, tx, tx + a.tw, ty - a.fs, ty, tx, ty - a.fs * 0.5, a.nlines, a.text, a.color});
+                placed.push_back({a.nx, a.ny, tx, ty, a.fs, tx, tx + a.tw, ty - a.fs, ty, tx, ty - a.fs * 0.5, a.nlines, a.text, a.color, static_cast<int>(i)});
             }
             std::sort(placed.begin(), placed.end(), [](const Placed& a, const Placed& b) { return a.y0 < b.y0; });
             for (auto& p : placed) {
@@ -1302,6 +1357,50 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 done.push_back(p);
             }
         }
+        // --- geometry sidecar for the WYSIWYG drag editor (tal-mrca-labels/1) ---
+        // Emits the page size and, per curated label, its identity ({first,last}), the branch ANCHOR
+        // (offset origin), the TETHER target (edge midpoint), the current placed BOX, and the OFFSET
+        // that reproduces that box if pinned (box_top_left = anchor + offset*page). The editor drags a
+        // box, inverts that formula to a new offset, and writes {offset,pinned:true} back to the .tal.
+        if (!params.mrca_label_sidecar.empty()) {
+            const auto jstr = [](const std::string& s) {
+                std::string o; o.reserve(s.size() + 2);
+                for (char c : s) {
+                    switch (c) {
+                        case '"': o += "\\\""; break;
+                        case '\\': o += "\\\\"; break;
+                        case '\n': o += "\\n"; break;
+                        case '\r': o += "\\r"; break;
+                        case '\t': o += "\\t"; break;
+                        default: if (static_cast<unsigned char>(c) < 0x20) fmt::format_to(std::back_inserter(o), "\\u{:04x}", static_cast<unsigned>(static_cast<unsigned char>(c))); else o += c;
+                    }
+                }
+                return o;
+            };
+            std::string j;
+            fmt::format_to(std::back_inserter(j),
+                           "{{\n  \"schema\": \"tal-mrca-labels/1\",\n  \"pdf\": \"{}\",\n  \"image_size\": {},\n"
+                           "  \"page\": {{ \"width\": {:.4f}, \"height\": {:.4f} }},\n  \"auto_place\": {},\n  \"labels\": [\n",
+                           jstr(output.filename().string()), image_size, width, height,
+                           params.mrca_labels_auto_place ? "true" : "false");
+            for (std::size_t k = 0; k < done.size(); ++k) {
+                const auto& p = done[k];
+                const Anchor& a = anchors[p.aidx];
+                const double off_x = (p.x0 - a.nx) / width, off_y = (p.y0 - a.ny) / height;
+                fmt::format_to(std::back_inserter(j),
+                               "    {{ \"id\": {}, \"first\": \"{}\", \"last\": \"{}\", \"text\": \"{}\", \"nlines\": {}, \"pinned\": {},\n"
+                               "      \"anchor\": {{ \"x\": {:.4f}, \"y\": {:.4f} }}, \"tether\": {{ \"x\": {:.4f}, \"y\": {:.4f} }},\n"
+                               "      \"box\": {{ \"x0\": {:.4f}, \"y0\": {:.4f}, \"x1\": {:.4f}, \"y1\": {:.4f} }},\n"
+                               "      \"offset\": {{ \"x\": {:.6f}, \"y\": {:.6f} }}, \"color\": \"#{:06x}\", \"fs\": {:.4f} }}{}\n",
+                               p.aidx, jstr(a.first), jstr(a.last), jstr(a.text), a.nlines, a.pinned ? "true" : "false",
+                               a.nx, a.ny, a.mid_x, a.ny, p.x0, p.y0, p.x1, p.y1, off_x, off_y, a.color.rgbI(), a.fs,
+                               k + 1 < done.size() ? "," : "");
+            }
+            j += "  ]\n}\n";
+            std::ofstream out{params.mrca_label_sidecar};
+            out << j;
+        }
+
         for (const auto& p : done) {
             // leader to the branch midpoint (p.nx,p.ny); attach point (p.cx,p.cy) chosen above.
             if (std::abs(p.cx - p.nx) > p.fs * 0.4 || std::abs(p.cy - p.ny) > p.fs * 0.4)
