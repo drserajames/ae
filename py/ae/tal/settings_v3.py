@@ -555,6 +555,12 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                                 ml["color"] = lab["color"]
                             if isinstance(lab.get("scale"), (int, float)):
                                 ml["size"] = lab["scale"]
+                        # A label the WYSIWYG drag editor has PINNED carries `pinned: true` on its
+                        # per-node entry: it is then placed at its offset (box top-left = node +
+                        # offset*page) and reserved as a fixed obstacle, while un-pinned labels still
+                        # auto-place around it. `pinned` implies an authored offset is present.
+                        if e.get("pinned"):
+                            ml["pinned"] = True
                         if "color" not in ml and isinstance(default_color, str):
                             ml["color"] = default_color           # all-nodes default (grey30)
                         if "size" not in ml and isinstance(default_scale, (int, float)):

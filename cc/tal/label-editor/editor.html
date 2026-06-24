@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tal MRCA label editor</title>
+<style>
+  :root { --accent:#1558d6; --pin:#c0392b; }
+  * { box-sizing: border-box; }
+  html,body { margin:0; height:100%; font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:#222; }
+  #app { display:flex; flex-direction:column; height:100%; }
+  header { display:flex; align-items:center; gap:10px; padding:6px 10px; background:#f4f5f7; border-bottom:1px solid #d9dbe0; flex:0 0 auto; }
+  header b { font-weight:600; }
+  header .sp { flex:1; }
+  button { font:inherit; padding:4px 10px; border:1px solid #c2c6cf; border-radius:5px; background:#fff; cursor:pointer; }
+  button:hover { background:#eef1f6; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.primary:disabled { opacity:.45; cursor:default; }
+  #status { color:#555; font-size:12px; }
+  #status.err { color:#c0392b; }
+  main { flex:1; display:flex; min-height:0; }
+  #stage { flex:1; position:relative; background:#fafbfc; overflow:hidden; }
+  svg#canvas { width:100%; height:100%; display:block; touch-action:none; }
+  aside { width:280px; flex:0 0 auto; border-left:1px solid #d9dbe0; overflow:auto; background:#fff; }
+  aside h3 { margin:0; padding:8px 10px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#666; background:#f4f5f7; position:sticky; top:0; }
+  .row { padding:6px 10px; border-bottom:1px solid #eee; cursor:pointer; display:flex; align-items:center; gap:8px; }
+  .row:hover { background:#f0f5ff; }
+  .row.sel { background:#e3edff; }
+  .row.pinned .dot { background:var(--pin); }
+  .row .dot { width:9px; height:9px; border-radius:50%; background:#9aa3b2; flex:0 0 auto; }
+  .row .t { flex:1; font-family:ui-monospace,Menlo,monospace; }
+  .row .mini { font-size:11px; color:#fff; background:var(--pin); border-radius:4px; padding:1px 6px; }
+  .row button.reset { padding:1px 6px; font-size:11px; }
+  /* overlay label boxes */
+  .lbl rect.box { fill:#fff; stroke:#9aa3b2; stroke-width:0; vector-effect:non-scaling-stroke; }
+  .lbl.pinned rect.box { stroke:var(--pin); }
+  .lbl.nodetext rect.box { stroke:#127a3d; }
+  .lbl.nodetext line.tether { stroke:#127a3d; }
+  .lbl.nodetext text { font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+  .lbl.sel rect.box { stroke:var(--accent); stroke-width:0; }
+  .lbl.sel rect.box, .lbl.pinned rect.box, .lbl.nodetext rect.box { stroke-width:1; }
+  .row.nodetext .dot { background:#127a3d; }
+  .row .mini.vac { background:#127a3d; }
+  .lbl rect.hit { fill:transparent; cursor:grab; }
+  .lbl.dragging rect.hit { cursor:grabbing; }
+  .lbl text { font-family:ui-monospace,Menlo,monospace; dominant-baseline:middle; pointer-events:none; }
+  .lbl line.tether { stroke:#888; stroke-width:1; vector-effect:non-scaling-stroke; }
+  .lbl.pinned line.tether { stroke:var(--pin); }
+  circle.anchor { fill:#888; }
+  .mask { fill:#fff; }
+  #hint { position:absolute; left:8px; bottom:8px; background:rgba(255,255,255,.9); border:1px solid #d9dbe0; border-radius:6px; padding:6px 9px; font-size:11px; color:#555; max-width:340px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <b>MRCA label editor</b>
+    <span id="talname" style="font-family:ui-monospace,Menlo,monospace;color:#555"></span>
+    <span class="sp"></span>
+    <span id="status"></span>
+    <button id="fit">Fit</button>
+    <button id="save" class="primary" disabled>Save &amp; re-render</button>
+  </header>
+  <main>
+    <div id="stage">
+      <svg id="canvas" xmlns="http://www.w3.org/2000/svg">
+        <image id="backdrop" x="0" y="0"/>
+        <g id="masks"></g>
+        <g id="labels"></g>
+      </svg>
+      <div id="hint">Drag any label — red = aa-transition (MRCA), green = vaccine name — to reposition.
+        Scroll = zoom, Space/right-drag = pan. Double-click an aa-label to reset it to auto.
+        <b>Save freezes the whole layout</b> (nothing re-optimises) and re-renders the PDF.</div>
+    </div>
+    <aside>
+      <h3>Curated labels (<span id="count">0</span>)</h3>
+      <div id="list"></div>
+    </aside>
+  </main>
+</div>
+<script>
+"use strict";
+const SVGNS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("canvas");
+const gMasks = document.getElementById("masks");
+const gLabels = document.getElementById("labels");
+const imgEl = document.getElementById("backdrop");
+const statusEl = document.getElementById("status");
+const saveBtn = document.getElementById("save");
+const listEl = document.getElementById("list");
+
+let page = {width:1000, height:1000};
+let labels = [];               // working copy of sidecar labels (box edited live)
+let changed = false;           // any label dragged/reset this session (enables Save)
+let selId = null;
+let vb = {x:0,y:0,w:1000,h:1000};
+
+function status(msg, err){ statusEl.textContent = msg||""; statusEl.className = err ? "err" : ""; }
+
+// ---- view (viewBox pan/zoom) ----
+function applyVB(){ svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`); }
+function fit(){ const m = page.width*0.04; vb = {x:-m, y:-m, w:page.width+2*m, h:page.height+2*m}; applyVB(); }
+function toSvg(cx, cy){ const p = svg.createSVGPoint(); p.x=cx; p.y=cy; return p.matrixTransform(svg.getScreenCTM().inverse()); }
+
+svg.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = svg.getBoundingClientRect();
+  if (e.shiftKey){ vb.x += e.deltaX * vb.w/rect.width; vb.y += e.deltaY * vb.h/rect.height; applyVB(); return; }
+  const p = toSvg(e.clientX, e.clientY);
+  const f = Math.exp(e.deltaY * 0.0015);
+  vb.x = p.x - (p.x - vb.x)*f; vb.y = p.y - (p.y - vb.y)*f; vb.w *= f; vb.h *= f; applyVB();
+}, {passive:false});
+
+let pan = null, spaceHeld = false;
+svg.addEventListener("mousedown", e => {
+  const onLabel = e.target.closest(".lbl");
+  if (e.button !== 0 || spaceHeld || !onLabel){      // pan: non-left, space, or empty space
+    if (e.button===0 && !spaceHeld && onLabel) return; // (handled by label drag)
+    pan = {x:e.clientX, y:e.clientY}; e.preventDefault();
+  }
+});
+window.addEventListener("mousemove", e => {
+  if (!pan) return;
+  const rect = svg.getBoundingClientRect();
+  vb.x -= (e.clientX-pan.x) * vb.w/rect.width;
+  vb.y -= (e.clientY-pan.y) * vb.h/rect.height;
+  pan = {x:e.clientX, y:e.clientY}; applyVB();
+});
+window.addEventListener("mouseup", () => { pan = null; });
+svg.addEventListener("contextmenu", e => e.preventDefault());
+window.addEventListener("keydown", e => { if (e.code==="Space"){ spaceHeld=true; svg.style.cursor="grab"; } });
+window.addEventListener("keyup",   e => { if (e.code==="Space"){ spaceHeld=false; svg.style.cursor=""; } });
+document.getElementById("fit").onclick = fit;
+
+// ---- model helpers ----
+function boxW(l){ return l.box.x1 - l.box.x0; }
+function boxH(l){ return l.box.y1 - l.box.y0; }
+function attach(l){ return {x:l.box.x1, y:(l.box.y0+l.box.y1)/2}; }      // leader meets mid-right edge
+function recomputeOffset(l){ l.offset = { x:(l.box.x0 - l.anchor.x)/page.width, y:(l.box.y0 - l.anchor.y)/page.height }; }
+function markChanged(){ changed = true; saveBtn.disabled = false; }
+
+// ---- render overlay ----
+function render(){
+  gMasks.innerHTML = ""; gLabels.innerHTML = "";
+  for (const l of labels){
+    // white mask over the backdrop's rendered label so moving the overlay leaves no ghost
+    const pad = l.fs*0.25;
+    const m = document.createElementNS(SVGNS,"rect");
+    m.setAttribute("class","mask");
+    m.setAttribute("x", l.box.x0-pad); m.setAttribute("y", l.box.y0-pad);
+    m.setAttribute("width", boxW(l)+2*pad); m.setAttribute("height", boxH(l)+2*pad);
+    l._mask = m; gMasks.appendChild(m);
+
+    const g = document.createElementNS(SVGNS,"g");
+    g.setAttribute("class","lbl "+l.kind+(l.pinned?" pinned":"")+(l.id===selId?" sel":""));
+    g.dataset.id = l.id;
+
+    // MRCA labels have a leader line to their branch; NodeText (vaccine) labels do NOT (the PDF
+    // draws none — they're just offset text at the leaf tip), so no tether/anchor dot for them.
+    l._teth = null;
+    if (l.kind==="mrca"){
+      const teth = document.createElementNS(SVGNS,"line");
+      teth.setAttribute("class","tether");
+      g.appendChild(teth); l._teth = teth;
+      const a = document.createElementNS(SVGNS,"circle");
+      a.setAttribute("class","anchor"); a.setAttribute("r", Math.max(0.6, l.fs*0.18));
+      a.setAttribute("cx", l.tether.x); a.setAttribute("cy", l.tether.y);
+      g.appendChild(a);
+    }
+
+    const box = document.createElementNS(SVGNS,"rect");
+    box.setAttribute("class","box"); box.setAttribute("rx", l.fs*0.2);
+    g.appendChild(box); l._box = box;
+
+    const toks = String(l.text).split(/\s+/).filter(Boolean);
+    l._texts = [];
+    const lineh = l.fs*1.18;
+    for (let i=0;i<toks.length;i++){
+      const t = document.createElementNS(SVGNS,"text");
+      t.setAttribute("font-size", l.fs); t.setAttribute("fill", l.color||"#555");
+      t.textContent = toks[i]; g.appendChild(t); l._texts.push(t);
+    }
+    const hit = document.createElementNS(SVGNS,"rect");
+    hit.setAttribute("class","hit"); g.appendChild(hit); l._hit = hit;
+
+    gLabels.appendChild(g);
+    positionLabel(l);
+    attachDrag(l, g);
+  }
+  renderList();
+}
+
+function positionLabel(l){
+  const pad = l.fs*0.25;
+  l._mask.setAttribute("x", l.box.x0-pad); l._mask.setAttribute("y", l.box.y0-pad);
+  l._box.setAttribute("x", l.box.x0); l._box.setAttribute("y", l.box.y0);
+  l._box.setAttribute("width", boxW(l)); l._box.setAttribute("height", boxH(l));
+  l._hit.setAttribute("x", l.box.x0-pad); l._hit.setAttribute("y", l.box.y0-pad);
+  l._hit.setAttribute("width", boxW(l)+2*pad); l._hit.setAttribute("height", boxH(l)+2*pad);
+  const lineh = l.fs*1.18;
+  for (let i=0;i<l._texts.length;i++){
+    l._texts[i].setAttribute("x", l.box.x0);
+    l._texts[i].setAttribute("y", l.box.y0 + (i+0.5)*lineh);
+  }
+  if (l._teth){
+    const at = attach(l);
+    l._teth.setAttribute("x1", l.tether.x); l._teth.setAttribute("y1", l.tether.y);
+    l._teth.setAttribute("x2", at.x); l._teth.setAttribute("y2", at.y);
+  }
+}
+
+function attachDrag(l, g){
+  g.addEventListener("mousedown", e => {
+    if (e.button!==0 || spaceHeld) return;             // let pan handle it
+    e.stopPropagation(); e.preventDefault();
+    select(l.id);
+    const start = toSvg(e.clientX, e.clientY);
+    const ox0=l.box.x0, oy0=l.box.y0, ox1=l.box.x1, oy1=l.box.y1;
+    g.classList.add("dragging");
+    function mv(ev){
+      const p = toSvg(ev.clientX, ev.clientY);
+      const dx = p.x-start.x, dy = p.y-start.y;
+      l.box = {x0:ox0+dx, y0:oy0+dy, x1:ox1+dx, y1:oy1+dy};
+      positionLabel(l);
+    }
+    function up(){
+      window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up);
+      g.classList.remove("dragging");
+      if (l.box.x0!==ox0 || l.box.y0!==oy0){
+        l.moved = true;
+        if (l.kind==="mrca"){ l.pinned = true; l.autoReset = false; g.classList.add("pinned"); }
+        recomputeOffset(l); markChanged(); renderList();
+      }
+    }
+    window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
+  });
+  g.addEventListener("dblclick", e => { e.stopPropagation(); resetToAuto(l); });
+}
+
+function select(id){ selId = id; for (const g of gLabels.children) g.classList.toggle("sel", +g.dataset.id===id); renderList(); }
+
+function resetToAuto(l){
+  if (l.kind!=="mrca") return;            // nodetext (vaccine) labels are always offset-placed
+  l.pinned = false; l.autoReset = true; l.moved = true;
+  markChanged();
+  // immediately persist + re-render so it re-flows into an auto position among the frozen others
+  save();
+}
+
+// ---- side list ----
+function renderList(){
+  listEl.innerHTML = "";
+  document.getElementById("count").textContent = labels.length;
+  for (const l of labels){
+    const row = document.createElement("div");
+    row.className = "row "+l.kind+(l.pinned?" pinned":"")+(l.id===selId?" sel":"");
+    const tag = l.kind==="nodetext" ? `<span class="mini vac">vaccine</span>`
+              : (l.pinned ? `<span class="mini">pinned</span><button class="reset">auto</button>` : ``);
+    row.innerHTML = `<span class="dot"></span><span class="t">${escapeHtml(l.text)}</span>`+tag;
+    row.onclick = e => { if (e.target.closest("button.reset")){ resetToAuto(l); return; } select(l.id); focusLabel(l); };
+    listEl.appendChild(row);
+  }
+}
+function focusLabel(l){ const cx=(l.box.x0+l.box.x1)/2, cy=(l.box.y0+l.box.y1)/2; vb.x=cx-vb.w/2; vb.y=cy-vb.h/2; applyVB(); }
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// ---- data ----
+async function load(initial){
+  const data = await (await fetch("/labels.json?t="+Date.now())).json();
+  page = data.page || page;
+  labels = (data.labels||[]).map(l => ({...l, box:{...l.box}, anchor:{...l.anchor}, tether:{...l.tether}, offset:{...l.offset}, moved:false, autoReset:false}));
+  document.getElementById("talname").textContent = data.tal_name || "";
+  imgEl.setAttribute("href", "/backdrop.png?t="+(data.rendered_at||Date.now()));
+  imgEl.setAttribute("width", page.width); imgEl.setAttribute("height", page.height);
+  changed = false; saveBtn.disabled = true;
+  if (initial) fit();
+  render();
+  const w = (data.warnings||[]);
+  status(`${labels.length} labels${w.length?` · ${w.length} warning(s)`:""}${data.saved!=null?` · saved ${data.saved}`:""}`);
+}
+
+async function save(){
+  if (!changed) return;
+  saveBtn.disabled = true; status("saving + re-rendering…");
+  // FREEZE the whole current layout: every MRCA label is pinned at its current position (so the
+  // untouched ones do NOT re-optimise / jump), except any reset-to-auto this session. NodeText
+  // (vaccine) labels are written only when moved.
+  const edits = [];
+  for (const l of labels){
+    if (l.kind==="mrca") edits.push({kind:"mrca", first:l.first, last:l.last, offset:[l.offset.x, l.offset.y], pinned: !l.autoReset});
+    else if (l.moved)    edits.push({kind:"nodetext", seq_id:l.seq_id, offset:[l.offset.x, l.offset.y]});
+  }
+  try {
+    const r = await fetch("/save", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({edits})});
+    const data = await r.json();
+    if (!r.ok){ status(data.error||"save failed", true); saveBtn.disabled=false; return; }
+    // reload (re-rendered backdrop + fresh sidecar geometry)
+    page = data.page || page;
+    labels = (data.labels||[]).map(l => ({...l, box:{...l.box}, anchor:{...l.anchor}, tether:{...l.tether}, offset:{...l.offset}, moved:false, autoReset:false}));
+    imgEl.setAttribute("href", "/backdrop.png?t="+(data.rendered_at||Date.now()));
+    changed = false; render();
+    const pdf = data.saved_pdf ? ` · PDF → ${data.saved_pdf.split("/").pop()}` : "";
+    status(`saved ${data.saved} · ${labels.length} labels re-rendered (layout frozen)${pdf}`);
+  } catch(ex){ status(String(ex), true); saveBtn.disabled = !changed; }
+}
+saveBtn.onclick = save;
+
+load(true);
+</script>
+</body>
+</html>

@@ -83,6 +83,10 @@ namespace ae::tal
         double offset_y{0.0};       // y offset, fraction of image_size (down is positive)
         std::string color{};        // "" -> black
         double size{0.0};           // font size as fraction of image_size; 0 -> default font
+        bool pinned{false};         // user PINNED this label: place it at its offset (box top-left =
+                                    // node + offset*page) and treat it as a fixed obstacle, while the
+                                    // other (un-pinned) labels still auto-place around it. Set by the
+                                    // WYSIWYG drag editor; un-pinned labels keep the auto-place behaviour.
     };
 
     struct NodeApply
@@ -175,6 +179,8 @@ namespace ae::tal
         std::vector<DashBarAAAt> dash_bars{};             // per-leaf aa-at-position dash columns
         std::vector<MrcaLabel> mrca_labels{};             // curated on-tree labels at MRCA(first,last) nodes (draw-aa-transitions per-node)
         bool mrca_labels_auto_place{false};               // auto-place mrca labels into whitespace (ignore per-label offsets), with collision avoidance + tether
+        std::string mrca_label_sidecar{};                 // when non-empty, write a "tal-mrca-labels/1" JSON sidecar (page geometry + per-label
+                                                          // anchor/tether/box/offset/pinned, device units) to this path — drives the WYSIWYG drag editor
     };
 
     // Render `tree` to a PDF whose height is `image_size` device units. The width is
