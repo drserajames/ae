@@ -885,12 +885,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         name_y.reserve(layout.leaves.size());
         for (const auto& ln : layout.leaves)
             name_y.emplace(ln.name, ln.y);
-        // AD section marker: a vertical line (with short top/bottom arms, like a double-arrow)
-        // spanning the section, the section LETTER at the TOP just to the RIGHT of the line,
-        // overlapping it. The line sits near the tree (left) side of the column.
-        const double spine_x = x_hzmark0 + hz_marker_w * 0.18;  // line near the LEFT (tree side)
-        const double arm = hz_marker_w * 0.10;                  // short arms (arrowhead-ish)
-        const double label_fs = std::clamp(hz_marker_w * 0.62, 7.0, 16.0);
+        // AD section marker: a "]" bracket — the vertical SPINE on the RIGHT, top & bottom arms
+        // pointing LEFT toward the grey-dash/matrix, and the section LETTER at the TOP just to the
+        // RIGHT of the spine (outside the bracket), level with the top arm.
+        const double spine_x = x_hzmark0 + hz_marker_w * 0.50;  // spine on the RIGHT
+        const double arm_len = hz_marker_w * 0.45;              // arms point LEFT, toward the matrix
+        const double label_fs = std::clamp(hz_marker_w * 0.7, 8.0, 18.0);
         for (const auto& section : params.hz_sections) {
             const auto itf = name_y.find(section.first), itl = name_y.find(section.last);
             if (itf == name_y.end() || itl == name_y.end())
@@ -898,16 +898,15 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             double y0 = dev_y(itf->second - 0.5), y1 = dev_y(itl->second + 0.5);
             if (y0 > y1)
                 std::swap(y0, y1);
-            pdf.line(spine_x, y0, spine_x, y1, BLACK, 0.6);            // section line
-            pdf.line(spine_x - arm, y0, spine_x + arm, y0, BLACK, 0.6); // top arm
-            pdf.line(spine_x - arm, y1, spine_x + arm, y1, BLACK, 0.6); // bottom arm
+            pdf.line(spine_x, y0, spine_x, y1, BLACK, 0.7);              // spine (right)
+            pdf.line(spine_x - arm_len, y0, spine_x, y0, BLACK, 0.7);    // top arm -> left (matrix)
+            pdf.line(spine_x - arm_len, y1, spine_x, y1, BLACK, 0.7);    // bottom arm -> left
             if (!section.prefix.empty()) {
-                // letter hard at the TOP of the line, overlapping it (sits over the line, with a
-                // tight white background so the line doesn't cut through it) — AD style.
+                // letter at the TOP, just to the RIGHT of the spine, level with the top arm (AD)
                 const auto [tw, th] = pdf.text_size(section.prefix, label_fs);
-                const double lx = spine_x - label_fs * 0.06;  // overlaps the line
-                const double ly = y0 + th * 0.92;             // hard at the top
-                pdf.rectangle(lx - label_fs * 0.08, ly - th * 1.0, tw + label_fs * 0.16, th * 1.16, WHITE, 0.0, WHITE);
+                const double lx = spine_x + label_fs * 0.12;
+                const double ly = y0 + th * 1.15;
+                pdf.rectangle(lx - label_fs * 0.08, ly - th * 1.05, tw + label_fs * 0.16, th * 1.2, WHITE, 0.0, WHITE);
                 pdf.text(lx, ly, section.prefix, label_fs, BLACK, /*center=*/false);
             }
         }
