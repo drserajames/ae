@@ -180,10 +180,11 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
         grid_w_mm = cols * cell_mm + (cols - 1) * col_gap_mm
         paper_w = 2.0 * margin_mm + tree_w_mm + panel_gap_mm + grid_w_mm
         tree_w_frac = tree_w_mm / (paper_w - 2.0 * margin_mm)
-        # Tighten the page HEIGHT to the content (avail_h + margins + a little glue headroom)
-        # instead of the full input paper_h, so the aspect approaches AD's 1+tree_aspect ratio
-        # rather than carrying ~20mm of wasted vertical margin.
-        paper_h = avail_h + 2.0 * margin_mm + 8.0
+        # Tighten the page HEIGHT to the content (avail_h + margins + glue headroom) instead of the
+        # full input paper_h, so the aspect approaches AD's 1+tree_aspect ratio. The inter-row glue
+        # + minipage baselines grow with the row count, so add headroom per row beyond 2 — else a
+        # 3-row grid (H3/B-Vic) spills to a 2nd page.
+        paper_h = avail_h + 2.0 * margin_mm + 8.0 + max(0, rows - 2) * 9.0
     else:
         # Fixed paper: size each cell to fit both the right panel's width and the height.
         right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
