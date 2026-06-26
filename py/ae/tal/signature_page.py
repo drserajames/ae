@@ -180,10 +180,11 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
         grid_w_mm = cols * cell_mm + (cols - 1) * col_gap_mm
         paper_w = 2.0 * margin_mm + tree_w_mm + panel_gap_mm + grid_w_mm
         tree_w_frac = tree_w_mm / (paper_w - 2.0 * margin_mm)
-        # Tighten the page HEIGHT to the content (avail_h + margins + a little glue headroom)
-        # instead of the full input paper_h, so the aspect approaches AD's 1+tree_aspect ratio
-        # rather than carrying ~20mm of wasted vertical margin.
-        paper_h = avail_h + 2.0 * margin_mm + 8.0
+        # Tighten the page HEIGHT to the content (avail_h + margins + glue headroom) instead of the
+        # full input paper_h, so the aspect approaches AD's 1+tree_aspect ratio. The inter-row glue
+        # + minipage baselines grow with the row count, so add headroom per row beyond 2 — else a
+        # 3-row grid (H3/B-Vic) spills to a 2nd page.
+        paper_h = avail_h + 2.0 * margin_mm + 8.0 + max(0, rows - 2) * 9.0
     else:
         # Fixed paper: size each cell to fit both the right panel's width and the height.
         right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
@@ -314,6 +315,7 @@ def render_map_via_kateri(chart, out_pdf, *, style: str = "-", width: float = 80
 
 
 def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *, width: float = 800.0,
+                                   viewport_size: float = 0.0,
                                    connect_timeout: float = 90.0, map_timeout: float = 60.0) -> list:
     """Render one antigenic-map PDF per named style in `chart`, in a single kateri
     session (chart sent once; `set_style`+`pdf` looped). `chart` is an
@@ -361,7 +363,7 @@ def render_section_maps_via_kateri(chart, style_names: Sequence[str], out_dir, *
                 # Per-map timeout: kateri occasionally stalls mid-session; fail this render
                 # fast (the report driver then moves on to the next lab) rather than hang.
                 try:
-                    pdf_bytes = await asyncio.wait_for(K.communicator.get_pdf(style=name, width=width, square=True), timeout=map_timeout)
+                    pdf_bytes = await asyncio.wait_for(K.communicator.get_pdf(style=name, width=width, square=True, viewport_size=viewport_size or 0.0), timeout=map_timeout)
                 except asyncio.TimeoutError:
                     raise SignaturePageError(f"kateri stalled rendering map {i} ({name}) after {map_timeout:.0f}s")
                 out = out_dir / f"map-{i:02d}.pdf"
@@ -508,6 +510,15 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
     return str(path), size
 
 
+def _mapi_viewport_size(mapi_path) -> Optional[float]:
+    """AD's sp.mapi square viewport SIZE (its zoom). kateri centres its auto-fit at this size so
+    the maps frame like AD — passing AD's raw-frame viewport coords directly mis-frames the map
+    (kateri renders the transformed layout, and AD's sp.mapi is off-centre from the cloud)."""
+    from ae.tal import section_maps as SM
+    raw = SM.viewport_from_mapi(mapi_path)  # [x, y, size, size]
+    return float(raw[2]) if raw else None
+
+
 def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int] = None, map_width: float = 800.0,
                                 viewport: Optional[Sequence[float]] = None, mapi: Optional[os.PathLike] = None,
                                 page_title: Optional[str] = None,
@@ -552,18 +563,20 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         section_prefixes = SM.assign_prefixes(sections, match)  # A/B/C in tree order (AD set_prefix)
         _, available_styles = SM.report_styles_from_ace(chart)
         vaccine_marks = SM.vaccine_marks_from_ace(chart)
-        # Viewport: an explicit arg if given, else None so kateri auto-fits/centres each map
-        # (fills the cell like AD). The chart's -reset viewport is off-centre for sig pages,
-        # and AD's sp.mapi viewport is in AD's oriented frame — neither transfers cleanly.
+        # Framing: kateri auto-fits/centres each map; we just give it AD's sp.mapi ZOOM (square
+        # side) so the maps frame like AD. An explicit `viewport` arg still overrides.
+        mapi_path = Path(chart).parent / "sp.mapi"
+        mapi_size = _mapi_viewport_size(mapi_path) if mapi_path.exists() else None
         vp = list(viewport) if viewport else None
-        print(f"  [sigp] viewport: {'explicit ' + str([round(x, 2) for x in vp]) if vp else 'kateri auto-fit'}", file=_sys.stderr)
+        print(f"  [sigp] viewport: {'explicit ' + str([round(x, 2) for x in vp]) if vp else ('kateri auto-fit @ AD size ' + str(mapi_size) if mapi_size else 'kateri auto-fit')}", file=_sys.stderr)
         styled = SM.build_section_styles(chart_obj, sections, match, scale, vp,
                                          available_styles=available_styles, vaccine_marks=vaccine_marks,
                                          serum_circles=serum_circles, serum_circle_fold=serum_circle_fold)
         for s in styled:
             print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
 
-        map_pdfs = render_section_maps_via_kateri(chart_obj, [s["name"] for s in styled], tmpdir / "maps", width=map_width)
+        map_pdfs = render_section_maps_via_kateri(chart_obj, [s["name"] for s in styled], tmpdir / "maps",
+                                                  width=map_width, viewport_size=mapi_size or 0.0)
 
         # Pass 2: the final tree settings with AD sig-page overrides — title top-left,
         # no aa-at-pos legend, no aa colour-bar dash columns, clades left of the matrix,

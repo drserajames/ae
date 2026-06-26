@@ -83,21 +83,28 @@ def render(tal: Path, tree: Path, outdir: Path, image_size_override, defines, dp
 
 # ---------------------------------------------------------------- surgical .tal patch
 
-def _active_pernode_span(lines):
-    """Line range [start, end] of the ACTIVE `"per-node": [ ... ]` array (NOT `?per-node`)."""
-    start = None
-    for i, ln in enumerate(lines):
-        if re.match(r'\s*"per-node"\s*:\s*\[', ln):   # anchored: "?per-node" won't match
-            start = i
-            break
-    if start is None:
+def _active_pernode_spans(lines):
+    """All line ranges [(start, end), ...] of ACTIVE `"per-node": [ ... ]` arrays (NOT `?per-node`).
+    A .tal may carry more than one draw-aa-transitions block (e.g. per hz-section); the write-back
+    searches across all of them so labels in later blocks are not silently missed."""
+    spans = []
+    n = len(lines)
+    i = 0
+    while i < n:
+        if re.match(r'\s*"per-node"\s*:\s*\[', lines[i]):   # anchored: "?per-node" won't match
+            depth = 0
+            for j in range(i, n):
+                depth += lines[j].count("[") - lines[j].count("]")   # seq_ids/names carry no brackets
+                if depth == 0:
+                    spans.append((i, j))
+                    i = j
+                    break
+            else:
+                raise RuntimeError('unterminated "per-node" array')
+        i += 1
+    if not spans:
         raise RuntimeError('no active "per-node" array found in the .tal draw-aa-transitions block')
-    depth = 0
-    for i in range(start, len(lines)):
-        depth += lines[i].count("[") - lines[i].count("]")   # seq_ids/names carry no brackets
-        if depth == 0:
-            return start, i
-    raise RuntimeError('unterminated "per-node" array')
+    return spans
 
 
 def _patch_entry_line(line: str, ox: float, oy: float, pinned: bool) -> str:
@@ -107,9 +114,17 @@ def _patch_entry_line(line: str, ox: float, oy: float, pinned: bool) -> str:
         line = re.sub(r'("offset"\s*:\s*)\[[^\]]*\]', lambda m: m.group(1) + off, line, count=1)
     elif re.search(r'"label"\s*:\s*\{', line):                      # add offset into existing label{}
         line = re.sub(r'("label"\s*:\s*\{)', lambda m: m.group(1) + f'"offset": {off}, ', line, count=1)
-    else:                                                           # add a label{} after the name
+    elif re.search(r'"label"\s*:\s*"', line):                       # string "label" (B/Yam-family schema)
+        # Inserting a second "label": {...} here would duplicate-key and (last-wins) drop the label
+        # text. The editor only supports the curated `"name"` + object-`"label"` schema, so fail loudly
+        # instead of silently corrupting the .tal.
+        raise RuntimeError('per-node entry has a string "label" (B/Yam-family schema); the editor only '
+                           'supports the curated "name" + object-"label" schema. line: ' + line.strip()[:80])
+    elif re.search(r'"\??name"\s*:\s*"[^"]*"', line):               # add a label{} after the name
         line = re.sub(r'("\??name"\s*:\s*"[^"]*")(\s*,)?',
                       lambda m: m.group(1) + f', "label": {{"offset": {off}}},', line, count=1)
+    else:                                                           # no anchor to attach an offset to
+        raise RuntimeError('per-node entry has no "name" to anchor a label offset. line: ' + line.strip()[:80])
     pv = "true" if pinned else "false"
     if re.search(r'"pinned"\s*:', line):                            # replace existing pinned
         line = re.sub(r'("pinned"\s*:\s*)(?:true|false)', lambda m: m.group(1) + pv, line, count=1)
@@ -137,14 +152,18 @@ def patch_tal(tal_path: Path, edits):
     applied = 0
 
     if mrca:
-        start, end = _active_pernode_span(lines)
+        spans = _active_pernode_spans(lines)
         for e in mrca:
             first, last = e["first"], e["last"]
             ox, oy = e["offset"]
             pinned = bool(e.get("pinned", True))
-            hit = next((i for i in range(start, end + 1)
-                        if re.search(r'"\??first"\s*:\s*"%s"' % re.escape(first), lines[i])
-                        and re.search(r'"\??last"\s*:\s*"%s"' % re.escape(last), lines[i])), None)
+            hit = None
+            for start, end in spans:
+                hit = next((i for i in range(start, end + 1)
+                            if re.search(r'"\??first"\s*:\s*"%s"' % re.escape(first), lines[i])
+                            and re.search(r'"\??last"\s*:\s*"%s"' % re.escape(last), lines[i])), None)
+                if hit is not None:
+                    break
             if hit is None:
                 raise RuntimeError(f"no per-node entry for first={first!r} last={last!r}")
             lines[hit] = _patch_entry_line(lines[hit], ox, oy, pinned)

@@ -127,11 +127,12 @@ class Communicator:
         result = await futu
         return result.get("moved", [])
 
-    async def get_pdf(self, style: str = None, width: float = 800.0, square: bool = False) -> bytes:
+    async def get_pdf(self, style: str = None, width: float = 800.0, square: bool = False, viewport_size: float = 0.0) -> bytes:
         if style:
             self.set_style(style=style)
         futu = asyncio.get_running_loop().create_future()
-        self.send_command_expect(command={"C": "pdf", "width": width, "square": square}, expect={"C": "PDFB", "future": futu})
+        self.send_command_expect(command={"C": "pdf", "width": width, "square": square, "viewportSize": viewport_size},
+                                 expect={"C": "PDFB", "future": futu})
         return await futu
 
     # def pdf(self, filename: str|Path, style: str = None, width: float = 800.0, open: bool = False):
