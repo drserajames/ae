@@ -51,6 +51,12 @@ phased roadmap and per-agent task ownership are in **`PLAN.md`**.
 > came from, e.g. `<report-dir>/interactive/`. The `data/` dir here is git-ignored
 > scratch only.
 
+> **Per-report driver.** Each report carries its own `0do` recipe at
+> `<report-dir>/interactive/0do` (beside `<report-dir>/tree/0do`), holding the
+> report-specific trees/chart-dirs and calling `run.sh` here — the report-folder
+> equivalent of how `tree/0do` calls the `tal` binary. `run.sh` and
+> `export_interactive.py` (this dir) are the reusable engine; the recipe is not.
+
 ## Quick start
 
 ```sh
