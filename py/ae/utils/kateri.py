@@ -18,12 +18,19 @@ KATERI_EXE = os.path.realpath(_kateri) if _kateri else "kateri"
 
 class KateriTask:
 
-    def __init__(self):
+    def __init__(self, headless: bool = False):
         self.kateri = None
+        # When True, launch kateri with --headless so it parks its window off-screen and stays out
+        # of the Dock/menu-bar (no window pop-up / focus steal). Used by batch PDF-export commands;
+        # left False for interactive commands (style/adjust) that need a visible, draggable window.
+        self.headless = headless
 
     async def start(self, socket_name: str, **ignored):
         try:
-            self.kateri = await asyncio.create_subprocess_exec(KATERI_EXE, "--socket", socket_name)
+            cmd = [KATERI_EXE, "--socket", socket_name]
+            if self.headless:
+                cmd.append("--headless")
+            self.kateri = await asyncio.create_subprocess_exec(*cmd)
             print(f">>> [Kateri] started", file=sys.stderr)
             retcode = await self.kateri.wait()
             print(f">>> [Kateri] finished with code {retcode}", file=sys.stderr)

@@ -30,7 +30,8 @@ def main_loop(start_kateri: bool = True) -> NoReturn:
     if args.command:
         os.chdir(Path(sys.argv[0]).parent)
         if start_kateri and not getattr(getattr(commander, args.command), "main_loop_no_kateri", False):
-            tasks: list[Task] = [kateri.KateriTask(), kateri.SocketServerTask()]
+            headless = getattr(getattr(commander, args.command), "main_loop_headless", False)
+            tasks: list[Task] = [kateri.KateriTask(headless=headless), kateri.SocketServerTask()]
         else:
             tasks: list[Task] = []
         main_loop = MainLoop(command=args.command, exit_on_exception=args.exit_on_exception)
@@ -68,6 +69,13 @@ def list_commands(parent=None, order: list[str]=[]) -> list[str]:
 def no_kateri(cmd: Callable) -> Callable:
     "decorator to avoid running kateri when command is called"
     cmd.main_loop_no_kateri = True
+    return cmd
+
+def headless(cmd: Callable) -> Callable:
+    """decorator to launch kateri headless (window parked off-screen, app kept out of the
+    Dock/menu-bar) for batch PDF-export commands — no window pop-up or focus steal. Do NOT use
+    on interactive commands (style/adjust) that need a visible, draggable window."""
+    cmd.main_loop_headless = True
     return cmd
 
 def no_loop(cmd: Callable) -> Callable:

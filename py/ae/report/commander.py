@@ -13,7 +13,7 @@ from ae import semantic
 
 import ae.report.download
 import ae.report.dirs
-from .main_loop import command, no_kateri, no_loop
+from .main_loop import command, no_kateri, no_loop, headless
 from .chart_modifier import ChartModifier
 
 # ======================================================================
@@ -53,6 +53,7 @@ class CommanderBasic:
 
     @command
     @no_loop
+    @headless
     async def populate_export(self):
         self.populate()
         await self.export()
@@ -81,6 +82,7 @@ class CommanderBasic:
 
     @command
     @no_loop
+    @headless
     async def export(self):
         chart_modifier = self.style()
         # do not await in parallel because current katteri protocol does not allow matching pdfs request and result
@@ -93,6 +95,7 @@ class CommanderBasic:
 
     @command
     @no_loop
+    @headless
     async def export_info(self):
         chart_modifier = self.style()
         for style_name in chart_modifier.export_info_styles():
@@ -100,6 +103,7 @@ class CommanderBasic:
 
     @command
     @no_loop
+    @headless
     async def export_mapi_for_signature_pages(self, chart_modifier: Optional[ChartModifier] = None):
         if chart_modifier is None:
             self.populate()
@@ -122,6 +126,7 @@ class CommanderBasic:
 
     @command
     @no_loop
+    @headless
     async def serum_coverage_export(self, serum_selector: Callable | None = None, fold: float = 2.0):
         "serum_selector: lambda sr: sr.no < 5"
         chart_modifier = self.serum_coverage(serum_selector=serum_selector, fold=fold)
@@ -140,6 +145,7 @@ class CommanderBasic:
 
     @command
     @no_loop
+    @headless
     async def serum_coverage_export_h3_2a2(self):
         return await self.serum_coverage_export(serum_selector=lambda sr: sr.has_clade("3C.2a1b.2a.2"), fold=2.0)
 
