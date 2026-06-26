@@ -130,6 +130,9 @@ void ae::py::chart_v3_antigens(pybind11::module_& chart_v3_submodule)
         .def("date", [](const Antigen& ag) { return *ag.date(); })                              //
         .def("date", [](Antigen& ag, const std::string& new_date) { ag.date(Date{new_date}); }) //
         .def("lab_ids", [](const Antigen& ag) { return *ag.lab_ids(); })                        //
+        .def("lab_ids", [](Antigen& ag, const std::vector<std::string>& new_lab_ids) {          //
+            ag.lab_ids().get() = new_lab_ids;                                                   //
+        })                                                                                      //
         .def("designation", &Antigen::designation)                                              //
         ;
 
