@@ -74,10 +74,12 @@ def make_tree(tree_file, settings, output_pdf, defines: dict | None = None,
         schema, warnings = settings_v3.load_tal(load_arg, defines=defines, program=program)
         for w in warnings:
             print(f">>> tree {output_pdf.name}: .tal warning: {w}", file=__import__("sys").stderr)
-        # AD prints the subtype/lineage as a top-left title (conf/tal.json
-        # `{"N":"title","text":"{virus-type/lineage}"}`); the report `.tal`s
-        # don't carry a title module, so derive it from the tree header.
-        if not schema.get("title"):
+        # AD prints the subtype/lineage as a top-left title via the builtin layout
+        # (conf/tal.json `layout-tree-only` -> `{"N":"title","text":"{virus-type/lineage}"}`);
+        # the report `.tal`s don't carry a title module, so derive it from the tree header.
+        # NOT for the info overlay: info.tal's `tal-default` replaces that builtin layout and
+        # defines no title, so AD's info trees have none — don't add one (keep them matching).
+        if not is_overlay and not schema.get("title"):
             title = _tree_title(tree_file)
             if title:
                 schema["title"] = title
