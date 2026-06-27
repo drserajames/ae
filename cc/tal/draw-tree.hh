@@ -141,6 +141,11 @@ namespace ae::tal
         // the report .tal's give the tree ratio ~0.4, columns push the page to ~0.63).
         // 0 (default) keeps the historical square canvas.
         double width_to_height_ratio{0.0};
+        double edge_line_width_scale{1.0};   // global multiplier on every tree-edge's drawn width
+                                             // (AD per-node edge_line_width_scale applied to all
+                                             // nodes via the info trees' all-and-intermediate
+                                             // tree-edge-line-width mod — the heavy-edge diagnostic
+                                             // look); 1.0 = default render unchanged
         std::string ladderize{};             // "" | "none" | "number-of-leaves" | "max-edge-length" — reorder children before layout
         bool labels{false};                  // draw each leaf's name to the right of its tip
         bool labels_avoid_collisions{true};  // suppress leaf labels that would overlap the one above
