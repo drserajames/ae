@@ -133,8 +133,9 @@ static void pack_colored_points(double center_lon, double center_lat, const std:
     if (colored.empty())
         return;
     const double W = ae::geo::geographic_map_size[0], H = ae::geo::geographic_map_size[1];
-    const double margin = image_width * 0.02;
-    const double scale = (image_width - 2.0 * margin) / W;
+    // Match export_geographic_pdf: the map fills the frame edge-to-edge (no margin), so the
+    // px<->degree scale used for ring packing is image_width / W.
+    const double scale = image_width / W;
     const double deg_per_px_lon = (ae::geo::geographic_map_bounds[2] - ae::geo::geographic_map_bounds[0]) / (scale * W);
     const double deg_per_px_lat = (ae::geo::geographic_map_bounds[1] - ae::geo::geographic_map_bounds[3]) / (scale * H);
     const double radius = point_size / 2.0;

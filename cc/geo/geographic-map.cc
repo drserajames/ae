@@ -62,11 +62,14 @@ namespace ae::geo
         // abs(x) spans [0, W], y spans up to H). Fit that whole rectangle to the canvas so
         // the path and the lon/lat points share one transform.
         const double W = geographic_map_size[0], H = geographic_map_size[1];
-        const double margin = image_width * 0.02;
-        const double scale = (image_width - 2.0 * margin) / W;
-        const double image_height = H * scale + 2.0 * margin;
-        const auto dev_x = [=](double px) { return px * scale + margin; };
-        const auto dev_y = [=](double py) { return py * scale + margin; };
+        // AD `geographic-draw` fills the frame edge-to-edge (no white border): the map is the
+        // full 2:1 page (width:height = W:H). The title/legend get a small independent inset
+        // (~10pt at width 800; AD's title sits ~10pt from the top-left), not a map margin.
+        const double scale = image_width / W;
+        const double image_height = H * scale;
+        const double inset = image_width * 0.0125;
+        const auto dev_x = [=](double px) { return px * scale; };
+        const auto dev_y = [=](double py) { return py * scale; };
 
         // lon/lat -> path coords, equirectangular over geographic_map_bounds
         // (lon_min, lat_max, lon_max, lat_min).
@@ -124,7 +127,7 @@ namespace ae::geo
 
         if (!title.empty()) {
             const double title_font = image_width / 40.0;
-            pdf.text(margin, margin, title, title_font, Color{0}, /*center=*/false); // top-left, as in AD
+            pdf.text(inset, inset, title, title_font, Color{0}, /*center=*/false); // top-left, as in AD
         }
 
         // Legend: a small stack of colour swatches + labels in the lower-left corner.
@@ -138,8 +141,8 @@ namespace ae::geo
                 max_label_w = std::max(max_label_w, pdf.text_size(e.label, font).first);
             const double box_w = pad * 2.0 + swatch + pad + max_label_w;
             const double box_h = pad * 2.0 + row_h * static_cast<double>(legend.size());
-            const double box_x = margin;
-            const double box_y = image_height - margin - box_h;
+            const double box_x = inset;
+            const double box_y = image_height - inset - box_h;
             pdf.rectangle(box_x, box_y, box_w, box_h, Color{0x808080}, 0.5, Color{0xFFFFFF});
             double ry = box_y + pad;
             for (const auto& e : legend) {
