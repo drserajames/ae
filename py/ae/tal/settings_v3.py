@@ -666,7 +666,10 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                         w = apply_raw["tree-edge-line-width"]
                         if (select_raw.get("all") or select_raw.get("all-and-intermediate")) and isinstance(w, (int, float)) and w > 0:
                             schema["edge_line_width_scale"] = float(w)
-                        else:
+                        elif not apply_raw.get("hide"):
+                            # a per-node edge width on a VISIBLE node has no tal-draw equivalent;
+                            # if the same mod also hides the node the width is moot (the edge is
+                            # never drawn — the info trees' outlier-hide mods), so don't warn.
                             warnings.append("nodes.apply.tree-edge-line-width on a non-global "
                                             "selection has no tal-draw equivalent — skipped")
                     sel, ap = _select(select_raw, warnings), _apply(apply_raw, warnings)
@@ -763,8 +766,10 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
     # Layout::width_relative_to_height) — not a per-column allowance: column COUNT does not
     # predict width (h3 has the most dash columns yet is narrower than h1, whose clades
     # column alone is 0.092 and whose time-series slots are wide). _compute_layout_width
-    # replicates that sum so the page matches the AD references (bvic 0.632, h3 0.649,
-    # h1 0.794). tal-draw lays the columns out internally as fractions of the page width.
+    # replicates that sum so the page matches the AD references — verified against AD `tal`
+    # on this cycle's .tjz to <0.1pt: report trees bvic 0.6537, h3 0.6676, h1 0.8267 (AD
+    # 653.714 / 667.619 / 826.667 pt); info trees 0.6181 (AD 618.095). tal-draw lays the
+    # columns out internally as fractions of the page width.
     tree_ratio = schema.pop("tree_width_to_height_ratio", None)
     if tree_ratio:  # a `tree` element with an explicit width-to-height-ratio sets the page
         schema["width_to_height_ratio"] = round(

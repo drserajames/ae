@@ -937,13 +937,17 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     }
 
     // --- geographic inset: continent-coloured world map in the lower-left (acmacs-tal
-    //     LegendContinentMap). Sized to ~18% of the page width, with the continent map's
-    //     aspect, sitting just above the bottom margin. ---
+    //     LegendContinentMap). AD sizes it as a Scaled 0.15 of the page HEIGHT (not width)
+    //     at offset {0, 0.93}; ae fits the continent path bbox to box_w, so the rendered
+    //     continents ~= box_w (AD's literal 0.15*height leaves internal viewport margins and
+    //     renders ~0.134*height of continents). Match AD's rendered map: ~0.134*height wide,
+    //     bottom-left, its band ~y[0.91,0.97]*height. Independent of page width so the inset
+    //     is the same physical size across subtypes (h1/h3/bvic), as in AD. ---
     if (params.geo_inset) {
-        const double box_w = 0.18 * width;
+        const double box_w = 0.134 * height;
         const double box_h = box_w / continent_map_aspect();
         const double box_x = margin;
-        const double box_y = height - vmargin - box_h;
+        const double box_y = 0.972 * height - box_h;
         draw_continent_inset(pdf, box_x, box_y, box_w, box_h);
     }
 
