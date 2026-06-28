@@ -546,26 +546,145 @@ def export_tree_json(tree_path: str) -> dict:
     return d, tree.number_of_leaves()
 
 
-def aa_transitions(parent_aa: str, node_aa: str) -> list:
+def aa_transitions(parent_aa: str, node_aa: str, del_cols=frozenset()) -> list:
     """AA substitutions on the edge from the nearest kept ancestor to this node (T4,
     PLAN #6), computed by diffing reconstructed ancestral sequences (h3.asr carries an
     'a' sequence on every node). 1-based HA1 positions (they line up with clade names);
-    gaps/X ignored. Each node diffs against its immediate parent; when a degree-2 node is
+    X ignored. Each node diffs against its immediate parent; when a degree-2 node is
     collapsed away its substitutions are prepended onto the surviving descendant (see
     prune_tree), so the merged edge lists every substitution along the path. The C++
     consensus path (set_aa_nuc_transition_labels) is broken in this build, so we derive
-    them here instead."""
+    them here instead.
+
+    Deletions: raxml reconstructs ancestors as un-deleted (gaps are missing data, not a
+    state), so a plain residue/residue diff never sees an indel. `reconstruct_indels` runs
+    a separate present/absent parsimony over `del_cols` and rewrites internal-node `a` to
+    '-' where the clade is deleted; here we then emit those gap edges. At a del_col a
+    residue->'-' edge is a deletion and '-'->residue a reversion/insertion; a run of
+    contiguous deleted del_cols on one edge merges into one label (e.g. {from:'Δ',
+    pos:'162-164', to:''} -> "Δ162-164"). Gaps OUTSIDE del_cols stay ignored (sequencing
+    artefacts). For h1/h3 (no del_cols) behaviour is unchanged."""
     if not parent_aa or not node_aa:
         return []
     subs = []
-    for i, (a, b) in enumerate(zip(parent_aa, node_aa)):
-        if a != b and a not in "-X" and b not in "-X":
+    n = min(len(parent_aa), len(node_aa))
+    i = 0
+    while i < n:
+        a, b = parent_aa[i], node_aa[i]
+        if a == b or a == "X" or b == "X":
+            i += 1
+            continue
+        if a != "-" and b != "-":                      # ordinary substitution
             subs.append({"pos": i + 1, "from": a, "to": b})
+            i += 1
+            continue
+        # one side is a gap
+        if i in del_cols and b == "-" and a != "-":    # deletion — merge contiguous run
+            j = i
+            while (j < n and j in del_cols and node_aa[j] == "-"
+                   and parent_aa[j] not in ("-", "X")):
+                j += 1
+            pos = str(i + 1) if (j - i) == 1 else f"{i + 1}-{j}"
+            subs.append({"pos": pos, "from": "Δ", "to": ""})
+            i = j
+            continue
+        if i in del_cols and a == "-" and b != "-":    # reversion / re-insertion
+            subs.append({"pos": i + 1, "from": "-", "to": b})
+            i += 1
+            continue
+        i += 1                                         # gap outside del_cols -> ignore
     return subs
 
 
+def reconstruct_indels(troot: dict, min_frac: float = 0.01):
+    """Present/absent (Fitch) parsimony for indel columns, mutating internal-node `a` in
+    place and returning the set of 0-based deletion columns.
+
+    raxml --ancestral models '-' as missing data, so every internal node is reconstructed
+    as un-deleted (e.g. all B/Vic ancestors show K162/N163 even though ~all leaves are
+    deleted). A residue/residue diff therefore misses the deletion entirely, and naively
+    un-filtering gaps would paint the deletion on every one of tens of thousands of
+    terminal branches instead of the one internal branch where the clade lost the codon.
+
+    Fix: pick the columns that are really deleted in a clade (leaf gap fraction >=
+    min_frac, which excludes 1-2 leaf sequencing gaps), and for each run a 2-state
+    (present/absent) Fitch reconstruction up+down the FULL tree. Where a clade is
+    reconstructed absent we overwrite that internal node's `a` at the column with '-', so
+    the existing edge diff (aa_transitions) now yields the deletion once, on the correct
+    branch, and rolls up through collapsed nodes like any substitution. Leaves are left
+    untouched (so colour-by-AA / aa_table are unaffected). Different-length deletions on
+    different branches (e.g. Δ162-163 vs Δ162-164) fall out naturally — that is the
+    'more than one deletion' case."""
+    # Flatten to arrays (iterative — the tree can be tens of thousands of leaves deep).
+    nodes, parent, kids, isleaf = [], [], [], []
+    stack = [(troot, -1)]
+    while stack:
+        nd, par = stack.pop()
+        idx = len(nodes)
+        nodes.append(nd); parent.append(par); kids.append([])
+        ch = nd.get("t")
+        isleaf.append(not ch)
+        if par >= 0:
+            kids[par].append(idx)
+        if ch:
+            for c in ch:
+                stack.append((c, idx))
+    N = len(nodes)
+    # leaf gap frequency per column
+    L = max((len(nodes[i].get("a", "")) for i in range(N) if isleaf[i]), default=0)
+    if not L:
+        return frozenset()
+    nleaf = sum(1 for i in range(N) if isleaf[i])
+    gapcount = [0] * L
+    for i in range(N):
+        if isleaf[i]:
+            a = nodes[i].get("a", "")
+            for c in range(len(a)):
+                if a[c] == "-":
+                    gapcount[c] += 1
+    del_cols = [c for c in range(L) if nleaf and gapcount[c] / nleaf >= min_frac]
+    if not del_cols:
+        print("[indel] no deletion columns >= "
+              f"{min_frac:.3%} gapped — nothing to reconstruct", file=sys.stderr)
+        return frozenset()
+    PRESENT, ABSENT = 1, 2
+    overrides = {}                                     # internal node idx -> {col: '-'}
+    for c in del_cols:
+        mask = [0] * N
+        for i in range(N):                             # leaf states
+            if isleaf[i]:
+                a = nodes[i].get("a", "")
+                ch = a[c] if c < len(a) else "X"
+                mask[i] = ABSENT if ch == "-" else (PRESENT | ABSENT) if ch == "X" else PRESENT
+        for i in reversed(range(N)):                   # Fitch up (children precede parent)
+            if not isleaf[i]:
+                inter, union = PRESENT | ABSENT, 0
+                for k in kids[i]:
+                    inter &= mask[k]; union |= mask[k]
+                mask[i] = inter if inter else union
+        chosen = [0] * N
+        for i in range(N):                             # Fitch down (root first)
+            if parent[i] < 0:
+                chosen[i] = PRESENT if mask[i] & PRESENT else ABSENT
+            else:
+                p = chosen[parent[i]]
+                chosen[i] = p if (mask[i] & p) else (PRESENT if mask[i] & PRESENT else ABSENT)
+            if not isleaf[i] and chosen[i] == ABSENT:
+                overrides.setdefault(i, {})[c] = "-"
+    for i, ov in overrides.items():                    # apply to internal-node sequences
+        la = list(nodes[i].get("a", ""))
+        for c, ch in ov.items():
+            if c < len(la):
+                la[c] = ch
+        nodes[i]["a"] = "".join(la)
+    print(f"[indel] deletion columns (1-based): {[c + 1 for c in del_cols]}; "
+          f"rewrote {len(overrides)} internal nodes", file=sys.stderr)
+    return frozenset(del_cols)
+
+
 def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
-               norm_pt: dict, parent_aa: str = "", aa_table: dict = None):
+               norm_pt: dict, parent_aa: str = "", aa_table: dict = None,
+               del_cols=frozenset()):
     """Return (pruned_node | None) keeping only paths to leaves whose normalised
     name is in keep_norms. Degree-2 internal nodes are collapsed (path
     compression); x = cumulative edge length ('c'). `parent_aa` is the reconstructed
@@ -575,7 +694,7 @@ def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
     children = root.get("t", [])
     cum = root.get("c", root.get("M", 0.0)) or 0.0
     node_aa = root.get("a", "")
-    A = aa_transitions(parent_aa, node_aa)
+    A = aa_transitions(parent_aa, node_aa, del_cols)
 
     if not children:  # leaf
         name = root.get("n", "")
@@ -603,7 +722,7 @@ def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
     # Children diff against THIS node's aa unless this node is collapsed away, in which
     # case its transitions must roll up onto the surviving descendant — handled below.
     kept = [k for k in (prune_tree(c, keep_norms, norm_clade, norm_ag, norm_pt,
-                                   node_aa, aa_table)
+                                   node_aa, aa_table, del_cols)
                         for c in children) if k]
     if not kept:
         return None
@@ -653,6 +772,14 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--template",
                     default=str(Path(__file__).with_name("viewer_template.html")))
+    ap.add_argument("--del-min-frac", type=float, default=0.01,
+                    help="a column is treated as a real deletion (reconstructed by "
+                         "parsimony, labelled Δ) when >= this fraction of leaves are "
+                         "gapped there (default 0.01); below it gaps are ignored as "
+                         "sequencing artefacts")
+    ap.add_argument("--no-indels", action="store_true",
+                    help="disable deletion reconstruction (only residue substitutions "
+                         "are labelled, as before)")
     args = ap.parse_args()
 
     # clade/continent palettes are read from each chart's own report styles (v3); the
@@ -711,9 +838,12 @@ def main():
     # for the tree we attach the first chart's antigen indices (primary linkage key is norm)
     primary = charts[0]["norm_to_ag"]
 
+    # Deletion reconstruction (rewrites internal-node `a` so the edge diff sees indels).
+    del_cols = frozenset() if args.no_indels else reconstruct_indels(troot, args.del_min_frac)
+
     aa_table = {}   # E2: norm -> reconstructed AA sequence (shared, for C1 colour-by-AA)
     pruned = prune_tree(troot, keep_norms, norm_clade, primary, norm_pt,
-                        aa_table=aa_table)
+                        aa_table=aa_table, del_cols=del_cols)
     if pruned is None:
         print("ERROR: no tips matched; pruned tree is empty.", file=sys.stderr)
         sys.exit(1)
