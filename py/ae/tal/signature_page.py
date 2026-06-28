@@ -180,17 +180,22 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
         grid_w_mm = cols * cell_mm + (cols - 1) * col_gap_mm
         paper_w = 2.0 * margin_mm + tree_w_mm + panel_gap_mm + grid_w_mm
         tree_w_frac = tree_w_mm / (paper_w - 2.0 * margin_mm)
-        # Tighten the page HEIGHT to the content (avail_h + margins + glue headroom) instead of the
-        # full input paper_h, so the aspect approaches AD's 1+tree_aspect ratio. The inter-row glue
-        # + minipage baselines grow with the row count, so add headroom per row beyond 2 — else a
-        # 3-row grid (H3/B-Vic) spills to a 2nd page.
-        paper_h = avail_h + 2.0 * margin_mm + 8.0 + max(0, rows - 2) * 9.0
+        # Page HEIGHT = the tightly-packed map grid + margins + a small spill guard. The grid is
+        # composed below (auto_width branch) as a \vtop{\offinterlineskip ...} with NO inter-row
+        # baselineskip glue, so N rows pack into ~rows*cell_mm. This matches AD's ~199mm sig page;
+        # the earlier \par-separated minipage stack carried ~20mm of baselineskip glue -> a ~217mm
+        # (~9% too tall) page. PAD=4mm is the minimum keeping every subtype on ONE page (the h3
+        # 4-col/10-map 3-row grid is the tightest — verified by sweep). => ~202mm, +1.5% vs AD.
+        sig_rowgap_mm = 1.5  # vertical gap between map rows (\vskip in the tight grid below)
+        grid_h_mm = rows * cell_mm + (rows - 1) * sig_rowgap_mm
+        paper_h = grid_h_mm + 2.0 * margin_mm + 4.0
     else:
         # Fixed paper: size each cell to fit both the right panel's width and the height.
         right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
         cell_mm = max(10.0, min(right_panel_mm / cols - 3.0, avail_h / rows - row_overhead))
         tree_w_frac = 0.5
-    tree_h_frac = round(avail_h / (paper_h - 2.0 * margin_mm), 3)
+    # For the auto-width sig page the tree matches the (tight) grid height; otherwise avail_h.
+    tree_h_frac = round((grid_h_mm if auto_width else avail_h) / (paper_h - 2.0 * margin_mm), 3)
     grid_panel_frac = round((cols * cell_mm + cols * col_gap_mm + 2.0) / (paper_w - 2.0 * margin_mm), 3)
 
     work = Path(tempfile.mkdtemp(prefix="tal-grid-"))
@@ -203,21 +208,33 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
             # Bound the map by BOTH the cell width and height (keepaspectratio): kateri's
             # auto-fit maps aren't always square, so a width-only fit would make a tall map
             # overflow the cell and spill the grid to a 2nd page.
-            img = rf"\includegraphics[width=\linewidth,height={cell_mm:.1f}mm,keepaspectratio]{{map{i}.pdf}}"
+            img = rf"\includegraphics[width={cell_mm:.1f}mm,height={cell_mm:.1f}mm,keepaspectratio]{{map{i}.pdf}}"
             # AD draws a thin black border around each map; kateri draws none, so frame here.
             return rf"\setlength{{\fboxsep}}{{0pt}}\setlength{{\fboxrule}}{{0.5pt}}\fbox{{{img}}}" if frame else img
 
-        cells = []
-        for i in range(len(maps)):
-            cap = caps[i] if i < len(caps) else ""
-            cap_tex = rf"\\[1pt]{{\footnotesize {_latex_escape(cap)}}}" if cap else ""
-            cells.append(
-                rf"\begin{{minipage}}[t]{{{cell_mm:.1f}mm}}\centering{boxed(i)}{cap_tex}\end{{minipage}}%"
-            )
-            cells.append(r"\hspace{2mm}")
-            if (i + 1) % cols == 0:  # row break
-                cells.append(r"\par\vspace{2mm}")
-        grid = "\n".join(cells)
+        if auto_width:
+            # Tight grid: each row an \hbox of framed maps; rows stacked in a
+            # \vtop{\offinterlineskip ...} so there is NO inter-row baselineskip glue (the cause of
+            # the over-tall page). Section-map sig pages carry no per-map captions.
+            row_tex = []
+            for r in range(rows):
+                imgs = [boxed(i) for i in range(r * cols, min((r + 1) * cols, len(maps)))]
+                row_tex.append(r"\hbox{" + r"\hspace{2mm}".join(imgs) + r"}")
+            grid = r"\vtop{\offinterlineskip" + "".join(
+                "\n" + rt + (rf"\vskip{sig_rowgap_mm:.1f}mm" if k < len(row_tex) - 1 else "")
+                for k, rt in enumerate(row_tex)) + r"}"
+        else:
+            cells = []
+            for i in range(len(maps)):
+                cap = caps[i] if i < len(caps) else ""
+                cap_tex = rf"\\[1pt]{{\footnotesize {_latex_escape(cap)}}}" if cap else ""
+                cells.append(
+                    rf"\begin{{minipage}}[t]{{{cell_mm:.1f}mm}}\centering{boxed(i)}{cap_tex}\end{{minipage}}%"
+                )
+                cells.append(r"\hspace{2mm}")
+                if (i + 1) % cols == 0:  # row break
+                    cells.append(r"\par\vspace{2mm}")
+            grid = "\n".join(cells)
 
         title_tex = rf"{{\large\bfseries {_latex_escape(page_title)}\par}}\vspace{{2mm}}" + "\n" if page_title else ""
         tree_cap_tex = rf"\\[1pt]{{\footnotesize {_latex_escape(tree_caption)}}}" if tree_caption else ""

@@ -320,7 +320,19 @@ def _dash_bar_legend(labels) -> list:
             entry = {"text": text, "color": e.get("color", "")}
             if isinstance(aa, str) and len(aa) == 1:
                 entry["aa"] = aa
+            # AD positions each legend label at its `vertical_position` anchor + offset.y and
+            # the renderer stacks them top->bottom, so order by that effective y rather than by
+            # the .tal's array/insertion order. h1's list form authors 156N (offset y=-0.0)
+            # AFTER 155E (y=0.01), so array order would render them swapped vs AD; sorting by
+            # offset.y restores AD's 156N-above-155E order. (h3/bvic dict legends are already
+            # authored in offset order, so this is a no-op for them.)
+            off = e.get("offset")
+            oy = off[1] if (isinstance(off, list) and len(off) == 2 and isinstance(off[1], (int, float))) else 0.0
+            entry["_sort"] = (1.0 if e.get("vertical_position") == "bottom" else 0.0) + float(oy)
             out.append(entry)
+    out.sort(key=lambda d: d["_sort"])
+    for d in out:
+        d.pop("_sort", None)
     return out
 
 

@@ -102,8 +102,14 @@ ae::tal::TimeSeries ae::tal::compute_time_series(ae::tree::Tree& tree, TimeSerie
 
     const sys_days range_first{start.empty() ? *std::min_element(dates.begin(), dates.end())
                                               : sys_days{ae::date::from_string(start, ae::date::allow_incomplete::yes, ae::date::throw_on_error::yes)}};
-    const sys_days range_last{end.empty() ? *std::max_element(dates.begin(), dates.end())
-                                          : sys_days{ae::date::from_string(end, ae::date::allow_incomplete::yes, ae::date::throw_on_error::yes)}};
+    // AD's time_series::make treats an explicit `end` as the EXCLUSIVE upper bound (the last
+    // slot is the interval before `end`), so end "2026-03" yields a last month of Feb 2026.
+    // generate_slots() below is inclusive of the month/year containing range_last, so step the
+    // explicit end back one day to drop the `end` interval. The auto case (no end) keeps the
+    // max leaf date, which must stay inclusive so the most-recent month is shown.
+    const sys_days range_last{end.empty()
+                                  ? *std::max_element(dates.begin(), dates.end())
+                                  : sys_days{ae::date::from_string(end, ae::date::allow_incomplete::yes, ae::date::throw_on_error::yes)} - days{1}};
 
     const auto bounds = generate_slots(interval, range_first, range_last);
     // fmt::runtime: ae's year_month_day formatter delegates to sys_days at runtime,

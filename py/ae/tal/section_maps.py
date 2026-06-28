@@ -54,11 +54,17 @@ WHITE = "#ffffff"
 # Small AD-like sizes (kateri px), tuned by eye against the AD reference. AD's data values
 # are test 3 / ref 5 / serum 5 / in-section 5 / vaccine 15; kept small here so the grid maps
 # read like AD's rather than the report's full-size maps (reset 20 / vaccine 40).
-BASE_ANTIGEN = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 13}
-REF_ANTIGEN_SIZE = 18
-BASE_SERUM = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 14}
+# Point sizes scaled by 0.742 (2026-06-26, Agent-SIG): measured against AD
+# reference-AD/addendum-4.pdf at 400dpi (grids matched at 64px/unit). AD's in-section
+# isolated-point diameter is 0.242 grid-units; the original sizes (13/18/14/19) rendered
+# ~0.33 (≈1.35x too large). Two empirical iterations (0.814 then x0.912, verified by
+# isolated-point diameter, robust to cluster overlap) → factor 0.742 brings AE to AD's
+# sig-page point size. Was 13/18/14/19.
+BASE_ANTIGEN = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 9.7}
+REF_ANTIGEN_SIZE = 13.3
+BASE_SERUM = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 10.4}
 INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE, "outline_width": 0.5}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.5, "size": 19}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.5, "size": 14.1}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
@@ -530,7 +536,7 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
             semantic.serum_circle.style(chart, style_name=sc_name, sera=list(sr_idx), fold=serum_circle_fold,
                                         priority=base_priority + 100 + si)
             style.add_modifier(parent=sc_name)
-            style.add_modifier(selector={sr_key: True}, only="sera", fill="black", size=15, raise_=True)
+            style.add_modifier(selector={sr_key: True}, only="sera", fill="black", size=11.1, raise_=True)
         # in-map title: small Helvetica, hard into the top-left corner above the first gridline
         # (AD) — kateri's default title offset is (30, 30), too far in; pull it close to the corner.
         style.plot_title.text.text = section_title(section)
