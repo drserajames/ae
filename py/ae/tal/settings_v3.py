@@ -189,12 +189,20 @@ def _time_series_slots(cmd: dict, warnings: list) -> int | None:
     return None
 
 
-def _compute_layout_width(tal: dict, defines: dict, warnings: list) -> float:
+def _compute_layout_width(tal: dict, defines: dict, warnings: list,
+                          program: str = "tal", include_builtin_hooks: bool = True) -> float:
     """Replicate acmacs-tal's page width-to-height ratio for the `.tal` program.
 
-    Walks the `tal` program in order — following string and {"N": "<sub-array>"}
+    Walks the `program` array in order — following string and {"N": "<sub-array>"}
     sub-array invocations, `if`/`then`/`else`, and skipping ?-disabled entries — and
     sums each enabled normal-position element's width, then applies the margins.
+
+    `program` is the entry array (the report trees use "tal"; the diagnostic "info"
+    trees use "tal-default", info.tal's self-contained program). `include_builtin_hooks`
+    adds AD's `layout-tree-only` column hooks (`tal-dash-bar-*`) that the report's "tal"
+    program relies on but does not invoke itself; the info "tal-default" program replaces
+    `layout-tree-only` entirely (it overrides the builtin `tal-default`), so those hooks
+    must NOT be added for it.
     """
     canvas_height = 1000.0
     margins = {"left": 0.025, "right": 0.0, "top": 0.025, "bottom": 0.025}
@@ -275,7 +283,7 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list) -> float:
             # all other commands (title, draw-aa-transitions, nodes, hz-sections in a
             # tree-only layout, set, ladderize, …) are absolute / contribute no width
 
-    walk(tal.get("tal", []))
+    walk(tal.get(program, []))
     # acmacs-tal's builtin tree-only layout (conf/tal.json `layout-tree-only`) draws its
     # tree/time-series/clades as singletons that the user `.tal` above overrides (settings
     # find-or-update by element id), but it ALSO invokes three user-overridable column
@@ -283,9 +291,10 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list) -> float:
     # `tal-dash-bar-clades`, `tal-dash-bar-left-2` — that the user program does not invoke
     # itself. The reports redefine `tal-dash-bar-clades` to add a per-subtype gap (h3 0.015,
     # h1 0.009; empty for bvic), so its width must be included. Walk any not already visited.
-    for hook in ("tal-dash-bar-left-1", "tal-dash-bar-clades", "tal-dash-bar-left-2"):
-        if hook not in visited and hook in tal and isinstance(tal[hook], list):
-            walk(tal[hook])
+    if include_builtin_hooks:
+        for hook in ("tal-dash-bar-left-1", "tal-dash-bar-clades", "tal-dash-bar-left-2"):
+            if hook not in visited and hook in tal and isinstance(tal[hook], list):
+                walk(tal[hook])
     return (width + margins["left"] + margins["right"]) / (1.0 + margins["top"] + margins["bottom"])
 
 
@@ -353,7 +362,12 @@ def _select(select: dict, warnings: list) -> dict:
         out["date_min"] = select["date_min"]
     if "date_max" in select:
         out["date_max"] = select["date_max"]
-    known = ("seq_id", "cumulative >=", "edge >=", "date_min", "date_max", "report")
+    # "all"/"all-and-intermediate" are AD's match-everything selectors (used by the info
+    # tree's global tree-label-scale / tree-edge-line-width mods). They carry no per-node
+    # criterion tal-draw can express as a selection, so they leave `out` empty (the mod is
+    # dropped by the caller). Treat them as known so they don't warn.
+    known = ("seq_id", "cumulative >=", "edge >=", "date_min", "date_max", "report",
+             "all", "all-and-intermediate")
     for key in select:
         if key.startswith("?"):
             continue  # ?-disabled key — silently skip (not an unsupported criterion)
@@ -368,6 +382,17 @@ def _apply(apply: dict, warnings: list) -> dict:
         out["hide"] = True
     if "tree-edge-line-color" in apply:
         out["edge_color"] = apply["tree-edge-line-color"]
+    if "tree-label-scale" in apply:
+        # AD scales (or, with -1, hides) the leaf label font. tal-draw has apply.label_scale,
+        # but the info/report trees draw no per-leaf name labels by default (schema labels=False),
+        # so a global tree-label-scale is a no-op here — pass it through harmlessly.
+        scale = apply["tree-label-scale"]
+        if isinstance(scale, (int, float)):
+            out["label_scale"] = float(scale)
+    # NB tree-edge-line-width (AD's per-node edge_line_width_scale) is handled in the `nodes`
+    # branch of translate(): the info trees apply it to `all-and-intermediate` (every node), which
+    # maps to tal-draw's GLOBAL edge_line_width_scale. A hypothetical per-node (seq_id) width has
+    # no tal-draw equivalent and is warned about there.
     if "label" in apply and isinstance(apply["label"], dict) and "color" in apply["label"]:
         out["label_color"] = apply["label"]["color"]
     if "text" in apply:
@@ -387,8 +412,13 @@ def _apply(apply: dict, warnings: list) -> dict:
     return out
 
 
-def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
-    """Translate a loaded `.tal` settings-v3 object into (schema, warnings)."""
+def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> tuple[dict, list]:
+    """Translate a loaded `.tal` settings-v3 object into (schema, warnings).
+
+    `program` is the top-level array to run as the mod program. The report trees use
+    "tal"; the diagnostic "info" trees use "tal-default" (info.tal's self-contained
+    program, which in AD overrides the builtin `tal-default` that `tal` runs `--open`).
+    """
     defines = dict(defines or {})
     warnings: list = []
     # No per-leaf name labels by default: the production trees have tens of thousands of
@@ -640,6 +670,20 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 if not isinstance(select_raw, dict) or not isinstance(apply_raw, dict):
                     warnings.append("nodes with non-object select/apply not supported — skipped")
                 else:
+                    # AD's per-node edge_line_width_scale. The info trees apply it to
+                    # `all`/`all-and-intermediate` (every node) — that maps to tal-draw's GLOBAL
+                    # edge_line_width_scale (the heavy-edge diagnostic look). A width targeted at
+                    # specific seq_ids has no per-node tal-draw equivalent, so warn instead.
+                    if "tree-edge-line-width" in apply_raw:
+                        w = apply_raw["tree-edge-line-width"]
+                        if (select_raw.get("all") or select_raw.get("all-and-intermediate")) and isinstance(w, (int, float)) and w > 0:
+                            schema["edge_line_width_scale"] = float(w)
+                        elif not apply_raw.get("hide"):
+                            # a per-node edge width on a VISIBLE node has no tal-draw equivalent;
+                            # if the same mod also hides the node the width is moot (the edge is
+                            # never drawn — the info trees' outlier-hide mods), so don't warn.
+                            warnings.append("nodes.apply.tree-edge-line-width on a non-global "
+                                            "selection has no tal-draw equivalent — skipped")
                     sel, ap = _select(select_raw, warnings), _apply(apply_raw, warnings)
                     if sel and ap:
                         node_mods.append({"select": sel, "apply": ap})
@@ -653,22 +697,23 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                 # leaf colouring: color-by is a string ("continent") or an object
                 # ({"N": "pos-aa-frequency"|"pos-aa-colors", "pos": N}). Both pos modes
                 # map to color_by_pos (frequency colouring; explicit aa scheme approximated).
-                # A `tree` element's color-by recolours the tree EDGES (acmacs-tal DrawTree);
-                # the continent colouring of the WHOCC report comes instead from the
-                # time-series / clades-whocc and tints only the matrix (edges stay black). So
-                # set color_edges only here, when the tree itself asks for an edge colouring.
+                # NB acmacs-tal's DrawTree draws every edge in `color_edge_line` (default BLACK,
+                # only changed by a `nodes apply.tree-edge-line-color` mod) — the `tree`
+                # color-by drives the leaf/time-series/legend *coloring()*, NOT the edges (see
+                # AD cc/draw-tree.cc lines 73/77/88). So `continent` tints the matrix + legend
+                # + world map and leaves the tree edges black (matching both the WHOCC report
+                # and the diagnostic info trees); do NOT set color_edges for it. color_by_pos
+                # is kept colour-edges for now (no AD reference render to check it against).
                 cb = cmd.get("color-by")
                 if isinstance(cb, str):
                     if cb == "continent":
                         schema["color_by_continent"] = True
-                        schema["color_edges"] = True
                     elif cb not in ("", "uniform"):
                         warnings.append(f"tree color-by {cb!r} not supported — skipped")
                 elif isinstance(cb, dict):
                     cbn = cb.get("N")
                     if cbn == "continent":
                         schema["color_by_continent"] = True
-                        schema["color_edges"] = True
                     elif cbn in ("pos-aa-frequency", "pos-aa-colors") and "pos" in cb:
                         schema["color_by_pos"] = {"pos": int(cb["pos"])}
                         schema["color_edges"] = True
@@ -676,6 +721,15 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
                         warnings.append(f"tree color-by {cbn!r} not supported — skipped")
                 if isinstance(cmd.get("legend"), dict) and cmd["legend"].get("show"):
                     schema.setdefault("legend", {})["show"] = True
+                    # AD draws the continent legend as the lower-left world map
+                    # (LegendContinentMap), not a top-right colour-square list — the info
+                    # tree's `tree {color-by:continent, legend:{show}}` is exactly this case
+                    # (the report trees get the same inset via `clades-whocc`). Enable the geo
+                    # inset so tal-draw swaps the text legend for the world map (its
+                    # want_legend = !legend_items.empty() && !geo_inset). Only for continent
+                    # colouring — a pos/clade legend stays the top-right square list.
+                    if schema.get("color_by_continent"):
+                        schema["geo_inset"] = True
             elif name == "ladderize":
                 # tree leaf ordering. AD ladderizes children by subtree size
                 # (number-of-leaves, default) or longest subtree edge (max-edge-length);
@@ -714,7 +768,7 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
             else:
                 warnings.append(f"command {name!r} not handled — skipped")
 
-    run(tal.get("tal", []))
+    run(tal.get(program, []))
     if node_mods:
         schema["nodes"] = node_mods
 
@@ -724,18 +778,74 @@ def translate(tal: dict, defines: dict | None = None) -> tuple[dict, list]:
     # Layout::width_relative_to_height) — not a per-column allowance: column COUNT does not
     # predict width (h3 has the most dash columns yet is narrower than h1, whose clades
     # column alone is 0.092 and whose time-series slots are wide). _compute_layout_width
-    # replicates that sum so the page matches the AD references (bvic 0.632, h3 0.649,
-    # h1 0.794). tal-draw lays the columns out internally as fractions of the page width.
+    # replicates that sum so the page matches the AD references — verified against AD `tal`
+    # on this cycle's .tjz to <0.1pt: report trees bvic 0.6537, h3 0.6676, h1 0.8267 (AD
+    # 653.714 / 667.619 / 826.667 pt); info trees 0.6181 (AD 618.095). tal-draw lays the
+    # columns out internally as fractions of the page width.
     tree_ratio = schema.pop("tree_width_to_height_ratio", None)
     if tree_ratio:  # a `tree` element with an explicit width-to-height-ratio sets the page
-        schema["width_to_height_ratio"] = round(_compute_layout_width(tal, defines, warnings), 4)
+        schema["width_to_height_ratio"] = round(
+            _compute_layout_width(tal, defines, warnings, program=program,
+                                  include_builtin_hooks=(program == "tal")), 4)
     # de-duplicate warnings, keep order
     seen: set = set()
     schema_warnings = [w for w in warnings if not (w in seen or seen.add(w))]
     return schema, schema_warnings
 
 
-def load_tal(path, defines: dict | None = None) -> tuple[dict, list]:
-    """Load a `.tal` file and translate it. `defines` are -D overrides (name -> value)."""
-    tal = _loads_relaxed(Path(path).read_text())
-    return translate(tal, defines)
+# A small subset of acmacs-tal's conf/tal.json `init` defaults, seeded under the overlay
+# path so the info program's `$`-references resolve the way AD's loaded environment would.
+# (The single-file report path does NOT seed these — it preserves the historical behaviour
+# where unresolved `$canvas-height` falls back to tal-draw's 1000 default and an unresolved
+# `$ladderize-method` is a no-op. Only the values the info program actually reads are listed.)
+_CONF_INIT_DEFAULTS = {
+    "canvas-height": 1000,
+    "ladderize-method": "number-of-leaves",
+    "report-cumulative-output": "",
+    "report-time-series-output": "",
+    "whocc": False,
+}
+
+
+def _collect_init_defines(tal: dict, into: dict) -> None:
+    """Fold a loaded `.tal`'s `init` `set` commands into the defines map (AD applies each
+    loaded file's `init` in load order, so later files override earlier on the same key;
+    `?`-prefixed keys are disabled and skipped). Mirrors how `$var` substitution resolves
+    against the accumulated environment."""
+    for cmd in tal.get("init", []):
+        if not isinstance(cmd, dict) or cmd.get("N") != "set":
+            continue
+        for key, val in cmd.items():
+            if key == "N" or key.startswith("?"):
+                continue
+            into[key] = val
+
+
+def load_tal(path, defines: dict | None = None, program: str | None = None) -> tuple[dict, list]:
+    """Load and translate acmacs-tal `.tal` settings.
+
+    `path` is a single `.tal` file (the report trees) OR a list of files to overlay the way
+    AD's ``tal -s a.tal -s b.tal`` does: every file's named arrays are loaded into one
+    environment (later files override earlier on key collision), each file's `init` `set`
+    defines accumulate in load order, and the chosen `program` array is run. For the info
+    trees the second file (`info.tal`) carries a self-contained `tal-default` program that
+    overrides AD's builtin one, so the overlay path defaults `program` to "tal-default".
+
+    `defines` are `-D` overrides (name -> value); they take precedence over `init` defines.
+    """
+    if isinstance(path, (str, Path)):
+        # Single-file (report) path — unchanged behaviour: no conf/init seeding.
+        tal = _loads_relaxed(Path(path).read_text())
+        return translate(tal, defines, program=program or "tal")
+
+    # Overlay path: merge several files into one environment.
+    merged: dict = {}
+    init_defines: dict = dict(_CONF_INIT_DEFAULTS)
+    for one in path:
+        tal = _loads_relaxed(Path(one).read_text())
+        _collect_init_defines(tal, init_defines)
+        for key, val in tal.items():
+            if key != "init":          # init handled via init_defines (accumulate, don't clobber)
+                merged[key] = val       # named arrays: later file wins on collision
+    effective = {**init_defines, **(defines or {})}
+    return translate(merged, effective, program=program or "tal-default")

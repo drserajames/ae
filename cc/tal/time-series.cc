@@ -10,9 +10,15 @@
 
 namespace ae::tal
 {
-    // Generate contiguous [first, after_last) slot boundaries covering [first_day, last_day].
+    // Generate contiguous [first, after_last) slot boundaries from first_day up to last_day.
+    // `last_inclusive` controls the upper bound, matching acmacs-tal's [first, after_last):
+    //   - false (an explicit settings `end`): EXCLUSIVE — `last_day` is the first instant NOT
+    //     covered, so the bucket starting at last_day is not drawn (e.g. month end "2026-03"
+    //     draws through Feb 2026, like AD; not Mar 2026).
+    //   - true (auto end = latest leaf date): INCLUSIVE — the bucket CONTAINING last_day is
+    //     drawn, so the most recent data is not dropped.
     static std::vector<std::pair<std::chrono::sys_days, std::chrono::sys_days>> generate_slots(TimeSeriesInterval interval, std::chrono::sys_days first_day,
-                                                                                               std::chrono::sys_days last_day)
+                                                                                               std::chrono::sys_days last_day, bool last_inclusive)
     {
         using namespace std::chrono;
         std::vector<std::pair<sys_days, sys_days>> bounds;
@@ -20,25 +26,25 @@ namespace ae::tal
             case TimeSeriesInterval::year: {
                 const year first_y{year_month_day{first_day}.year()};
                 const year last_y{year_month_day{last_day}.year()};
-                for (year y = first_y; y <= last_y; ++y)
+                for (year y = first_y; last_inclusive ? y <= last_y : y < last_y; ++y)
                     bounds.emplace_back(sys_days{y / January / 1}, sys_days{(y + years{1}) / January / 1});
                 break;
             }
             case TimeSeriesInterval::month: {
                 const year_month_day first_ymd{first_day}, last_ymd{last_day};
                 const year_month last_ym{last_ymd.year() / last_ymd.month()};
-                for (year_month ym{first_ymd.year() / first_ymd.month()}; ym <= last_ym; ym += months{1})
+                for (year_month ym{first_ymd.year() / first_ymd.month()}; last_inclusive ? ym <= last_ym : ym < last_ym; ym += months{1})
                     bounds.emplace_back(sys_days{ym / 1}, sys_days{(ym + months{1}) / 1});
                 break;
             }
             case TimeSeriesInterval::week: {
                 const sys_days monday{first_day - (weekday{first_day} - Monday)}; // align to the Monday on/before first_day
-                for (sys_days s = monday; s <= last_day; s += days{7})
+                for (sys_days s = monday; last_inclusive ? s <= last_day : s < last_day; s += days{7})
                     bounds.emplace_back(s, s + days{7});
                 break;
             }
             case TimeSeriesInterval::day: {
-                for (sys_days s = first_day; s <= last_day; s += days{1})
+                for (sys_days s = first_day; last_inclusive ? s <= last_day : s < last_day; s += days{1})
                     bounds.emplace_back(s, s + days{1});
                 break;
             }
@@ -111,7 +117,9 @@ ae::tal::TimeSeries ae::tal::compute_time_series(ae::tree::Tree& tree, TimeSerie
                                   ? *std::max_element(dates.begin(), dates.end())
                                   : sys_days{ae::date::from_string(end, ae::date::allow_incomplete::yes, ae::date::throw_on_error::yes)} - days{1}};
 
-    const auto bounds = generate_slots(interval, range_first, range_last);
+    // An explicit settings `end` is an EXCLUSIVE upper bound (acmacs-tal [first, after_last));
+    // an auto end (empty -> latest leaf date) must still include that leaf's bucket.
+    const auto bounds = generate_slots(interval, range_first, range_last, /*last_inclusive=*/end.empty());
     // fmt::runtime: ae's year_month_day formatter delegates to sys_days at runtime,
     // so the "%Y-%m-%d" chrono spec cannot pass fmt's consteval format-string check.
     const auto ymd_str = [](sys_days day) { return fmt::format(fmt::runtime("{:%Y-%m-%d}"), year_month_day{day}); };

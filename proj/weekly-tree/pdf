@@ -51,3 +51,23 @@ if [[ ! -f ${SUBTYPE}/${SUBTYPE}${ASR_INFIX}.after-${LAST_DATE}.pdf ]]; then
 fi
 
 # ----------------------------------------------------------------------------------------------------
+# B/Vic: also build the ASR-annotated trees (per-node ancestral aa sequences from raxml-ng-asr).
+# The report PDF derives aa-transitions by leaf consensus, so it uses the non-asr tree built above
+# and does NOT need this. The interactive tree+map viewer, however, computes transitions by diffing
+# ancestral sequences and so needs a tjz that carries an "a" on every node (as h1/h3 already do via
+# the .asr branch). This block is additive: it leaves bvic's non-asr *.tjz untouched and produces
+# bvic.asr.tjz + bvic.asr.after-${LAST_DATE}.tjz alongside them (the dn rsync glob bvic*.tjz pulls
+# them). Caveat: gap columns (the B/Vic 162-164 deletions) yield no transitions either way.
+
+if [[ ${SUBTYPE} == "bvic" ]]; then
+    if [[ ! -f ${SUBTYPE}/${SUBTYPE}.asr.tjz ]]; then
+        ASR_STATES=$(cat ${SUBTYPE}/raxml-asr-best.txt | sed 's/ancestralTree/ancestralStates/')
+        ${AE_ROOT}/bin/tree-to-json --populate ${SUBTYPE} --asr-tree $(cat ${SUBTYPE}/raxml-asr-best.txt) --asr-states ${ASR_STATES} --ladderize --print-cumulative 20 --remove-if-cumulative-more-than ${CUMUL[${SUBTYPE}]} $(cat ${SUBTYPE}/cmaple_tree-rot-trim-col.txt) ${SUBTYPE}/${SUBTYPE}.asr.tjz
+    fi
+    if [[ ! -f ${SUBTYPE}/${SUBTYPE}.asr.after-${LAST_DATE}.tjz ]]; then
+        hidb5-find -s --list-names ${HIDB_SUBTYPE} all >${SUBTYPE}.important.txt
+        ${AE_ROOT}/bin/tree-to-json --remove-leaves-isolated-before ${LAST_DATE} --important ${SUBTYPE}.important.txt ${SUBTYPE}/${SUBTYPE}.asr.tjz ${SUBTYPE}/${SUBTYPE}.asr.after-${LAST_DATE}.tjz
+    fi
+fi
+
+# ----------------------------------------------------------------------------------------------------

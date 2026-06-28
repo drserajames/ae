@@ -50,23 +50,36 @@ def _tree_title(tree_file: Path) -> str | None:
 # ----------------------------------------------------------------------
 
 def make_tree(tree_file, settings, output_pdf, defines: dict | None = None,
-              size: int | None = None, tal_draw: str | None = None) -> Path:
+              size: int | None = None, tal_draw: str | None = None,
+              program: str | None = None) -> Path:
     """Render one tree PDF. *settings* is an acmacs-tal `.tal` config (translated
     to the tal-draw schema) or a tal-draw JSON file. *defines* are `-D name=value`
-    overrides for `.tal` `$variables`."""
+    overrides for `.tal` `$variables`.
+
+    *settings* may also be a **list** of `.tal` files to overlay the way AD's
+    ``tal -s a.tal -s b.tal`` does — used by the diagnostic "info" trees, which layer
+    ``info.tal`` (a self-contained `tal-default` program: continent colouring, a
+    time-series, hidden outlier seqs) over the subtype's base `.tal` (whose `init`
+    supplies the shared defines). For a list, *program* defaults to "tal-default"."""
     tree_file, output_pdf = Path(tree_file), Path(output_pdf)
     tal_draw = tal_draw or _resolve_tal_draw()
-    settings = Path(settings)
 
-    if settings.suffix == ".tal":
+    is_overlay = isinstance(settings, (list, tuple))
+    settings_list = [Path(s) for s in settings] if is_overlay else [Path(settings)]
+    is_tal = is_overlay or settings_list[0].suffix == ".tal"
+
+    if is_tal:
         from ae.tal import settings_v3
-        schema, warnings = settings_v3.load_tal(settings, defines=defines)
+        load_arg = settings_list if is_overlay else settings_list[0]
+        schema, warnings = settings_v3.load_tal(load_arg, defines=defines, program=program)
         for w in warnings:
             print(f">>> tree {output_pdf.name}: .tal warning: {w}", file=__import__("sys").stderr)
-        # AD prints the subtype/lineage as a top-left title (conf/tal.json
-        # `{"N":"title","text":"{virus-type/lineage}"}`); the report `.tal`s
-        # don't carry a title module, so derive it from the tree header.
-        if not schema.get("title"):
+        # AD prints the subtype/lineage as a top-left title via the builtin layout
+        # (conf/tal.json `layout-tree-only` -> `{"N":"title","text":"{virus-type/lineage}"}`);
+        # the report `.tal`s don't carry a title module, so derive it from the tree header.
+        # NOT for the info overlay: info.tal's `tal-default` replaces that builtin layout and
+        # defines no title, so AD's info trees have none — don't add one (keep them matching).
+        if not is_overlay and not schema.get("title"):
             title = _tree_title(tree_file)
             if title:
                 schema["title"] = title
@@ -74,7 +87,7 @@ def make_tree(tree_file, settings, output_pdf, defines: dict | None = None,
         schema_file.write_text(json.dumps(schema))
         settings_arg = schema_file
     else:
-        settings_arg = settings
+        settings_arg = settings_list[0]
 
     cmd = [tal_draw, f"--settings={settings_arg}", str(tree_file), str(output_pdf)]
     if size:
