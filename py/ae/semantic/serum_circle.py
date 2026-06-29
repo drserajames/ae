@@ -1,5 +1,17 @@
 import sys
+import re
 import ae_backend
+
+# AD's egg-passage detection (acmacs-virus passage.cc re_egg + Passage::is_egg, which does a
+# regex_search over the WHOLE passage string — "contains an egg element", not "last element is
+# egg"). ae's own Passage.passage_type() only inspects the LAST deconstructed element and only
+# recognises "E"/"SPFCE", so it misclassifies SPF/SPE/D egg passages (e.g. SPF2, E4SPF9, E2SIAT1)
+# as cell. Replicate AD's regex here so serum-circle egg/cell colouring matches AD exactly.
+# (suffix groups in AD's regex are all optional, so they reduce to this core egg token search.)
+_AD_EGG_RE = re.compile(r"(?:(?:E|D|SPF(?:CE)?|SPE)(?:\?|[0-9][0-9]?)|EGG)")
+
+def _passage_is_egg(passage) -> bool:
+    return bool(_AD_EGG_RE.search(str(passage)))
 
 # ======================================================================
 
@@ -39,18 +51,35 @@ def style(chart: ae_backend.chart_v3.Chart, style_name: str, priority: int = 100
     for serum_no in sera:
         if serum_no >= 0 and serum_no < num_sera:
             serum = chart.serum(serum_no)
-            if not (passage := serum.passage()).empty():
-                serum_passage_type = passage.passage_type()
+            # Classify the serum's passage type exactly as AD's serum-circle drawing does:
+            # passage_type(reassortant_as_egg::no) (acmacs-map-draw mapi-settings-serum-circles.cc:29).
+            # A reassortant serum is its OWN class ("reassortant" -> orange), NOT egg, even when its
+            # passage string is egg (e.g. NYMC-333 E1/E9). Only NON-reassortant egg-passaged sera are
+            # "egg" (red); everything else is "cell" (blue). ae's Passage.passage_type() is
+            # reassortant-unaware (egg/cell only), so it must be checked here — otherwise reassortant
+            # sera get painted red instead of orange, the red/blue split that diverged from AD.
+            reassortant = serum.reassortant()
+            reassortant_empty = reassortant.empty() if hasattr(reassortant, "empty") else not str(reassortant)
+            if not reassortant_empty:
+                serum_passage_type = "reassortant"
+            elif not (passage := serum.passage()).empty():
+                # AD's passage_type(reassortant_as_egg::no): "contains egg element" -> egg, else cell.
+                # NOT ae's Passage.passage_type(), which only checks the last element and misses SPF/SPE/D.
+                serum_passage_type = "egg" if _passage_is_egg(passage) else "cell"
             elif "EGG" in serum.serum_id():
                 serum_passage_type = "egg"
             else:
                 serum_passage_type = "cell"
             # print(f">>>> SR {serum_no} {serum.designation()} I:{serum.serum_id()} EI:{'EGG' in serum.serum_id()} P:[{serum.passage()}] PT:{serum_passage_type}", file=sys.stderr)
             this_circle_style = {**circle_style}
+            # index per-passage-type colour maps; fall back to "egg" if a style omits the
+            # "reassortant" key (older callers) so a reassortant serum can't KeyError.
             if isinstance(this_circle_style.get("outline"), dict):
-                this_circle_style["outline"] = this_circle_style["outline"][serum_passage_type]
+                _o = this_circle_style["outline"]
+                this_circle_style["outline"] = _o.get(serum_passage_type, _o.get("egg"))
             if isinstance(this_circle_style.get("fill"), dict):
-                this_circle_style["fill"] = this_circle_style["fill"][serum_passage_type]
+                _f = this_circle_style["fill"]
+                this_circle_style["fill"] = _f.get(serum_passage_type, _f.get("egg"))
             if isinstance(this_circle_style.get("radius_lines", {}).get("outline"), dict):
                 this_circle_style["radius_lines"]["outline"] = this_circle_style["radius_lines"]["outline"][serum_passage_type]
             style.add_modifier(selector={"!i": serum_no}, only="sera", serum_circle={"fold": fold, "theoretical": theoretical, "fallback": fallback, "style": this_circle_style})

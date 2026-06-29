@@ -50,10 +50,15 @@ namespace ae::draw
         void path_negative_move(const double* first, const double* last, Color outline, double outline_width, Color fill);
         // Draw UTF-8 text via Cairo's built-in font API. When center is true the text's
         // bounding box is centred on (x, y); otherwise (x, y) is the box's top-left.
-        void text(double x, double y, std::string_view utf8, double font_size, Color color, bool center = true, bool monospace = false);
+        // halo_width > 0 strokes a halo (default white) behind the glyphs so an underlying
+        // line/bracket is masked and the text stands out (halo_width = stroke radius in device units).
+        void text(double x, double y, std::string_view utf8, double font_size, Color color, bool center = true, bool monospace = false,
+                  double halo_width = 0.0, Color halo_color = WHITE);
         // Draw UTF-8 text rotated by angle_degrees (positive = clockwise; -90 reads upward)
-        // about (x, y), with (x, y) as the baseline-left anchor of the first glyph.
-        void text_rotated(double x, double y, std::string_view utf8, double font_size, Color color, double angle_degrees);
+        // about (x, y), with (x, y) as the baseline-left anchor of the first glyph. halo_width > 0
+        // strokes a halo (default white) behind the glyphs (see text()).
+        void text_rotated(double x, double y, std::string_view utf8, double font_size, Color color, double angle_degrees,
+                          double halo_width = 0.0, Color halo_color = WHITE);
         // Measure a string at the given font size: returns {width, height} in device units.
         std::pair<double, double> text_size(std::string_view utf8, double font_size);
 

@@ -48,23 +48,19 @@ VIRIDIS_ANCHORS = (0x440154, 0x40FFFF, 0xFDE725)
 # WHITE outline (so no visible border); in-tree antigens a touch darker (gray63); in-section
 # antigens filled by date with a black outline; vaccines small with a small label. Sizes are
 # AD's (test 3 / ref 5 / serum 5 / in-section 5 / vaccine 15) scaled to kateri's larger canvas.
-GREY88 = "#e0e0e0"   # AD grey88: out-of-section / "older" antigens
-GRAY63 = "#a1a1a1"   # AD gray63: in-tree antigens (those with a tree leaf)
+GREY88 = "#e0e0e0"   # AD-rendered solid test-antigen fill (~224)
+GREY80 = "#cccccc"   # AD /all-color outline (grey80, ~204): faint edge on the grey fill
+GRAY63 = "#a1a1a1"   # in-section no-date antigen fill (medium grey)
 WHITE = "#ffffff"
-# Small AD-like sizes (kateri px), tuned by eye against the AD reference. AD's data values
-# are test 3 / ref 5 / serum 5 / in-section 5 / vaccine 15; kept small here so the grid maps
-# read like AD's rather than the report's full-size maps (reset 20 / vaccine 40).
-# Point sizes scaled by 0.742 (2026-06-26, Agent-SIG): measured against AD
-# reference-AD/addendum-4.pdf at 400dpi (grids matched at 64px/unit). AD's in-section
-# isolated-point diameter is 0.242 grid-units; the original sizes (13/18/14/19) rendered
-# ~0.33 (≈1.35x too large). Two empirical iterations (0.814 then x0.912, verified by
-# isolated-point diameter, robust to cluster overlap) → factor 0.742 brings AE to AD's
-# sig-page point size. Was 13/18/14/19.
-BASE_ANTIGEN = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 9.7}
-REF_ANTIGEN_SIZE = 13.3
-BASE_SERUM = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 10.4}
-INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE, "outline_width": 0.5}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.5, "size": 14.1}
+# Sizes/outlines from AD's LIVE sig-page config (2026-0223-ssm/sp/sp.tal, confirmed
+# 2026-06-27). AD units: test 2.5 / reference 3.0 / serum 3.0 / in-section 3.5; scaled to
+# kateri px by ~4.03 (in-section 3.5 -> 14.1, matched to AD by isolated-point diameter).
+# AD /all-color: test = solid grey fill + faint grey80 outline; reference + sera = HOLLOW
+# (transparent fill, grey80 outline); in-section = date-colour fill + thick BLACK outline.
+BASE_ANTIGEN = {"fill": GREY88, "outline": GREY80, "outline_width": 1.0, "size": 10.1}
+REF_ANTIGEN = {"fill": "transparent", "outline": GREY80, "outline_width": 1.0, "size": 12.1}
+BASE_SERUM = {"fill": "transparent", "outline": GREY80, "outline_width": 1.0, "size": 12.1}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": 1.5, "size": 14.1}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
@@ -512,11 +508,12 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         if viewport:  # else let kateri auto-fit/centre the map (fills the cell like AD)
             style.viewport(*viewport)
         style.legend.shown = False
-        # base: all points light grey (grey88), white outline (no visible border), small
+        # AD /all-grey + /all-color recipe: every test antigen solid grey + faint grey80 outline;
+        # reference antigens HOLLOW (transparent fill, grey80 outline); sera hollow grey80 squares.
+        # (AD draws no separate "in-tree gray63" class — every background antigen is the same grey.)
         style.add_modifier(only="antigens", **BASE_ANTIGEN)
-        style.add_modifier(selector={"R": True}, only="antigens", size=REF_ANTIGEN_SIZE)  # reference antigens a touch bigger
+        style.add_modifier(selector={"R": True}, only="antigens", **REF_ANTIGEN)  # reference = hollow grey80
         style.add_modifier(only="sera", **BASE_SERUM)
-        style.add_modifier(selector={"it": True}, only="antigens", **INTREE_ANTIGEN)  # in-tree antigens gray63
         if ag_idx:
             # in-section emphasis (black outline + raise); grey fill for dates outside the window
             style.add_modifier(selector={ag_key: True}, only="antigens", fill=NO_DATE_FILL, raise_=True, **INSECTION_ANTIGEN)
@@ -532,11 +529,23 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         # dark serum point so the circle centre is visible (AD draws these only when requested).
         if serum_circles and sr_idx:
             from ae import semantic
-            sc_name = f"sigsec-sc-{si:02d}"
-            semantic.serum_circle.style(chart, style_name=sc_name, sera=list(sr_idx), fold=serum_circle_fold,
-                                        priority=base_priority + 100 + si)
-            style.add_modifier(parent=sc_name)
-            style.add_modifier(selector={sr_key: True}, only="sera", fill="black", size=11.1, raise_=True)
+            # AD spc.tal: empirical circle (no dash) with passage-coloured outline
+            # (egg #FF4040 / cell #4040FF / reassortant #FFB040), width 0.6; fallback circle
+            # (fixed radius) when no empirical circle exists, so sera with no homologous antigen
+            # still get a circle (AD draws these — fixes the "missing circle, e.g. cell E").
+            # NB: add the per-serum circle modifiers DIRECTLY to this section's style (passing
+            # style_name=name) — the previous separate-style-plus-`parent=` indirection did not
+            # propagate the per-serum serum_circle modifiers to kateri, so most circles (esp.
+            # egg/red) were missing. This mirrors the serum-coverage path (which renders correctly).
+            semantic.serum_circle.style(
+                chart, style_name=name, sera=list(sr_idx), fold=serum_circle_fold, fallback=True,
+                priority=style.priority,
+                circle_style={"outline": {"egg": "#FF4040", "cell": "#4040FF", "reassortant": "#FFB040"},
+                              "fill": {"egg": "transparent", "cell": "transparent", "reassortant": "transparent"},
+                              "outline_width": 2.4, "dash": 0})
+            # AD mark_serum: raise the section's sera (transparent hollow square) so the circle
+            # centre is visible — AD does NOT fill it black.
+            style.add_modifier(selector={sr_key: True}, only="sera", raise_=True)
         # in-map title: small Helvetica, hard into the top-left corner above the first gridline
         # (AD) — kateri's default title offset is (30, 30), too far in; pull it close to the corner.
         style.plot_title.text.text = section_title(section)

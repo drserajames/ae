@@ -168,21 +168,36 @@ namespace ae::draw
         }
     }
 
-    void CairoPdf::text_rotated(double x, double y, std::string_view utf8, double font_size, Color color, double angle_degrees)
+    void CairoPdf::text_rotated(double x, double y, std::string_view utf8, double font_size, Color color, double angle_degrees,
+                                double halo_width, Color halo_color)
     {
         const std::string str{utf8};
         cairo_save(context_);
         cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(context_, font_size);
-        set_source(context_, color);
         cairo_translate(context_, x, y);
         cairo_rotate(context_, angle_degrees * std::numbers::pi / 180.0);
         cairo_move_to(context_, 0.0, 0.0);
-        cairo_show_text(context_, str.c_str());
+        if (halo_width > 0.0) {
+            // stroke the glyph outlines in the halo colour first (rounded joins so the halo is a
+            // smooth band), then fill the glyphs on top — masks any line/bracket behind the text.
+            cairo_text_path(context_, str.c_str());
+            set_source(context_, halo_color);
+            cairo_set_line_width(context_, halo_width * 2.0);
+            cairo_set_line_join(context_, CAIRO_LINE_JOIN_ROUND);
+            cairo_stroke_preserve(context_);
+            set_source(context_, color);
+            cairo_fill(context_);
+        }
+        else {
+            set_source(context_, color);
+            cairo_show_text(context_, str.c_str());
+        }
         cairo_restore(context_);
     }
 
-    void CairoPdf::text(double x, double y, std::string_view utf8, double font_size, Color color, bool center, bool monospace)
+    void CairoPdf::text(double x, double y, std::string_view utf8, double font_size, Color color, bool center, bool monospace,
+                        double halo_width, Color halo_color)
     {
         const std::string str{utf8};
         cairo_select_font_face(context_, monospace ? "monospace" : "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
@@ -193,9 +208,21 @@ namespace ae::draw
         // box lands where we want (centred on, or top-left at, (x, y)).
         const double tx = center ? (x - ext.width / 2.0 - ext.x_bearing) : (x - ext.x_bearing);
         const double ty = center ? (y - ext.height / 2.0 - ext.y_bearing) : (y - ext.y_bearing);
-        set_source(context_, color);
         cairo_move_to(context_, tx, ty);
-        cairo_show_text(context_, str.c_str());
+        if (halo_width > 0.0) {
+            cairo_text_path(context_, str.c_str());
+            set_source(context_, halo_color);
+            cairo_set_line_width(context_, halo_width * 2.0);
+            cairo_set_line_join(context_, CAIRO_LINE_JOIN_ROUND);
+            cairo_stroke_preserve(context_);
+            set_source(context_, color);
+            cairo_fill(context_);
+        }
+        else {
+            set_source(context_, color);
+            cairo_move_to(context_, tx, ty);
+            cairo_show_text(context_, str.c_str());
+        }
     }
 
     std::pair<double, double> CairoPdf::text_size(std::string_view utf8, double font_size)

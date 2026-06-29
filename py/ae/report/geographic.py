@@ -189,6 +189,8 @@ class _CladeResolver:
         try:
             selected = self._seqdb.select_all().filter_name(name=name, reassortant=reassortant, passage=passage)
             if len(selected):
+                selected.find_masters()     # resolve hash-dedup slave->master (find_clades does this
+                                            # internally, but not when _clades_file is unset)
                 if self._clades_file:
                     try:
                         selected.find_clades(self._clades_file)
@@ -295,6 +297,9 @@ class _Coloring:
         try:
             sel = self._seqdb.select_all().filter_name(name=name, reassortant=reassortant, passage=passage)
             if len(sel):
+                sel.find_masters()      # seqdb v4 hash-dedups identical seqs into master/slave;
+                                        # slaves carry no inline aa — resolve to the master first,
+                                        # else ~half the strains read empty aa -> transparent dot.
                 aa = sel[0].aa
                 return aa if aa else None
         except Exception:
