@@ -291,14 +291,25 @@ def is_vaccine(ag) -> bool:
 
 
 # --- chart loading ------------------------------------------------------------
+def layout_coords(proj):
+    """The projection's layout as a plain list of per-point coord lists, in point order
+    (antigens then sera). Disconnected points come back as `[nan, nan, …]` so the
+    downstream NaN checks in `xy()` still fire — this matches the fill the old numpy
+    `as_numpy()` produced. Pure-Python — no numpy."""
+    lay = proj.layout()
+    dims = lay.number_of_dimensions()
+    nan = float("nan")
+    return [[nan] * dims if c is None else [float(v) for v in c] for c in lay]
+
+
 def apply_transformation(lay, t):
     """Bake the 2D transformation [a,b,c,d] into raw layout coords so plotted x/y are
-    oriented (E1, PLAN #5). [x',y'] = [x,y] @ [[a,b],[c,d]]; NaNs pass through."""
-    if lay.shape[1] != 2:
+    oriented (E1, PLAN #5). [x',y'] = [x,y] @ [[a,b],[c,d]]; NaNs pass through. *lay* is
+    a list of per-point coord lists (see `layout_coords`); returns a new such list."""
+    if not lay or len(lay[0]) != 2:
         return lay  # only 2D transformation supported; 3D maps plotted raw
-    import numpy as np
-    M = np.array([[t[0], t[1]], [t[2], t[3]]], dtype=float)
-    return lay @ M
+    a, b, c, d = t
+    return [[x * a + y * c, x * b + y * d] for x, y in lay]
 
 
 _SSM_RE = re.compile(r"(\d{4}-\d{4})-ssm$")   # e.g. 2026-0223-ssm -> 2026-0223
@@ -358,7 +369,7 @@ def load_chart(label, path, fallback, clade_acc, cont_acc, stats, clade_style="a
     ch = ae_backend.chart_v3.Chart(path)
     na, ns = ch.number_of_antigens(), ch.number_of_sera()
     proj = ch.projection(0)
-    lay = apply_transformation(proj.layout().as_numpy(),  # (na+ns, dims)
+    lay = apply_transformation(layout_coords(proj),  # (na+ns) × dims, pure-Python
                                read_transformation(proj))
 
     cj = read_chart_json(path)                  # report styles (R) + semantics (T)
