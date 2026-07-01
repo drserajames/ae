@@ -65,18 +65,17 @@ jobs:
           print(f"stress {s:.4f} OK")
           PY
 
-      # Unit tests: run the data-free suites as a real gate (AE_ROOT lets
-      # chart_v3_test find the bundled test/chart1.ace). The "virus name parsing"
-      # suite is excluded because it needs the private locationdb (LOCDB_V2), which
-      # must not be exposed in public CI — see README/CLAUDE for the data policy.
-      - name: Unit tests (data-free suites)
+      # Generate a MINIMAL, geography-only locationdb into a temp dir (not committed,
+      # never in the repo). This carries no titers/sequences/WHO/GISAID data, so it
+      # is safe on public CI, and it lets the virus-name test run without the private
+      # acmacs-data locationdb.
+      - name: Generate minimal locationdb fixture
+        run: python3 test/fixtures/make-min-locationdb.py "$RUNNER_TEMP/locationdb.json.xz"
+
+      # Full unit-test suite as the gate. AE_ROOT locates the bundled test chart;
+      # LOCDB_V2 points at the synthetic fixture above.
+      - name: Unit tests
         env:
           AE_ROOT: ${{ github.workspace }}
-        run: |
-          meson test -C build --print-errorlogs \
-            "SelfTest" \
-            "ae test date parsing" \
-            "ae test passage parsing" \
-            "ae test_named_vector" \
-            "ae test_pos" \
-            "ae chart_v3_test"
+          LOCDB_V2: ${{ runner.temp }}/locationdb.json.xz
+        run: meson test -C build --print-errorlogs
