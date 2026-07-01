@@ -126,7 +126,9 @@ namespace ae::chart::v3
             const auto& titers = chart->titers();
             std::sort(std::begin(indexes), std::end(indexes), [&titers](auto i1, auto i2) {
                 if (const auto ln1 = titers.layers_with(i1), ln2 = titers.layers_with(i2); ln1.size() == ln2.size()) {
-                    if (ln1.back() == ln2.back())
+                    // ln1/ln2 are empty when the antigen has only dont-care titers in every layer;
+                    // .back() on an empty list is UB (segfaults on large merged charts), so guard it.
+                    if (ln1.empty() || ln1.back() == ln2.back())
                         return i1 > i2;
                     else
                         return ln1.back() > ln2.back();
