@@ -64,9 +64,13 @@ namespace ae
             void add(std::string_view key, value&& val);
             bool has_key(std::string_view key) const;
 
-            auto begin() const { return data_.begin(); }
-            auto end() const { return data_.end(); }
-            const auto& data() const { return data_; }
+            // Defined out-of-line below, after `value` is complete: instantiating
+            // std::vector<std::pair<std::string, value>>::begin() etc. requires a
+            // complete `value` (libc++ in the macOS 26.5 SDK / clang 21 evaluates
+            // std::pair's is_trivially_relocatable trait, which needs completeness).
+            auto begin() const;
+            auto end() const;
+            const auto& data() const;
 
             value& operator[](std::string_view key) { return find_or_add(key); }
             const value& operator[](std::string_view key) const { return find_or_null(key); }
@@ -96,9 +100,10 @@ namespace ae
             bool contains(const value& val) const;
             // void sort_unique();
 
-            auto begin() const { return data_.begin(); }
-            auto end() const { return data_.end(); }
-            const auto& data() const { return data_; }
+            // Defined out-of-line below, after `value` is complete (see note on object).
+            auto begin() const;
+            auto end() const;
+            const auto& data() const;
 
           private:
             std::vector<value> data_{};
@@ -285,6 +290,10 @@ namespace ae
         inline object::object() : data_{} {} // g++11 wants this
         inline bool object::operator==(const object& rhs) const { return data_ == rhs.data_; }
 
+        inline auto object::begin() const { return data_.begin(); }
+        inline auto object::end() const { return data_.end(); }
+        inline const auto& object::data() const { return data_; }
+
         inline size_t object::size() const { return data_.size(); }
         inline void object::add(std::string_view key, value&& val) { insert_or_assign(key, std::move(val)); }
 
@@ -320,6 +329,9 @@ namespace ae
         }
 
         // inline array::array() {}
+        inline auto array::begin() const { return data_.begin(); }
+        inline auto array::end() const { return data_.end(); }
+        inline const auto& array::data() const { return data_; }
         inline size_t array::size() const { return data_.size(); }
         inline void array::add(value&& src) { data_.push_back(std::move(src)); }
         inline void array::add_if_not_present(value&& src) { if (!contains(src)) data_.push_back(std::move(src)); }

@@ -116,7 +116,10 @@ namespace rjson::inline v2
 
         void remove_comments();
 
-        template <typename Func> inline bool all_of(Func func) const { return std::all_of(content_.begin(), content_.end(), func); }
+        // Defined out-of-line below, after `value` is complete: instantiating
+        // std::map<std::string, value>::begin()/end() needs a complete `value`
+        // (libc++ in the macOS 26.5 SDK / clang 21 applies alignof to the element).
+        template <typename Func> bool all_of(Func func) const;
 
         template <typename T> void copy_to(T&& target) const;
         template <typename T, typename F> void transform_to(T&& target, F&& transformer) const;
@@ -157,7 +160,8 @@ namespace rjson::inline v2
 
         void remove_comments();
 
-        template <typename Func> inline bool all_of(Func func) const { return std::all_of(content_.begin(), content_.end(), func); }
+        // Defined out-of-line below, after `value` is complete (see note on object::all_of).
+        template <typename Func> bool all_of(Func func) const;
 
         template <typename T> void copy_to(T&& target) const;
         template <typename T, typename F> void transform_to(T&& target, F&& transformer) const;
@@ -324,6 +328,13 @@ namespace rjson::inline v2
         }
 
     }; // class value
+
+    // --------------------------------------------------
+    // Out-of-line definitions that instantiate std::vector<value>/std::map<..,value>
+    // operations requiring a complete `value` (clang 21 / macOS 26.5 SDK libc++).
+
+    template <typename Func> inline bool object::all_of(Func func) const { return std::all_of(content_.begin(), content_.end(), func); }
+    template <typename Func> inline bool array::all_of(Func func) const { return std::all_of(content_.begin(), content_.end(), func); }
 
     // --------------------------------------------------
 
