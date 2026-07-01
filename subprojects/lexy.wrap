@@ -3,7 +3,11 @@ directory = lexy
 url = https://github.com/foonathan/lexy.git
 # revision = HEAD
 revision = 86f807852ec1f453ba7aeca7c69c062f7650fa37
-# patch_directory = lexy
+# Overlay subprojects/packagefiles/lexy/ over the cloned tree.
+# Carries a fix for an upstream typo (_colum_nr) in input_location.hpp that
+# Apple clang 21 / libc++ (macOS 26.5 SDK) rejects; older clang never
+# instantiated that operator< template body so it slid by.
+patch_directory = lexy
 
 [provide]
 lexy = lexy_dep

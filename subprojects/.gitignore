@@ -4,6 +4,6 @@ xlnt-*
 simdjson-*
 range-v3-*
 pybind11-*
-lexy
+/lexy
 xxHash-*
 alglib-cpp
