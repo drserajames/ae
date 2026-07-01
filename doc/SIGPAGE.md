@@ -28,8 +28,8 @@ Needs: the **kateri** app on `PATH`, and the **arm64** Python that imports `ae_b
 path is pure-stdlib on the Python side — no numpy needed.
 
 ```bash
-export PYTHONPATH=/Users/sarahjames/AC/eu/ae-tree/build
-cd /Users/sarahjames/AC/eu/ae-tree
+cd <your ae checkout>
+source ae-env.sh            # sets PYTHONPATH -> build/ + py/
 
 # Engine — one signature page from a tree + chart + .tal:
 python3 bin/tal-signature-page \

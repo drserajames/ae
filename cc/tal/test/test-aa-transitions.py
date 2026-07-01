@@ -6,7 +6,7 @@ Loads a synthetic tree where leaves L1-L3,L6 carry MKTII and the derived (L4,L5)
 carries MKAII, so position 3 has a clear T->A substitution. Computes transitions and
 checks the derived branch is labelled T3A.
 
-    /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 cc/tal/test/test-aa-transitions.py
+    python3 cc/tal/test/test-aa-transitions.py
 
 Skips if ae_backend can't be imported (run under the arm64 python3.10).
 """
