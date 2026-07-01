@@ -65,9 +65,18 @@ jobs:
           print(f"stress {s:.4f} OK")
           PY
 
-      # Unit tests: catch2 SelfTest + the data-free ae suites. The virus-name and
-      # chart_v3 suites need reference data (LOCDB_V2 etc.) not present in CI, so
-      # full `meson test` is not the gate — build + smoke above is.
-      - name: Unit tests (non-blocking; some need reference data)
-        continue-on-error: true
-        run: meson test -C build --print-errorlogs
+      # Unit tests: run the data-free suites as a real gate (AE_ROOT lets
+      # chart_v3_test find the bundled test/chart1.ace). The "virus name parsing"
+      # suite is excluded because it needs the private locationdb (LOCDB_V2), which
+      # must not be exposed in public CI — see README/CLAUDE for the data policy.
+      - name: Unit tests (data-free suites)
+        env:
+          AE_ROOT: ${{ github.workspace }}
+        run: |
+          meson test -C build --print-errorlogs \
+            "SelfTest" \
+            "ae test date parsing" \
+            "ae test passage parsing" \
+            "ae test_named_vector" \
+            "ae test_pos" \
+            "ae chart_v3_test"
