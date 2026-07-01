@@ -1,0 +1,81 @@
+name: linux
+
+# Linux build gate for ae. The codebase targets Apple libc++ on macOS; on Linux we
+# build with clang + libc++ (NOT libstdc++, which rejects the recursive-variant JSON
+# types in cc/utils/collection.hh & cc/ad/rjson-*). catch2 is built from source via
+# its wrap so it shares the libc++ ABI (apt's libCatch2 is libstdc++-only).
+
+on:
+  push:
+    branches: [main, build-onboarding]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      CC: clang-18
+      CXX: clang++-18
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"   # vendored lexy's doctest declares cmake_minimum_required(<3.5)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain and dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            clang-18 lld-18 libc++-18-dev libc++abi-18-dev \
+            ninja-build meson cmake pkg-config \
+            python3-dev python3-pip \
+            libbrotli-dev zlib1g-dev liblzma-dev libbz2-dev libomp-18-dev \
+            libcairo2-dev git ca-certificates
+          # NOTE: catch2 is intentionally NOT installed from apt (its libCatch2 is
+          # libstdc++-ABI and cannot link into a libc++ build) — it comes from the wrap.
+
+      # Cache the meson-downloaded subprojects (fmt, lexy, simdjson, alglib, catch2, …)
+      - name: Cache meson subprojects
+        uses: actions/cache@v4
+        with:
+          path: subprojects/packagecache
+          key: subprojects-${{ hashFiles('subprojects/*.wrap') }}
+
+      - name: Configure (clang + libc++)
+        run: |
+          meson setup build \
+            -Doptimization=2 -Ddebug=true \
+            -Dcpp_args=-stdlib=libc++ -Dcpp_link_args=-stdlib=libc++ \
+            --force-fallback-for=catch2
+
+      - name: Compile
+        run: ninja -C build
+
+      - name: Smoke test — import ae_backend and optimise the bundled chart
+        run: |
+          export PYTHONPATH="$PWD/build:$PWD/py"
+          python3 -c "import ae_backend, platform; print('ae_backend OK', platform.machine(), platform.python_version())"
+          python3 bin/chart-relax -n 10 test/chart1.ace /tmp/out.ace
+          # test/chart1.ace converges to stress 66.1247 on every platform — assert it.
+          python3 - <<'PY'
+          import sys; sys.path[:0] = ['build', 'py']
+          import ae_backend
+          c = ae_backend.chart_v3.Chart('/tmp/out.ace')
+          s = c.projection(0).stress()
+          assert abs(s - 66.1247) < 0.01, f"unexpected stress {s}"
+          print(f"stress {s:.4f} OK")
+          PY
+
+      # Generate a MINIMAL, geography-only locationdb into a temp dir (not committed,
+      # never in the repo). This carries no titers/sequences/WHO/GISAID data, so it
+      # is safe on public CI, and it lets the virus-name test run without the private
+      # acmacs-data locationdb.
+      - name: Generate minimal locationdb fixture
+        run: python3 test/fixtures/make-min-locationdb.py "$RUNNER_TEMP/locationdb.json.xz"
+
+      # Full unit-test suite as the gate. AE_ROOT locates the bundled test chart;
+      # LOCDB_V2 points at the synthetic fixture above.
+      - name: Unit tests
+        env:
+          AE_ROOT: ${{ github.workspace }}
+          LOCDB_V2: ${{ runner.temp }}/locationdb.json.xz
+        run: meson test -C build --print-errorlogs

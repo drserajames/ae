@@ -5,7 +5,7 @@ Uses a synthetic vaccine list (vaccines-test.py: strains "A" and "E") and the
 synthetic tree-clades.json (leaves A..E) to check that load_vaccine_names +
 match_leaves_by_name select exactly the vaccine leaves — no real data involved.
 
-    /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 cc/tal/test/test-mark-vaccines.py
+    python3 cc/tal/test/test-mark-vaccines.py
 
 Skips if ae_backend can't be imported (the matching loads the tree via ae_backend,
 so run under the arm64 python3.10).

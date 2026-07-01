@@ -1,4 +1,5 @@
 packagecache
+Catch2-*
 fmt-*
 xlnt-*
 simdjson-*

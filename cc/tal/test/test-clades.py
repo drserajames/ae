@@ -4,7 +4,7 @@
 Loads a small phylo-tree-v3 JSON tree with per-leaf clade annotations and checks
 the computed clade sections against values worked out by hand.
 
-    /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 cc/tal/test/test-clades.py
+    python3 cc/tal/test/test-clades.py
 
 Tree (top-to-bottom leaf order A,B,C,D,E), clades: A=X B=X C=Y D=Y E=X
   -> clade X: 2 sections  {A..B size 2}, {E size 1}

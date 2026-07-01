@@ -1,4 +1,5 @@
 build
+.build-native.ini
 .cache
 .ccls-cache
 __pycache__

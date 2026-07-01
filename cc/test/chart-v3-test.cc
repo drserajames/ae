@@ -9,7 +9,7 @@
 
 // ----------------------------------------------------------------------
 
-TEST_CASE("best stress", "{stress]") {
+TEST_CASE("best stress", "[stress]") {
     const char* ae_root = std::getenv("AE_ROOT");
     REQUIRE(ae_root != nullptr);
 

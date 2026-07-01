@@ -4,7 +4,7 @@
 Reuses the dated phylo-tree-v3 tree (leaf dates A=2020-01-15, B=2020-02-20,
 C=2020-03-10, D=2021-01-05, E=2021-02-12) and checks year/month bucketing.
 
-    /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 cc/tal/test/test-time-series.py
+    python3 cc/tal/test/test-time-series.py
 
 Loads the freshly built ae_backend.so by path via importlib, to bypass any
 editable-install copy of ae_backend that may shadow it.

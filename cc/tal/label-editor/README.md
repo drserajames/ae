@@ -75,8 +75,8 @@ Implemented in the `ae-tree` worktree:
 Rebuild `tal-draw` after a C++ change (no `meson.build` edit ⇒ no reconfigure):
 
 ```bash
-cd ae-tree && export PATH="/opt/homebrew/bin:$PATH" PKG_CONFIG_PATH="/opt/homebrew/opt/brotli/lib/pkgconfig" CMAKE_POLICY_VERSION_MINIMUM=3.5
-arch -arm64 /tmp/ae-py314-venv/bin/ninja -C build-py314 tal-draw
+export PATH="/opt/homebrew/bin:$PATH" PKG_CONFIG_PATH="/opt/homebrew/opt/brotli/lib/pkgconfig" CMAKE_POLICY_VERSION_MINIMUM=3.5
+arch -arm64 ninja -C build-py314 tal-draw
 ```
 
 ### Sidecar schema (`tal-mrca-labels/1`)

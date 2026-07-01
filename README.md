@@ -32,5 +32,36 @@
 
 ## Build
 
-./mk
-meson compile -C build
+On macOS/Apple Silicon, use the self-checking build script — it runs preflight
+checks, generates the meson native file, configures, compiles, and verifies:
+
+```sh
+./build.sh          # configure (if needed) + compile; leaves build/ -> build-py314/
+./build.sh check    # run preflight checks only (no build)
+./build.sh -h       # all subcommands (clean, reconfigure, test)
+```
+
+`build.sh` uses **Apple Clang** (`/usr/bin/clang++`) and the Homebrew Python 3.14 —
+do **not** `brew install llvm` (Homebrew LLVM is incompatible with the vendored `lexy`
+subproject). It writes a `.build-native.ini` meson native file (gitignored). Override
+the interpreter/compiler/build-dir with the `AE_PYTHON` / `AE_CXX` / `AE_BUILD_DIR`
+environment variables. Full toolchain background is in [`CLAUDE.md`](CLAUDE.md).
+
+> The legacy `./mk` script assumes Homebrew LLVM and does **not** work on the current
+> Apple-Clang / Python-3.14 toolchain — prefer `./build.sh`.
+
+## Use
+
+After building, source the environment file to set `AE_ROOT`, `PYTHONPATH`
+(so `import ae_backend` and the `bin/` tools work without per-command prefixes), and,
+if the sibling `../acmacs-data` and `../whocc-tables` are present, the runtime data
+variables (`LOCDB_V2`, `HIDB_V5`, `SEQDB_V4`, `AC_CLADES_JSON_V2`, `WHOCC_TABLES_DIR`):
+
+```sh
+source ae-env.sh
+chart-relax -n 100 input.ace output.ace     # bin/ is now on PATH
+```
+
+Set `ACMACS_DATA=/path/to/acmacs-data` before sourcing if that repo lives elsewhere.
+`numpy` is an additional runtime dependency of the kateri move→relax flow —
+`/opt/homebrew/bin/python3 -m pip install --user --break-system-packages numpy`.

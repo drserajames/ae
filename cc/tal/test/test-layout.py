@@ -4,7 +4,7 @@
 Loads a small, hand-verifiable Newick tree and checks the computed node positions
 against values worked out by hand. Run:
 
-    /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 cc/tal/test/test-layout.py
+    python3 cc/tal/test/test-layout.py
 
 Loads the freshly built ae_backend.so by path via importlib, to bypass any
 editable-install copy of ae_backend that may shadow it on sys.path / meta_path.

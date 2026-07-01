@@ -14,10 +14,16 @@
 set -uo pipefail
 
 DPI="${2:-150}"
-WT="$(cd "$(dirname "$0")/../../.." && pwd)"          # ae-tree root
-TREE=/Users/sarahjames/AC/eu/ac/results/ssm/2026-0805-tc1/tree
-ADDIR=/Users/sarahjames/AC/eu/ac/results/ssm/2026-0223-ssm/tree
-TALDRAW="$WT/build-arm64/tal-draw"
+WT="$(cd "$(dirname "$0")/../../.." && pwd)"          # ae checkout root
+# Report input dirs — override via env for another machine/report. Defaults are the
+# maintainer's local ssm report trees (private; not shipped with the repo).
+TREE="${TREE:-$HOME/AC/eu/ac/results/ssm/2026-0805-tc1/tree}"
+ADDIR="${ADDIR:-$HOME/AC/eu/ac/results/ssm/2026-0223-ssm/tree}"
+TALDRAW="${TALDRAW:-$WT/build/tal-draw}"
+if [ ! -d "$TREE" ] || [ ! -d "$ADDIR" ]; then
+    echo "error: TREE ($TREE) or ADDIR ($ADDIR) not found — set TREE=/… ADDIR=/… to your report trees." >&2
+    exit 2
+fi
 
 one() {
   local SUB="$1" TJZ TAL

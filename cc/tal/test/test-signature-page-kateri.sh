@@ -17,7 +17,7 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 bin="$root/bin/tal-signature-page"
-py="${TAL_TEST_PYTHON:-/Library/Frameworks/Python.framework/Versions/3.10/bin/python3}"
+py="${TAL_TEST_PYTHON:-/opt/homebrew/bin/python3.14}"
 
 command -v kateri >/dev/null 2>&1 || { echo "SKIP: kateri not on PATH"; exit 0; }
 command -v pdfjam >/dev/null 2>&1 || { echo "SKIP: pdfjam not installed"; exit 0; }

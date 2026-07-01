@@ -30,7 +30,7 @@ from ae_backend import tree as TREE
 # decat decompresses .ace (brotli/xz/…) to stdout. The report's authoritative plot
 # styles (R) and per-antigen semantic attributes (T) live in the chart JSON with no
 # convenient ae_backend getter, so v3 reads them straight from the decompressed chart.
-DECAT = shutil.which("decat") or "/Users/sarahjames/AC/eu/bin/decat"
+DECAT = shutil.which("decat") or str(Path(__file__).resolve().parents[2] / "bin" / "decat")
 
 # semantic_clades lives in the sibling acmacs-data/ checkout (canonical report clade
 # palette). run.sh adds it to PYTHONPATH; insert defensively here too so the exporter

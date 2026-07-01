@@ -8,5 +8,7 @@ AE="${HERE:h}"           # …/ae              (the ae checkout this run.sh live
 # acmacs-data carries semantic_clades.py (canonical clade palette, used by E1); it sits
 # beside the ae checkout, so derive it relative to AE rather than hard-coding a home path.
 export PYTHONPATH="${AE}/build-arm64:${AE}/py:${AE:h}/acmacs-data${PYTHONPATH:+:${PYTHONPATH}}"
-PY="/Library/Frameworks/Python.framework/Versions/3.10/bin/python3"
+# Interactive exporter runs against the 3.10 build-arm64/ extension. Override the
+# interpreter with AE_PYTHON if your arm64 python3.10 lives elsewhere.
+PY="${AE_PYTHON:-/Library/Frameworks/Python.framework/Versions/3.10/bin/python3}"
 exec arch -arm64 "$PY" "${HERE}/export_interactive.py" "$@"
