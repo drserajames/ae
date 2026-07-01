@@ -7,7 +7,6 @@
 #include "chart/v3/chart-seqdb.hh"
 #include "chart/v3/optimize.hh"
 #include "pybind11/detail/common.h"
-#include "pybind11/numpy.h"
 #include <limits>
 
 // ======================================================================
@@ -547,19 +546,19 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         .def(
             "logged_array",
             [](const Titers& titers, size_t n_ag, size_t n_sr) {
-                pybind11::array_t<double> result({static_cast<pybind11::ssize_t>(n_ag), static_cast<pybind11::ssize_t>(n_sr)});
-                auto buf = result.mutable_unchecked<2>();
                 const double nan = std::numeric_limits<double>::quiet_NaN();
+                std::vector<std::vector<double>> result(n_ag, std::vector<double>(n_sr, nan));
                 for (size_t ag = 0; ag < n_ag; ++ag) {
                     for (size_t sr = 0; sr < n_sr; ++sr) {
                         const auto t = titers.titer(antigen_index{ag}, serum_index{sr});
-                        buf(ag, sr) = t.is_dont_care() ? nan : t.logged();
+                        if (!t.is_dont_care())
+                            result[ag][sr] = t.logged();
                     }
                 }
                 return result;
             },
             "n_antigens"_a, "n_sera"_a,
-            pybind11::doc("(n_ag, n_sr) float64 array of log2 titers; NaN for missing titers")) //
+            pybind11::doc("(n_ag x n_sr) nested list of log2 titers; NaN for missing titers")) //
         ;
 
     pybind11::class_<Titer>(chart_v3_submodule, "Titer")                                                                      //
@@ -674,49 +673,6 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         .def("minmax", &Layout::minmax)                                                                                                           //
         .def(
             "connected", [](const Layout& layout, size_t index) { return layout.point_has_coordinates(point_index{index}); }, "index"_a) //
-        .def(
-            "set_from_numpy",
-            [](Layout& layout, pybind11::array_t<double, pybind11::array::c_style | pybind11::array::forcecast> arr) {
-                if (arr.ndim() != 2)
-                    throw std::invalid_argument{"set_from_numpy: array must be 2-D"};
-                const size_t n_pts = *layout.number_of_points();
-                const size_t n_dims = *layout.number_of_dimensions();
-                if (static_cast<size_t>(arr.shape(0)) != n_pts || static_cast<size_t>(arr.shape(1)) != n_dims)
-                    throw std::invalid_argument{fmt::format("set_from_numpy: expected shape ({}, {}), got ({}, {})", n_pts, n_dims, arr.shape(0), arr.shape(1))};
-                auto buf = arr.unchecked<2>();
-                for (size_t pt = 0; pt < n_pts; ++pt) {
-                    if (std::isnan(buf(pt, 0))) {
-                        layout.set_nan(point_index{pt});
-                    } else {
-                        auto ref = layout[point_index{pt}];
-                        for (size_t d = 0; d < n_dims; ++d)
-                            ref[number_of_dimensions_t{d}] = buf(pt, d);
-                    }
-                }
-            },
-            "coordinates"_a,
-            pybind11::doc("write (n_points, n_dims) float64 array into layout; NaN rows mark disconnected points")) //
-        .def(
-            "as_numpy",
-            [](const Layout& layout) {
-                const size_t n_pts = *layout.number_of_points();
-                const size_t n_dims = *layout.number_of_dimensions();
-                pybind11::array_t<double> result({static_cast<pybind11::ssize_t>(n_pts), static_cast<pybind11::ssize_t>(n_dims)});
-                auto buf = result.mutable_unchecked<2>();
-                const double nan = std::numeric_limits<double>::quiet_NaN();
-                for (size_t pt = 0; pt < n_pts; ++pt) {
-                    if (layout.point_has_coordinates(point_index{pt})) {
-                        const auto c = layout[point_index{pt}];
-                        for (size_t d = 0; d < n_dims; ++d)
-                            buf(pt, d) = c[number_of_dimensions_t{d}];
-                    } else {
-                        for (size_t d = 0; d < n_dims; ++d)
-                            buf(pt, d) = nan;
-                    }
-                }
-                return result;
-            },
-            pybind11::doc("(n_points, n_dims) float64 array; NaN rows for disconnected points")) //
         // .def("__str__", [](const Layout& layout) { return fmt::format("{}", layout); }) //
         ;
 

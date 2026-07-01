@@ -502,7 +502,7 @@ def chart_titer_data(ch, proj, na, ns) -> dict:
     recomputed bases instead roughly doubles the apparent stress.)"""
     t = ch.titers()
     titers = [[str(t.titer(i, j)) for j in range(ns)] for i in range(na)]
-    logged_arr = t.logged_array(na, ns)         # (na, ns) float64, NaN for missing
+    logged_arr = t.logged_array(na, ns)         # (na x ns) nested list, NaN for missing
     logged = [[None if (v != v) else round(float(v), 4) for v in row]
               for row in logged_arr]
     mcb = proj.minimum_column_basis()
