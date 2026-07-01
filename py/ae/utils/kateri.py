@@ -241,7 +241,7 @@ async def handle_relax(comm: "Communicator"):
     are only better starting coordinates, not pinned) while capturing the optimiser's
     intermediate layouts, and stream those back as `LAYT` frames so kateri animates the
     relax (last frame commits the layout). Implemented by `ae.adjust.adjust_from_kateri`
-    (imported lazily to keep this transport module free of the adjust/ae_backend/numpy
+    (imported lazily to keep this transport module free of the adjust/ae_backend
     dependency at import time). Runs as a task off `connected()`'s read loop — it streams
     frames with `await`s between them while the loop keeps draining `get_chart`'s reply —
     so exceptions are logged here rather than lost."""

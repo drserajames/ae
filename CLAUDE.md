@@ -538,7 +538,7 @@ bin/chart-grid-test input.ace
 ## Common gotchas
 
 - `ae_backend` must be on `PYTHONPATH` (from `build/`) — it is **not** installed system-wide.
-- **`numpy` is a runtime dependency** of `py/ae/adjust.py` (`_kabsch_align`, used by the kateri move→relax flow in `adjust_from_kateri`). It is **not** part of the build; install it for the Homebrew Python 3.14 interpreter that runs the report `0do` scripts: `/opt/homebrew/bin/python3 -m pip install --user --break-system-packages numpy` (PEP-668 externally-managed; `--user` keeps it out of Homebrew's tree). Without it, dragging a point and hitting relax in kateri fails with `ModuleNotFoundError: No module named 'numpy'`.
+- **No third-party runtime deps in `py/ae`** — it is pure-stdlib. `py/ae/adjust.py` `_kabsch_align` (the kateri move→relax alignment in `adjust_from_kateri`) previously needed `numpy` for one 2×2 SVD; that was replaced with a closed-form pure-Python 2D orthogonal-Procrustes solution (`_nearest_orthogonal_2x2`, verified to reproduce the numpy result to machine precision), so **numpy is no longer required** — nothing to `pip install`, and it survives Python minor-version bumps. (Historically the fix was `pip install --user --break-system-packages numpy`; that is obsolete.)
 - `build/` is a **symlink** to `build-py314/` (the Python 3.14 build; `build-arm64/` is the 3.10 fallback). Repoint with `ln -sfn build-py314 build`. To remove it: `rm build` (not `rm -rf build`, which would delete the build directory contents).
 - `.ace` files are usually XZ-compressed; opening with a text editor or `cat` will show binary garbage. Use `xz -d -c file.ace` to inspect raw JSON.
 - Titer `"*"` = missing; `"<N"` = below detection; `">N"` = above threshold. Do not treat these as numbers.

@@ -24,7 +24,8 @@ orchestration layer.
 ## Single documented command
 
 Needs: the **kateri** app on `PATH`, and the **arm64** Python that imports `ae_backend`
-(the default Homebrew `python3` 3.14 with `build/` → `build-py314/`; numpy installed for it).
+(the default Homebrew `python3` 3.14 with `build/` → `build-py314/`). The signature-page
+path is pure-stdlib on the Python side — no numpy needed.
 
 ```bash
 export PYTHONPATH=/Users/sarahjames/AC/eu/ae-tree/build
