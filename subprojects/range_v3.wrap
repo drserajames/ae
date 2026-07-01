@@ -1,7 +1,10 @@
 [wrap-git]
 directory = range-v3-0.12.0
 url = https://github.com/ericniebler/range-v3.git
-revision = head
+# Pin to the 0.12.0 release tag — 'head' is non-reproducible and can break the
+# build (and CI) whenever upstream moves.
+revision = 0.12.0
+depth = 1
 patch_directory = range_v3
 
 # [wrap-file]

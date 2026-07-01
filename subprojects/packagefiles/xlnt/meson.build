@@ -1,6 +1,11 @@
 project('xlnt_all', 'c', 'cpp',
   version : '1.5.0'
 )
+# xlnt 1.5.0 uses uint32_t/int64_t in headers without including <cstdint>. libc++
+# (macOS) pulls it in transitively, but libstdc++ (Linux/GCC 13+) does not, so the
+# C++ TUs fail with "unknown type name 'uint32_t'". Force-include it for C++ (the C
+# crypto sources already include <stdint.h>).
+add_project_arguments('-include', 'cstdint', language : 'cpp')
 libstudxml_dir = include_directories('third-party/libstudxml', '.')
 libstudxml_sys = include_directories(is_system : true)
 libstudxml_inc = [libstudxml_dir, libstudxml_sys]

@@ -13,6 +13,12 @@
 // Suppress the fallback on macOS 13+ where the SDK already provides it.
 #if defined(__APPLE__) && defined(__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__) && __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__ >= 130000
 #  define AE_STDLIB_HAS_VECTOR_SPACESHIP 1
+#elif defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 150000
+// Upstream libc++ (Linux) ships std::vector::operator<=> from libc++ 15 but, like
+// Apple's, does NOT define __cpp_lib_three_way_comparison — so suppress the fallback
+// here too, otherwise it collides with libc++'s native operator<=> (ambiguous /
+// implicitly-deleted comparison errors).
+#  define AE_STDLIB_HAS_VECTOR_SPACESHIP 1
 #else
 #  define AE_STDLIB_HAS_VECTOR_SPACESHIP 0
 #endif
