@@ -26,6 +26,7 @@ Example::
 
 import sys
 import glob
+import math
 import asyncio
 import importlib.util
 from pathlib import Path
@@ -266,30 +267,63 @@ def _sample_frames(frames, max_frames):
     return [frames[round(i * (n - 1) / (max_frames - 1))] for i in range(max_frames)]
 
 
+def _nearest_orthogonal_2x2(a, b, c, d):
+    """Nearest orthogonal matrix (over O(2), reflection allowed) to `H = [[a, b], [c, d]]`
+    — the 2×2 case of the SVD polar factor `U·Vᵀ`, i.e. the `Q` maximising `trace(Qᵀ·H)`.
+    In 2D the optimum has a closed form: compare the best rotation (`det +1`) against the
+    best reflection (`det −1`) and return whichever fits `H` better. Returns a 2×2 list."""
+    rot = math.hypot(a + d, c - b)                   # score of the best-fitting rotation
+    ref = math.hypot(a - d, b + c)                   # score of the best-fitting reflection
+    if rot < 1e-12 and ref < 1e-12:
+        return [[1.0, 0.0], [0.0, 1.0]]              # H ≈ 0 (points coincide): identity
+    if rot >= ref:
+        cos, sin = (a + d) / rot, (c - b) / rot
+        return [[cos, -sin], [sin, cos]]             # rotation
+    cos, sin = (a - d) / ref, (b + c) / ref
+    return [[cos, sin], [sin, -cos]]                 # reflection
+
+
 def _kabsch_align(reference, frame):
     """Procrustes/Kabsch-align *frame* onto *reference* — translation + rotation +
     reflection, **no scale**. Both are lists of `[x, y]` or `None`, same order/length.
     The optimiser returns each layout in an arbitrary MDS gauge, so without this every
     streamed frame would rotate/flip/fly off-screen relative to what the operator sees;
     aligning onto the pre-relax layout keeps the animation visually stable. Returns a
-    new list with `None` preserved for disconnected points."""
-    import numpy as np
+    new list with `None` preserved for disconnected points.
+
+    Pure-Python (no numpy): kateri maps are 2D, so the cross-covariance `H = Bᶜᵀ·Aᶜ` of
+    the centred common points is a 2×2 matrix whose optimal orthogonal factor `Q` has a
+    closed form (see `_nearest_orthogonal_2x2`). Each point maps as `q = (p − c_B)·Q + c_A`,
+    reproducing the former numpy `R = Vt.T @ U.T` / `p @ R.T` result to machine precision."""
     idx = [i for i in range(len(frame))
            if frame[i] is not None and i < len(reference) and reference[i] is not None]
     if len(idx) < 2:
         return [list(p) if p is not None else None for p in frame]
-    A = np.array([reference[i] for i in idx], dtype=float)   # target gauge (kept)
-    B = np.array([frame[i] for i in idx], dtype=float)       # aligned onto A
-    cA, cB = A.mean(0), B.mean(0)
-    U, _, Vt = np.linalg.svd((B - cB).T @ (A - cA))
-    R = Vt.T @ U.T                                            # orthogonal; reflection allowed
+    if any(len(frame[i]) != 2 or len(reference[i]) != 2 for i in idx):
+        raise NotImplementedError("_kabsch_align: only 2D layouts are supported")
+
+    n = len(idx)
+    cAx = sum(reference[i][0] for i in idx) / n      # centroid of the target gauge (kept)
+    cAy = sum(reference[i][1] for i in idx) / n
+    cBx = sum(frame[i][0] for i in idx) / n          # centroid of the frame being aligned
+    cBy = sum(frame[i][1] for i in idx) / n
+
+    a = b = c = d = 0.0                              # H = Bᶜᵀ·Aᶜ, 2×2 cross-covariance
+    for i in idx:
+        bx, by = frame[i][0] - cBx, frame[i][1] - cBy
+        ax, ay = reference[i][0] - cAx, reference[i][1] - cAy
+        a += bx * ax; b += bx * ay
+        c += by * ax; d += by * ay
+    (q00, q01), (q10, q11) = _nearest_orthogonal_2x2(a, b, c, d)
+
     out = []
     for p in frame:
         if p is None:
             out.append(None)
         else:
-            q = (np.asarray(p, dtype=float) - cB) @ R.T + cA
-            out.append([float(q[0]), float(q[1])])
+            ux, uy = p[0] - cBx, p[1] - cBy         # q = (p − c_B)·Q + c_A
+            out.append([ux * q00 + uy * q10 + cAx,
+                        ux * q01 + uy * q11 + cAy])
     return out
 
 
