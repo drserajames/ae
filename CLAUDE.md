@@ -85,15 +85,23 @@ also now writes layout coordinates (`Projection.set_coordinates` / `Layout.__set
   [`cc/py/module.cc`](cc/py/module.cc) + [`cc/py/module.hh`](cc/py/module.hh) without
   reordering existing entries.
 - AD source to reference for each subsystem is under `~/AC/eu/AD/sources/<package>`.
-- Build with the native-arm64 Apple-Clang-16 procedure below (not `./mk`, not Homebrew
+- Build with the native-arm64 Apple-Clang procedure below (not `./mk`, not Homebrew
   LLVM). New drawing deps (Cairo, Pango) come from arm64 Homebrew at `/opt/homebrew`.
 
 ## Current build state (Apple Silicon)
 
 **`build/` → `build-py314/`** — The active build is **native arm64 for Python 3.14**
-(`ae_backend.cpython-314-darwin.so`), compiled with Apple Clang 16 and arm64 Homebrew
+(`ae_backend.cpython-314-darwin.so`), compiled with **Apple Clang** and arm64 Homebrew
 dependencies at `/opt/homebrew`. No Rosetta 2 needed. Import it with the default
 `/opt/homebrew/bin/python3` (3.14.x).
+
+> **Toolchain note (Jul 2026).** The active compiler is now **Apple clang 21** (macOS 26.5
+> SDK), after a 27 Jun 2026 Xcode update. Its stricter libc++ requires complete element types
+> in `std::vector`/`std::pair`, which needed behaviour-preserving source fixes — see
+> *clang 21 / macOS 26.5 SDK* under "Source code changes" below. The build tooling also moved
+> off the (evaporated) `/tmp` venv onto **persistent Homebrew meson/ninja** — see the Python
+> 3.14 procedure below. Earlier "Apple Clang 16" references predate this; the tree now builds
+> under clang 21.
 
 > **Python version history.** Homebrew bumped its default `python3` to **3.14** (Jun 2026).
 > CPython extensions are ABI-locked per minor version, so the older 3.10 `.so` would not
@@ -141,7 +149,7 @@ arch -arm64 /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 \
     -m pip install --user meson==1.1.0 ninja
 ```
 
-**Do NOT use Homebrew LLVM** (currently version 22 in arm64 Homebrew). It is too new for the vendored `lexy` subproject and causes build failures with incomplete-type errors. Apple Clang 16 (`/usr/bin/clang++`) is the correct compiler for this project.
+**Do NOT use Homebrew LLVM** (currently version 22 in arm64 Homebrew). It is too new for the vendored `lexy` subproject and causes build failures with incomplete-type errors. Apple Clang (`/usr/bin/clang++`, currently clang 21) is the correct compiler for this project.
 
 ### Build procedure
 
@@ -192,7 +200,11 @@ build now targets **Python 3.14** in `build-py314/`. Two deltas from the 3.10 pr
 2. **`python3` in the native file points at 3.14**, and meson must run under an arm64 3.14
    interpreter so clang inherits arm64.
 
-Homebrew Python is PEP-668 externally-managed, so install the build tools in a venv:
+Install meson/ninja from **arm64 Homebrew** — persistent and reboot-safe. (Historically these
+lived in a `/tmp/ae-py314-venv` venv because Homebrew's `python@3.14` is PEP-668
+externally-managed; that venv + its `/tmp` native file evaporated, leaving the build
+un-rebuildable, so we moved to brew-managed tools. Homebrew's meson runs on its own
+`python@3.14`, sidestepping PEP 668 without `--break-system-packages`.)
 
 ```bash
 cd /Users/sarahjames/AC/eu/ae
@@ -200,30 +212,36 @@ export PATH="/opt/homebrew/bin:$PATH"
 export PKG_CONFIG_PATH="/opt/homebrew/opt/brotli/lib/pkgconfig"
 export CMAKE_POLICY_VERSION_MINIMUM=3.5     # lexy/CMake-4.x workaround (see below)
 
-# arm64 venv with meson + ninja for Python 3.14
-arch -arm64 /opt/homebrew/bin/python3.14 -m venv /tmp/ae-py314-venv
-/tmp/ae-py314-venv/bin/python -m pip install meson ninja   # meson 1.11.1, ninja 1.13.0
+# Persistent arm64 meson + ninja (meson 1.11.1 on python@3.14, ninja 1.13.2)
+brew install meson ninja
 
-# Native file: Apple Clang 16 + Python 3.14
-cat > /tmp/ae-py314-native.ini << 'EOF'
+# Native file: Apple Clang + Python 3.14 — kept OUTSIDE /tmp so it survives reboots.
+# `ninja` is pinned to the arm64 brew binary so meson never picks /usr/local/bin/ninja
+# (the x86_64 Homebrew one that would silently spawn x86_64 clang).
+cat > ~/AC/eu/ae-py314-native.ini << 'EOF'
 [binaries]
 c       = '/usr/bin/clang'
 cpp     = '/usr/bin/clang++'
 python3 = '/opt/homebrew/bin/python3.14'
+ninja   = '/opt/homebrew/bin/ninja'
 
 [properties]
 pkg_config_libdir = '/opt/homebrew/opt/brotli/lib/pkgconfig'
 EOF
 
-# Configure + compile (use the venv's arm64 ninja explicitly — meson may otherwise
-# pick up /usr/local/bin/ninja, the x86_64 Homebrew one that spawns x86_64 clang)
-arch -arm64 /tmp/ae-py314-venv/bin/meson setup build-py314 \
-    --native-file /tmp/ae-py314-native.ini -Doptimization=3 -Ddebug=true
-arch -arm64 /tmp/ae-py314-venv/bin/ninja -C build-py314
+# Configure + compile
+arch -arm64 /opt/homebrew/bin/meson setup build-py314 \
+    --native-file ~/AC/eu/ae-py314-native.ini -Doptimization=3 -Ddebug=true
+arch -arm64 /opt/homebrew/bin/ninja -C build-py314
 
 # Make it the default once verified (keeps build-arm64 as the 3.10 fallback)
 ln -sfn build-py314 build
 ```
+
+> The final `Generating ae_backend_stubs` step may print `ae_backend: Failed to import,
+> skipping` — the build-time stub generator can't import the freshly-linked module. It is
+> non-fatal (ninja exits 0) and does not affect the module; `PYTHONPATH=build-py314` import
+> works.
 
 ### Why the arm64 meson and ninja matter
 
@@ -252,9 +270,9 @@ python3 -c "import sys; sys.path.insert(0, 'build'); import ae_backend, platform
 
 ---
 
-## Source code changes for Apple Clang 16 compatibility
+## Source code changes for Apple Clang compatibility
 
-Three categories of changes were applied to make the codebase compile with Apple Clang 16 on macOS 14+. These are committed in the source tree and should not need to be repeated unless the vendored subprojects are updated.
+These changes were applied to make the codebase compile with Apple Clang on macOS 14+ (originally clang 16; §4 covers the clang 21 / macOS 26.5 SDK update). They are committed in the source tree and should not need to be repeated unless the vendored subprojects or the toolchain are updated.
 
 ### 1. `cc/ext/compare.hh` — vector `operator<=>` ambiguity fix
 
@@ -306,6 +324,22 @@ endif
 
 This works for both x86_64 Homebrew (`/usr/local`) and arm64 Homebrew (`/opt/homebrew`) because `brew --prefix libomp` returns the formula-specific prefix regardless of which Homebrew is in PATH.
 
+### 4. clang 21 / macOS 26.5 SDK — libc++ requires complete element types in containers
+
+A 27 Jun 2026 Xcode update bumped the toolchain to **Apple clang 21 + macOS 26.5 SDK**. Its libc++ is stricter: `std::vector<T>` / `std::pair<…, T>` now evaluate `is_trivially_relocatable` / `alignof` on the element, which **requires `T` complete** — where the code previously relied on `std::vector<incomplete>` (the old libc++ tolerated it). A from-scratch build of the whole tree broke with *"field has incomplete type"* / *"invalid application of 'alignof' to an incomplete type"* / *"no matching function for call to `__add_alignment_assumption`"*.
+
+The fix (behaviour-preserving) is to **out-of-line the recursive-variant container members so they instantiate only after the `value` type is complete**. For a JSON-like `value` that is a variant over `object`/`array` (which themselves hold `std::vector<value>`), any member touching the vector (`begin`/`end`/`data`/`erase`/…) must be defined below the full `value` definition, not inline in the class body. Applied in:
+
+- `cc/utils/collection.hh` — `dynamic::{object,array}` `begin`/`end`/`data`
+- `cc/ad/rjson-v2.hh` — `rjson::{object,array}::all_of`
+- `cc/ad/rjson-v3.hh` — `rjson::v3::detail::{object,array}` `begin`/`end`
+
+Also a genuine upstream **lexy** typo (`_colum_nr` in `input_location.hpp`) that clang 21 now instantiates in an `operator<` template body — carried as a tracked `subprojects/packagefiles/lexy/` overlay wired via `patch_directory = lexy` in `lexy.wrap`. Note `subprojects/.gitignore` must anchor its `lexy` rule to `/lexy` (not bare `lexy`), or the `packagefiles/lexy` overlay is ignored too.
+
+> **If you hit a new "incomplete type" error after adding code**: it is almost always a
+> `std::vector<X>`/`std::pair<…,X>` instantiated (via an inline member) while `X` is only
+> forward-declared. Move that member's definition below `X`'s full definition.
+
 ### libc++ hardening differs between builds — `build-py314` traps on UB that `build-arm64` ignores
 
 `build-py314/` (3.14) is configured with **`-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST`**;
@@ -329,9 +363,9 @@ failure" in the ssm-report `style` step) was found and fixed this way on 2026-06
 meson compile -C build      # compile everything
 ```
 
-**Note**: The `mk` script assumes Homebrew LLVM (`/opt/homebrew/opt/llvm/bin/clang++` or `/usr/local/opt/llvm/bin/clang++`). On this machine, arm64 Homebrew LLVM (version 22) is installed but **incompatible** with the vendored `lexy` subproject. Use the manual arm64 build procedure above (Apple Clang 16) instead of `./mk`.
+**Note**: The `mk` script assumes Homebrew LLVM (`/opt/homebrew/opt/llvm/bin/clang++` or `/usr/local/opt/llvm/bin/clang++`). On this machine, arm64 Homebrew LLVM (version 22) is installed but **incompatible** with the vendored `lexy` subproject. Use the manual arm64 build procedure above (Apple Clang) instead of `./mk`.
 
-Dependencies: clang-14+ / g++-11+, ninja, meson ≥0.60, cmake ≥3.18, libomp, brotli, zlib, libbz2, liblzma, catch2.
+Dependencies: Apple Clang (currently clang 21) / g++-11+, ninja, meson ≥1.4 (for Python 3.14; 1.11.1 in use), cmake ≥3.18, libomp, brotli, zlib, libbz2, liblzma, catch2.
 
 ---
 
@@ -511,7 +545,7 @@ bin/chart-grid-test input.ace
 - Column bases (`colbases`) are `log2(max_titer_per_serum)` and are fundamental to stress calculations — they are not stored in projections by default, only in forced-column-bases overrides.
 - The `Layout` object supports iteration (`for coords in layout`) and indexed read/write: `layout[i]` reads a point's coords, `layout[i] = [x, y]` sets them (negative index counts from the end). Coordinates can also be set via `proj.set_coordinates(point_no, [x, y])`, and `proj.set_unmovable([i, j])` pins points so a subsequent `relax()` keeps them fixed.
 - **New C++ code**: Always use `fmt::format_to(` (not bare `format_to(`). Both `std::format_to` and `fmt::format_to` are visible in C++20 mode under Apple Clang 16 and the unqualified form is ambiguous.
-- **Homebrew LLVM 22** (at `/opt/homebrew/opt/llvm/`) is installed but **not used** — incompatible with the vendored `lexy` subproject. Apple Clang 16 (`/usr/bin/clang++`) is the correct compiler.
+- **Homebrew LLVM 22** (at `/opt/homebrew/opt/llvm/`) is installed but **not used** — incompatible with the vendored `lexy` subproject. Apple Clang (`/usr/bin/clang++`, currently clang 21) is the correct compiler.
 - **Rebuilding**: Run meson via `arch -arm64 python3.10` and ninja via `arch -arm64 ~/Library/Python/3.10/bin/ninja`. The x86_64 `/usr/local/bin/ninja` will silently produce x86_64 binaries even on an arm64 Mac.
 - **Python 3.14** (the current Homebrew default, which `build/`→`build-py314/` targets) lacks `distutils`, so **meson 1.1.0 fails** with *"is not a valid python or it is missing distutils"*. Fix by using a newer meson (≥ ~1.4; the active build used 1.11.1), not by downgrading Python. The old 3.10 instructions that put `/Library/Frameworks/Python.framework/Versions/3.10/bin/python3` first in PATH apply only to the legacy `build-arm64/` (3.10) fallback.
 - **`brew --prefix libomp`**: libomp is keg-only — always use the formula-specific form `brew --prefix libomp` rather than bare `brew --prefix` when constructing library/include paths.
