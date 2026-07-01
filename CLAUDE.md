@@ -358,12 +358,26 @@ failure" in the ssm-report `style` step) was found and fixed this way on 2026-06
 
 ## Build system (standard path)
 
+**Preferred:** run **`./build.sh`** — a self-checking wrapper that encodes the working
+arm64/Apple-Clang/py3.14 recipe below (preflight checks, generated native file, `arch -arm64`
+meson/ninja, `CMAKE_POLICY_VERSION_MINIMUM=3.5`, CA-bundle → `SSL_CERT_FILE`, arch+import verify,
+`build/`→`build-py314/`). Then `source ae-env.sh` to set `AE_ROOT`/`PYTHONPATH`/data vars.
+`./build.sh check` runs preflight only. (Added on the `build-onboarding` branch.)
+
+> **Fresh-checkout gotcha:** meson downloads the vendored subprojects (wraps) over HTTPS using the
+> build Python. Homebrew's **python@3.14 ships no CA bundle**, so on a clean `subprojects/` every
+> wrap download fails with `CERTIFICATE_VERIFY_FAILED`. Export `SSL_CERT_FILE` to a cert bundle
+> (`/etc/ssl/cert.pem` or `brew --prefix ca-certificates`/…/cacert.pem) — `build.sh` does this
+> automatically. The existing checkout hides the problem because its wraps are already cached.
+
+Legacy path (do **not** use):
+
 ```bash
 ./mk                        # configure with meson (creates build/)
 meson compile -C build      # compile everything
 ```
 
-**Note**: The `mk` script assumes Homebrew LLVM (`/opt/homebrew/opt/llvm/bin/clang++` or `/usr/local/opt/llvm/bin/clang++`). On this machine, arm64 Homebrew LLVM (version 22) is installed but **incompatible** with the vendored `lexy` subproject. Use the manual arm64 build procedure above (Apple Clang) instead of `./mk`.
+**Note**: The `mk` script assumes Homebrew LLVM (`/opt/homebrew/opt/llvm/bin/clang++` or `/usr/local/opt/llvm/bin/clang++`). On this machine, arm64 Homebrew LLVM (version 22) is installed but **incompatible** with the vendored `lexy` subproject. Use `./build.sh` (or the manual arm64 Apple-Clang procedure above) instead of `./mk`.
 
 Dependencies: Apple Clang (currently clang 21) / g++-11+, ninja, meson ≥1.4 (for Python 3.14; 1.11.1 in use), cmake ≥3.18, libomp, brotli, zlib, libbz2, liblzma, catch2.
 
