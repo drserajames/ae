@@ -15,15 +15,30 @@ namespace ae::draw
         cairo_set_source_rgba(cr, color.red(), color.green(), color.blue(), color.alpha());
     }
 
+    // The backend is chosen by the output extension: ".png" -> raster image surface
+    // (finalised with cairo_surface_write_to_png in the destructor); anything else ->
+    // vector PDF surface (as before — tal-draw / geo-draw are unaffected). Device
+    // coordinates are identical for both backends.
     CairoPdf::CairoPdf(const std::filesystem::path& filename, double width, double height)
-        : surface_{cairo_pdf_surface_create(filename.c_str(), width, height)}, context_{cairo_create(surface_)}
     {
+        if (filename.extension() == ".png") {
+            png_filename_ = filename.string();
+            surface_ = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, static_cast<int>(width), static_cast<int>(height));
+        }
+        else {
+            surface_ = cairo_pdf_surface_create(filename.c_str(), width, height);
+        }
+        context_ = cairo_create(surface_);
     }
 
     CairoPdf::~CairoPdf()
     {
+        if (!png_filename_.empty()) {
+            cairo_surface_flush(surface_);
+            cairo_surface_write_to_png(surface_, png_filename_.c_str());
+        }
         cairo_destroy(context_);
-        cairo_surface_destroy(surface_); // finalizes and writes the PDF to disk
+        cairo_surface_destroy(surface_); // finalizes and writes the PDF to disk (for the PDF backend)
     }
 
     void CairoPdf::background(Color color)

@@ -27,6 +27,7 @@ PYBIND11_MODULE(ae_backend, mdl)
     ae::py::utils(mdl);
     ae::py::tal(mdl); // --- tal (subsystem #3) ---
     ae::py::hidb(mdl); // --- hidb (subsystem #2) ---
+    ae::py::map_draw(mdl); // --- map-draw (subsystem #1, revived) ---
 
     // ----------------------------------------------------------------------
 
