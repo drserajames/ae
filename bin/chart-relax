@@ -98,7 +98,10 @@ def main(args: argparse.Namespace):
         if chart.number_of_projections() == 0 or chart.titers().number_of_layers() < 2:
             raise Error("cannot relax incrmentally")
         print(f"relaxing chart incrementally {args.number_of_optimizations}")
-        chart.relax_incremental(number_of_optimizations=args.number_of_optimizations, remove_source_projection=not args.keep_original_projections, unmovable_non_nan_points=args.unmovable_non_nan_points, rough=args.rough)
+        # remove_source_projection: default on (AD chart-relax-incremental passes
+        # --remove-source-projection explicitly); --keep-original-projections turns it off.
+        remove_source_projection = args.remove_source_projection and not args.keep_original_projections
+        chart.relax_incremental(number_of_optimizations=args.number_of_optimizations, remove_source_projection=remove_source_projection, unmovable_non_nan_points=args.unmovable_non_nan_points, rough=args.rough)
     else:
         print(f"relaxing chart {args.number_of_optimizations} times in {args.number_of_dimensions}d with minimum_column_basis={args.minimum_column_basis}")
         chart.relax(number_of_dimensions=args.number_of_dimensions, number_of_optimizations=args.number_of_optimizations, minimum_column_basis=args.minimum_column_basis, dimension_annealing=args.dimension_annealing, rough=args.rough, disconnect_having_few_titers=args.disconnect_having_few_titers)
@@ -268,6 +271,12 @@ try:
     parser.add_argument("--existing", type=int, metavar="projection_no", help="relax existing projection")
     parser.add_argument("--rough", default=False, action="store_true", help="perform rough optimisation")
     parser.add_argument("--no-grid", dest="grid", default=True, action="store_false")
+    # --grid-test: accepted for chart-relax-incremental parity (grid already runs by
+    # default; use --no-grid to disable). AD's chart-relax-incremental passes it explicitly.
+    parser.add_argument("--grid-test", dest="grid", action="store_true", help="run grid test after optimisation (default on; kept for chart-relax-incremental parity)")
+    # --remove-source-projection: remove the copied source projection of the incremental
+    # merge (default on, matching AD chart-relax-incremental). --keep-original-projections overrides.
+    parser.add_argument("--remove-source-projection", dest="remove_source_projection", default=True, action="store_true", help="remove the incremental-merge source projection (default on; only affects --incremental)")
     parser.add_argument("--grid-json", type=Path, help="export grid test results into json")
     parser.add_argument("--grid-step", default=0.1, type=float)
     # parser.add_argument("--method", default="alglib-cg", choices=["alglib-lbfgs", "alglib-cg", "optim-bfgs", "optim-differential-evolution"])

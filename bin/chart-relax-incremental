@@ -1,0 +1,15 @@
+#! /usr/bin/env python3
+"""Thin wrapper: chart-relax-incremental == chart-relax --incremental.
+
+The WHO-CC incremental chain (ae.whocc.chains.maps.IncrementalMapMaker) invokes
+`chart-relax-incremental` with -n / --grid-test / --remove-source-projection /
+--keep-projections / --grid-json and the disconnect flags. All of those are handled by
+`chart-relax`; this wrapper just prepends --incremental so the ported engine needs no
+command-name change (mirrors AD's separate chart-relax-incremental tool).
+"""
+
+import os, sys
+
+_here = os.path.dirname(os.path.abspath(__file__))
+_target = os.path.join(_here, "chart-relax")
+os.execv(sys.executable, [sys.executable, _target, "--incremental", *sys.argv[1:]])
