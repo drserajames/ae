@@ -1,0 +1,111 @@
+/* Tabs https://www.w3schools.com/howto/howto_js_tabs.asp */
+
+h2 {
+    margin: 1em;
+}
+
+.subtype-tabs {
+    margin: 0 1em;
+}
+
+.subtype-tabs .tablinks {
+    overflow: hidden;
+    border: none;
+    border-left: 1px solid grey;
+    border-bottom: 3px solid grey;
+}
+
+.subtype-tabs button {
+    background-color: inherit;
+    float: left;
+    border: none;
+    border-right: 1px solid grey;
+    margin: 0;
+    padding: 0 0.5em;
+    outline: none;
+    cursor: pointer;
+    /* padding: 14px 16px; */
+    transition: 0.3s;
+    font-size: 1.3em;
+    color: grey;
+}
+
+.subtype-tabs button:hover {
+    color: black;
+    background-color: #f0f0f0;
+    /* text-decoration: underline ; */
+    /* text-decoration: underline; */
+    /* text-decoration-color: #4040C0; */
+    /* text-decoration-thickness: 2px; */
+}
+
+.subtype-tabs button.active {
+    font-weight: bold;
+    color: black;
+    /* background-color: #ccc; */
+}
+
+.tabcontent {
+    display: none;
+    /* padding: 0px 2px; */
+    /* border: 1px solid #ccc; */
+    /* border-top: none; */
+}
+
+.tabcontent table.labs {
+    border-collapse: collapse;
+}
+
+/* .tabcontent table.labs th { */
+/*     font-size: 1.2em; */
+/*     border: 1px solid black; */
+/*     padding: 1em 0; */
+/* } */
+
+.tabcontent table.labs td {
+    border: 1px solid black;
+}
+
+.tabcontent table.labs tr.year-separator td {
+    border: none;
+}
+
+.tabcontent table.labs tr.year-separator td div {
+    min-height: 1em;
+}
+
+.tabcontent table.labs tr[year] {
+    background-color: #F0F0F0;
+    font-size: 1.2em;
+    font-weight: bold;
+    text-align: center;
+}
+
+.tabcontent table.labs tr[year] td {
+    /* border-top: 3px solid black; */
+    padding: 5px 2em;
+}
+
+.tabcontent table.labs tr[year-month] td[month] {
+    font-size: 1.2em;
+    padding: 1em;
+}
+
+.tabcontent table.labs tr[year-month] td[lab] {
+    padding: 0.2em 3em;
+    min-width: 4em;
+}
+
+.tabcontent table.labs tr[year-month] td[lab] ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+.tabcontent table.labs tr[year-month] td[lab] li {
+    padding: 0.2em 0;
+}
+
+.loading-message {
+    font-size: 2em;
+    margin: 1em;
+}
