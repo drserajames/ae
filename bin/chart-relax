@@ -82,6 +82,12 @@ class Error (RuntimeError): pass
 # ----------------------------------------------------------------------
 
 def main(args: argparse.Namespace):
+    # --threads: limit OpenMP optimizer parallelism (0 = autodetect). Set before any
+    # optimization runs so libomp picks it up at the first parallel region. The chain
+    # appends --threads N for SLURM per-node limiting.
+    if args.threads and args.threads > 0:
+        os.environ["OMP_NUM_THREADS"] = str(args.threads)
+
     chart = ae_backend.chart_v3.Chart(args.source)
 
     if args.existing is not None:
@@ -95,13 +101,23 @@ def main(args: argparse.Namespace):
         chart.relax_incremental(number_of_optimizations=args.number_of_optimizations, remove_source_projection=not args.keep_original_projections, unmovable_non_nan_points=args.unmovable_non_nan_points, rough=args.rough)
     else:
         print(f"relaxing chart {args.number_of_optimizations} times in {args.number_of_dimensions}d with minimum_column_basis={args.minimum_column_basis}")
-        chart.relax(number_of_dimensions=args.number_of_dimensions, number_of_optimizations=args.number_of_optimizations, minimum_column_basis=args.minimum_column_basis, dimension_annealing=args.dimension_annealing, rough=args.rough)
+        chart.relax(number_of_dimensions=args.number_of_dimensions, number_of_optimizations=args.number_of_optimizations, minimum_column_basis=args.minimum_column_basis, dimension_annealing=args.dimension_annealing, rough=args.rough, disconnect_having_few_titers=args.disconnect_having_few_titers)
 
     if args.grid: # and not args.rough:
-        grid_test(chart)
+        grid_test(chart, grid_json=args.grid_json)
 
     if args.keep_projections:
         chart.keep_projections(args.keep_projections)
+
+    # --reorient: procrustes-reorient every resulting projection to the master chart's
+    # projection 0 over common antigens/sera, no scaling (matches AD chart-relax-grid).
+    # Only applied when an output chart is requested.
+    if args.output and args.reorient:
+        master = ae_backend.chart_v3.Chart(args.reorient)
+        if master.number_of_projections() == 0:
+            raise Error(f"chart for reorienting has no projections: {args.reorient}")
+        for projection_no in range(chart.number_of_projections()):
+            chart.orient_to(master=master, projection_no=projection_no)
 
     if args.output:
         # print brief report
@@ -115,13 +131,18 @@ def main(args: argparse.Namespace):
 
 # ----------------------------------------------------------------------
 
-def grid_test(chart: ae_backend.chart_v3.Chart):
+def grid_test(chart: ae_backend.chart_v3.Chart, grid_json: Path = None):
     projection = chart.projection()
     print("running grid test on the best projection")
-    while True:
+    relax_attempts = 20         # AD chart-relax-grid: move trapped points and relax up to 20 times
+    relaxed = 0
+    result = None
+    for _attempt in range(relax_attempts):
         print(f"    stress: {projection.stress():.6f}")
         result = chart.grid_test()
-        if cnt := result.count_trapped():
+        relaxed += 1
+        cnt = result.count_trapped()
+        if cnt:
             print(f"  {cnt} trapped points found, moving them and relaxing")
             for en in result.trapped_hemisphering():
                 print(en)
@@ -130,6 +151,54 @@ def grid_test(chart: ae_backend.chart_v3.Chart):
         else:
             print("  no more trapped points found, grid test completed")
             break
+
+    if grid_json is not None and result is not None:
+        write_grid_json(chart, result, relaxed, grid_json)
+
+# ----------------------------------------------------------------------
+
+def write_grid_json(chart: ae_backend.chart_v3.Chart, result, relaxed: int, filename: Path):
+    """Export grid-test results in AD's grid-test-v1 json format (matches
+    acmacs-chart-2 GridTest::Results::export_to_json)."""
+    num_antigens = chart.number_of_antigens()
+
+    def point_name(point_no: int) -> str:
+        if point_no < num_antigens:
+            pt = chart.antigen(point_no)
+        else:
+            pt = chart.serum(point_no - num_antigens)
+        parts = [pt.name()]
+        if getattr(pt, "reassortant", None) and pt.reassortant():
+            parts.append(pt.reassortant())
+        if getattr(pt, "passage", None) and str(pt.passage()):
+            parts.append(str(pt.passage()))
+        return " ".join(p for p in parts if p)
+
+    def export_point(en):
+        return {
+            "point_no": en.point_no,
+            "name": point_name(en.point_no),
+            "distance": en.distance,
+            "contribution_diff": en.contribution_diff,
+            "pos": list(en.pos),
+        }
+
+    hemisphering, trapped = [], []
+    for en in result.trapped_hemisphering():
+        if en.diagnosis == "trapped":
+            trapped.append(export_point(en))
+        elif en.diagnosis == "hemisphering":
+            hemisphering.append(export_point(en))
+
+    data = {
+        "  version": "grid-test-v1",
+        "chart": chart.name(0),
+        "hemisphering": hemisphering,
+        "trapped": trapped,
+        "relaxed": relaxed,
+    }
+    Path(filename).write_text(json.dumps(data, indent=2) + "\n")
+    print(f"grid test results written to {filename}")
 
 # ----------------------------------------------------------------------
 
@@ -194,7 +263,7 @@ try:
     parser.add_argument("-d", dest="number_of_dimensions", default=2, type=int)
     parser.add_argument("-m", dest="minimum_column_basis", default="none")
     parser.add_argument("-k", "--keep-projections", default=10, type=int, help="number of projections to keep, 0 - keep all")
-    # parser.add_argument("-r", "--reorient", help="chart to re-orient resulting projections to")
+    parser.add_argument("--reorient", metavar="master.ace", type=Path, default=None, help="chart to re-orient resulting projections to (procrustes to its projection 0 over common antigens/sera, no scaling); only applied when an output chart is given")
     parser.add_argument("-i", "--incremental", default=False, action="store_true", help="randomize only points having NaN coordinates")
     parser.add_argument("--existing", type=int, metavar="projection_no", help="relax existing projection")
     parser.add_argument("--rough", default=False, action="store_true", help="perform rough optimisation")
@@ -209,7 +278,7 @@ try:
     parser.add_argument("--unmovable-non-nan-points", action="store_true", default=False)
     # parser.add_argument("--disconnect-antigens", default=None, help="comma or space separated list of antigen/point indexes (0-based) to disconnect for the new projections")
     # parser.add_argument("--disconnect-sera", default=None, help="comma or space separated list of serum indexes (0-based) to disconnect for the new projections")
-    # parser.add_argument("--threads", default=0, type=int, help="number of threads to use for optimization (omp): 0 - autodetect, 1 - sequential")
+    parser.add_argument("--threads", default=0, type=int, help="number of threads to use for optimization (omp): 0 - autodetect, 1 - sequential")
     parser.add_argument("source", type=Path)
     parser.add_argument("output", nargs="?", type=Path)
     args = parser.parse_args()

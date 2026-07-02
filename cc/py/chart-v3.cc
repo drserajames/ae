@@ -269,12 +269,13 @@ void ae::py::chart_v3(pybind11::module_& mdl)
             "relax", //
             [](Chart& chart, size_t number_of_dimensions, size_t number_of_optimizations, std::string_view mcb, bool dimension_annealing, bool rough,
                size_t /*number_of_best_distinct_projections_to_keep*/, std::shared_ptr<SelectedAntigens> antigens_to_disconnect, std::shared_ptr<SelectedSera> sera_to_disconnect,
-               std::optional<size_t> seed) {
+               std::optional<size_t> seed, bool disconnect_having_few_titers) {
                 if (number_of_optimizations == 0)
                     number_of_optimizations = 100;
                 optimization_options opt;
                 opt.precision = rough ? optimization_precision::rough : optimization_precision::fine;
                 opt.dimension_annealing = use_dimension_annealing_from_bool(dimension_annealing);
+                opt.disconnect_too_few_numeric_titers = disconnect_having_few_titers ? disconnect_few_numeric_titers::yes : disconnect_few_numeric_titers::no;
                 if (seed.has_value())
                     opt.seed = static_cast<std::uint_fast32_t>(*seed);
                 ae::disconnected_points disconnect;
@@ -287,7 +288,7 @@ void ae::py::chart_v3(pybind11::module_& mdl)
             },                                                                                                                                                    //
             "number_of_dimensions"_a = 2, "number_of_optimizations"_a = 0, "minimum_column_basis"_a = "none", "dimension_annealing"_a = false, "rough"_a = false, //
             "unused_number_of_best_distinct_projections_to_keep"_a = 5, "disconnect_antigens"_a = nullptr, "disconnect_sera"_a = nullptr,                         //
-            "seed"_a = pybind11::none(),                                                                                                                           //
+            "seed"_a = pybind11::none(), "disconnect_having_few_titers"_a = true,                                                                                  //
             pybind11::doc{"makes one or more antigenic maps from random starting layouts, adds new projections, projections are sorted by stress"})               //
 
         .def(
