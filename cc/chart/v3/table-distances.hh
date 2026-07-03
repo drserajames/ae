@@ -21,10 +21,11 @@ namespace ae::chart::v3
           public:
             struct Entry
             {
-                Entry(point_index p1, point_index p2, double dist) : point_1(p1), point_2(p2), distance{dist} {}
+                Entry(point_index p1, point_index p2, double dist, double w = 1.0) : point_1(p1), point_2(p2), distance{dist}, weight{w} {}
                 point_index point_1;
                 point_index point_2;
                 double distance;
+                double weight{1.0};
             };
 
             using entries_t = std::vector<Entry>;
@@ -93,16 +94,17 @@ namespace ae::chart::v3
 
         void dodgy_is_regular(dodgy_titer_is_regular_e dodgy_is_regular) { dodgy_is_regular_ = dodgy_is_regular; }
 
-        void update(const Titer& titer, point_index p1, point_index p2, double column_basis, double adjust, multiply_antigen_titer_until_column_adjust mult);
+        void update(const Titer& titer, point_index p1, point_index p2, double column_basis, double adjust, multiply_antigen_titer_until_column_adjust mult, double weight = 1.0);
         void update(const Titers& titers, const column_bases& col_bases, const StressParameters& parameters);
 
         // void report() const { std::cerr << "TableDistances regular: " << regular().size() << "  less-than: " << less_than().size() << '\n'; }
 
         struct EntryForPoint
         {
-            EntryForPoint(point_index ap, double td) : another_point(ap), distance(td) {}
+            EntryForPoint(point_index ap, double td, double w = 1.0) : another_point(ap), distance(td), weight{w} {}
             point_index another_point;
             double distance;
+            double weight{1.0};
         };
         using entries_for_point_t = std::vector<EntryForPoint>;
 
@@ -120,7 +122,7 @@ namespace ae::chart::v3
             entries_for_point_t regular, less_than;
         };
 
-        void add_value(Titer::Type type, point_index p1, point_index p2, double value)
+        void add_value(Titer::Type type, point_index p1, point_index p2, double value, double weight = 1.0)
         {
             switch (type) {
                 case Titer::Dodgy:
@@ -128,10 +130,10 @@ namespace ae::chart::v3
                         break;
                     [[fallthrough]];
                 case Titer::Regular:
-                    regular().emplace_back(p1, p2, value);
+                    regular().emplace_back(p1, p2, value, weight);
                     break;
                 case Titer::LessThan:
-                    less_than().emplace_back(p1, p2, value);
+                    less_than().emplace_back(p1, p2, value, weight);
                     break;
                 case Titer::MoreThan:
                     // more_than().emplace_back(p1, p2, value);
@@ -155,7 +157,7 @@ namespace ae::chart::v3
        MapDistances(const Layout& layout, const TableDistances& table_distances)
        {
            auto make_map_distance = [&layout](const auto& table_distance_entry) -> Entry {
-               return {table_distance_entry.point_1, table_distance_entry.point_2, layout.distance(table_distance_entry.point_1, table_distance_entry.point_2)};
+               return {table_distance_entry.point_1, table_distance_entry.point_2, layout.distance(table_distance_entry.point_1, table_distance_entry.point_2), table_distance_entry.weight};
            };
            std::transform(table_distances.regular().begin(), table_distances.regular().end(), std::back_inserter(regular()), make_map_distance);
            std::transform(table_distances.less_than().begin(), table_distances.less_than().end(), std::back_inserter(less_than()), make_map_distance);

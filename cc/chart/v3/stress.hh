@@ -36,6 +36,7 @@ namespace ae::chart::v3
         multiply_antigen_titer_until_column_adjust mult{multiply_antigen_titer_until_column_adjust::yes};
         avidity_adjusts m_avidity_adjusts{};
         dodgy_titer_is_regular_e dodgy_titer_is_regular{dodgy_titer_is_regular_e::no};
+        titer_weights weights{}; // per-titer weights; empty => every weight is 1.0 (no-op)
 
     }; // struct StressParameters
 
@@ -90,7 +91,7 @@ namespace ae::chart::v3
 
     Stress stress_factory(const Chart& chart, const Projection& projection, multiply_antigen_titer_until_column_adjust mult);
     Stress stress_factory(const Chart& chart, number_of_dimensions_t number_of_dimensions, minimum_column_basis mcb, const disconnected_points& disconnected,
-                          const unmovable_points& unmovable, const optimization_options& options);
+                          const unmovable_points& unmovable, const optimization_options& options, const titer_weights& weights = titer_weights{});
 
     // avidity test support
     Stress stress_factory(const Chart& chart, const Projection& projection, antigen_index antigen_no, double logged_avidity_adjust, multiply_antigen_titer_until_column_adjust mult);

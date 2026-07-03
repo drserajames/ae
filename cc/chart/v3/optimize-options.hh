@@ -25,6 +25,39 @@ namespace ae::chart::v3
 
     using number_of_optimizations_t = index_tt<struct number_of_optimizations_tag>;
 
+    // ----------------------------------------------------------------------
+
+    // Per-titer weights for the optimizer: w_ij multiplies the contribution of the
+    // titer between antigen i and serum j to both the stress and its gradient
+    // (0 removes the titer, 1 is the default, 2 double-weights it). Stored as a dense
+    // row-major antigen×serum matrix. An *empty* titer_weights means "every weight is
+    // 1.0", so the feature is a complete no-op when unused.
+    class titer_weights
+    {
+      public:
+        titer_weights() = default;
+        titer_weights(antigen_index number_of_antigens, serum_index number_of_sera)
+            : number_of_sera_{number_of_sera}, data_(number_of_antigens.get() * number_of_sera.get(), 1.0)
+        {
+        }
+
+        bool empty() const { return data_.empty(); }
+
+        double get(antigen_index ag, serum_index sr) const
+        {
+            if (data_.empty())
+                return 1.0;
+            return data_[ag.get() * number_of_sera_.get() + sr.get()];
+        }
+
+        void set(antigen_index ag, serum_index sr, double weight) { data_[ag.get() * number_of_sera_.get() + sr.get()] = weight; }
+
+      private:
+        serum_index number_of_sera_{0};
+        std::vector<double> data_{};
+
+    }; // class titer_weights
+
     enum class use_dimension_annealing { no, yes };
     constexpr inline use_dimension_annealing use_dimension_annealing_from_bool(bool use) { return use ? use_dimension_annealing::yes : use_dimension_annealing::no; }
     enum class remove_source_projection { no, yes }; // for relax_incremental

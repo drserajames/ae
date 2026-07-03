@@ -60,9 +60,10 @@ ae::chart::v3::Stress ae::chart::v3::stress_factory(const Chart& chart, const Pr
 // ----------------------------------------------------------------------
 
 ae::chart::v3::Stress ae::chart::v3::stress_factory(const Chart& chart, number_of_dimensions_t number_of_dimensions, minimum_column_basis mcb, const disconnected_points& disconnected,
-                                                    const unmovable_points& unmovable, const optimization_options& options)
+                                                    const unmovable_points& unmovable, const optimization_options& options, const titer_weights& weights)
 {
     Stress stress(number_of_dimensions, chart.number_of_points(), options.mult, options.dodgy_titer_is_regular);
+    stress.parameters().weights = weights;
     stress.set_disconnected(disconnected);
     if (options.disconnect_too_few_numeric_titers == disconnect_few_numeric_titers::yes)
         stress.extend_disconnected(chart.titers().having_too_few_numeric_titers());
@@ -145,16 +146,16 @@ ae::chart::v3::Stress::Stress(number_of_dimensions_t number_of_dimensions, point
 
 // ----------------------------------------------------------------------
 
-inline double contribution_regular(ae::point_index point_1, ae::point_index point_2, double table_distance, std::span<const double> args, ae::number_of_dimensions_t num_dim)
+inline double contribution_regular(ae::point_index point_1, ae::point_index point_2, double table_distance, std::span<const double> args, ae::number_of_dimensions_t num_dim, double weight)
 {
     const double diff = table_distance - map_distance(args, point_1, point_2, num_dim);
-    return diff * diff;
+    return weight * diff * diff;
 }
 
-inline double contribution_less_than(ae::point_index point_1, ae::point_index point_2, double table_distance, std::span<const double> args, ae::number_of_dimensions_t num_dim)
+inline double contribution_less_than(ae::point_index point_1, ae::point_index point_2, double table_distance, std::span<const double> args, ae::number_of_dimensions_t num_dim, double weight)
 {
     const double diff = table_distance - map_distance(args, point_1, point_2, num_dim) + 1;
-    return diff * diff * ae::chart::v3::sigmoid(diff * ae::chart::v3::SigmoidMutiplier());
+    return weight * diff * diff * ae::chart::v3::sigmoid(diff * ae::chart::v3::SigmoidMutiplier());
 }
 
 // inline double contribution_regular(const typename ae::chart::v3::TableDistances::Entry& entry, std::span<const double> args, ae::number_of_dimensions_t num_dim)
@@ -174,9 +175,9 @@ inline double contribution_less_than(ae::point_index point_1, ae::point_index po
 double ae::chart::v3::Stress::value(std::span<const double> args) const
 {
     return std::transform_reduce(table_distances().regular().begin(), table_distances().regular().end(), double{0}, std::plus<>(),
-                                 [args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_regular(entry.point_1, entry.point_2, entry.distance, args, num_dim); }) +
+                                 [args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_regular(entry.point_1, entry.point_2, entry.distance, args, num_dim, entry.weight); }) +
            std::transform_reduce(table_distances().less_than().begin(), table_distances().less_than().end(), double{0}, std::plus<>(),
-                                 [args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_less_than(entry.point_1, entry.point_2, entry.distance, args, num_dim); });
+                                 [args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_less_than(entry.point_1, entry.point_2, entry.distance, args, num_dim, entry.weight); });
 
 } // ae::chart::v3::Stress::value
 
@@ -193,9 +194,9 @@ double ae::chart::v3::Stress::value(const Layout& aLayout) const
 double ae::chart::v3::Stress::contribution(point_index point_no, std::span<const double> args) const
 {
     return std::transform_reduce(table_distances().begin_regular_for(point_no), table_distances().end_regular_for(point_no), double{0}, std::plus<>(),
-                                 [args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_regular(entry.point_1, entry.point_2, entry.distance, args, num_dim); }) +
+                                 [args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_regular(entry.point_1, entry.point_2, entry.distance, args, num_dim, entry.weight); }) +
            std::transform_reduce(table_distances().begin_less_than_for(point_no), table_distances().end_less_than_for(point_no), double{0}, std::plus<>(),
-                                 [args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_less_than(entry.point_1, entry.point_2, entry.distance, args, num_dim); });
+                                 [args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_less_than(entry.point_1, entry.point_2, entry.distance, args, num_dim, entry.weight); });
 
 } // ae::chart::v3::Stress::contribution
 
@@ -213,10 +214,10 @@ double ae::chart::v3::Stress::contribution(point_index point_no, const TableDist
 {
     return std::transform_reduce(
                table_distances_for_point.regular.begin(), table_distances_for_point.regular.end(), double{0}, std::plus<>(),
-               [point_no, args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_regular(point_no, entry.another_point, entry.distance, args, num_dim); }) +
+               [point_no, args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_regular(point_no, entry.another_point, entry.distance, args, num_dim, entry.weight); }) +
            std::transform_reduce(
                table_distances_for_point.less_than.begin(), table_distances_for_point.less_than.end(), double{0}, std::plus<>(),
-               [point_no, args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_less_than(point_no, entry.another_point, entry.distance, args, num_dim); });
+               [point_no, args, num_dim = number_of_dimensions_](const auto& entry) { return contribution_less_than(point_no, entry.another_point, entry.distance, args, num_dim, entry.weight); });
 
 } // ae::chart::v3::Stress::contribution
 
@@ -287,13 +288,13 @@ void ae::chart::v3::Stress::gradient_plain(std::span<const double> args, double*
 
     auto contribution_regular = [args,num_dim=number_of_dimensions_,update](const auto& entry) {
         const double map_dist = ::map_distance(args, entry, num_dim);
-        const double inc_base = (entry.distance - map_dist) * 2 / non_zero(map_dist);
+        const double inc_base = entry.weight * (entry.distance - map_dist) * 2 / non_zero(map_dist);
         update(entry, inc_base);
     };
     auto contribution_less_than = [args,num_dim=number_of_dimensions_,update](const auto& entry) {
         const double map_dist = ::map_distance(args, entry, num_dim);
         const double diff = entry.distance - map_dist + 1;
-        const double inc_base = (diff * 2 * ae::chart::v3::sigmoid(diff * SigmoidMutiplier())
+        const double inc_base = entry.weight * (diff * 2 * ae::chart::v3::sigmoid(diff * SigmoidMutiplier())
                                 + diff * diff * ae::chart::v3::d_sigmoid(diff * SigmoidMutiplier()) * SigmoidMutiplier()) / non_zero(map_dist);
         update(entry, inc_base);
     };
@@ -335,13 +336,13 @@ void ae::chart::v3::Stress::gradient_with_unmovable(std::span<const double> args
 
     auto contribution_regular = [args,num_dim=number_of_dimensions_,update](const auto& entry) {
         const double map_dist = ::map_distance(args, entry, num_dim);
-        const double inc_base = (entry.distance - map_dist) * 2 / non_zero(map_dist);
+        const double inc_base = entry.weight * (entry.distance - map_dist) * 2 / non_zero(map_dist);
         update(entry, inc_base);
     };
     auto contribution_less_than = [args,num_dim=number_of_dimensions_,update](const auto& entry) {
         const double map_dist = ::map_distance(args, entry, num_dim);
         const double diff = entry.distance - map_dist + 1;
-        const double inc_base = (diff * 2 * ae::chart::v3::sigmoid(diff * SigmoidMutiplier())
+        const double inc_base = entry.weight * (diff * 2 * ae::chart::v3::sigmoid(diff * SigmoidMutiplier())
                                 + diff * diff * ae::chart::v3::d_sigmoid(diff * SigmoidMutiplier()) * SigmoidMutiplier()) / non_zero(map_dist);
         update(entry, inc_base);
     };

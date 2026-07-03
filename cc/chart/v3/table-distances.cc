@@ -4,13 +4,13 @@
 
 // ----------------------------------------------------------------------
 
-void ae::chart::v3::TableDistances::update(const Titer& titer, point_index p1, point_index p2, double column_basis, double adjust, multiply_antigen_titer_until_column_adjust mult)
+void ae::chart::v3::TableDistances::update(const Titer& titer, point_index p1, point_index p2, double column_basis, double adjust, multiply_antigen_titer_until_column_adjust mult, double weight)
 {
     try {
         auto distance = column_basis - titer.logged() - adjust;
         if (distance < 0 && mult == multiply_antigen_titer_until_column_adjust::yes)
             distance = 0;
-        add_value(titer.type(), p1, p2, distance);
+        add_value(titer.type(), p1, p2, distance, weight);
     }
     catch (invalid_titer&) {
         // ignore dont-care
@@ -30,7 +30,8 @@ void ae::chart::v3::TableDistances::update(const Titers& titers, const column_ba
                 double adj{0.0};
                 if (!logged_adjusts.empty())
                     adj = logged_adjusts[*titer_ref.antigen] + logged_adjusts[*(titers.number_of_antigens() + titer_ref.serum)];
-                update(titer_ref.titer, point_index{*titer_ref.antigen}, titers.number_of_antigens() + titer_ref.serum, col_bases[titer_ref.serum], adj, parameters.mult);
+                const double weight = parameters.weights.empty() ? 1.0 : parameters.weights.get(titer_ref.antigen, titer_ref.serum);
+                update(titer_ref.titer, point_index{*titer_ref.antigen}, titers.number_of_antigens() + titer_ref.serum, col_bases[titer_ref.serum], adj, parameters.mult, weight);
             }
         }
     }
@@ -47,9 +48,9 @@ ae::chart::v3::TableDistances::entries_for_point_t ae::chart::v3::TableDistances
     entries_for_point_t result;
     for (const auto& src : source) {
         if (src.point_1 == point_no)
-            result.emplace_back(src.point_2, src.distance);
+            result.emplace_back(src.point_2, src.distance, src.weight);
         else if (src.point_2 == point_no)
-            result.emplace_back(src.point_1, src.distance);
+            result.emplace_back(src.point_1, src.distance, src.weight);
     }
     return result;
 

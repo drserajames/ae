@@ -81,9 +81,9 @@ namespace ae::chart::v3
         void forced_column_bases(class column_bases& cb);
 
         void relax(number_of_optimizations_t number_of_optimizations, minimum_column_basis mcb, number_of_dimensions_t number_of_dimensions, const optimization_options& options,
-                   const disconnected_points& disconnected = disconnected_points{}, const unmovable_points& unmovable = unmovable_points{});
+                   const disconnected_points& disconnected = disconnected_points{}, const unmovable_points& unmovable = unmovable_points{}, const titer_weights& weights = titer_weights{});
         void relax_incremental(projection_index source_projection_no, number_of_optimizations_t number_of_optimizations, const optimization_options& options,
-                               const disconnected_points& disconnected = disconnected_points{}, const unmovable_points& unmovable = unmovable_points{});
+                               const disconnected_points& disconnected = disconnected_points{}, const unmovable_points& unmovable = unmovable_points{}, const titer_weights& weights = titer_weights{});
         void move_trapped_points_relax(projection_index projection_no = projection_index{0}, size_t n_iter = 5);
 
         void combine_projections(const Chart& merge_in);
