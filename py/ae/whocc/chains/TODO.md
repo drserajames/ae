@@ -1,5 +1,27 @@
 # acmacs-whocc incremental-chains → ae port
 
+## Status: ✅ COMPLETE (2026-07-03)
+
+All work packages done, consolidated onto one branch (`whocc-chains-port`), and pushed to
+`drserajames/ae`. The live AD pipeline (`acmacs_py.chain202105`) is untouched — switching
+production over to the ae chain is a separate, gated, reversible decision.
+
+- **#1 CLI parity** (`chart-relax-grid`) — `e0505f4`
+- **#2 chain engine** (`ae.whocc.chains`) — `9663bb9`
+- **#3 renderer wiring** — via the merged `map-draw` CLI / `ae_backend.map_draw` (see below)
+- **#4 web layer** (stdlib `http.server`) — `498ce48`
+- **#5 diagnostic plots** (matplotlib, `proj/whocc-chains-diagnostics/`) — `7a5e981`/`c4b0eeb`/`712b00e`
+- **renderer consolidated** — `map-draw-revive` merged in at `7d0c624`; `build/map-draw` +
+  `ae_backend.map_draw` build in-branch, so the web `/png` renders with no cross-branch dep.
+- **#6 fidelity** — reproduces AD across **6** lab/subtype/assay combos (CDC-HINT + bvic/h1pdm/
+  h3-gp/h3-fra/byam): merges match dims/layers every step; propagated maps match (RMSD≈0; two
+  sparser combos sit +1–2% stress = a benign ae-optimiser basin-finding gap, not a data/merge
+  divergence). Harness: `ac/results/whocc-chains-port-test/`.
+
+**Known follow-up (ae-core, not this port):** `combine_cheating_assays` in `chart_v3.merge`
+assigns a geometric-mean titer to a few (0–3/step) antigen×serum cells where AD leaves them
+missing — negligible map impact, but a real low-frequency merge difference to investigate.
+
 ## Goal
 
 Port the WHO-CC **incremental-chain** workflow (the `chains-202105` engine + web app) from AD

@@ -66,17 +66,19 @@ also now writes layout coordinates (`Projection.set_coordinates` / `Layout.__set
 
 | # | Subsystem | AD source | ae target | State |
 |---|-----------|-----------|-----------|-------|
-| 1 | Map drawing | `acmacs-draw`, `acmacs-map-draw` | — / `cc/geo/` | ⚪ **shelved** — antigenic maps are done in **kateri** (Dart app, separate repo, driven over a socket via `py/ae/utils/kateri.py`); `cc/map-draw/` removed (preserved on `map-draw-shelved`). `cc/draw/cairo-surface.*` kept (shared); **geographic** maps = `cc/geo/` + `geo-draw` (done) |
+| 1 | Map drawing | `acmacs-draw`, `acmacs-map-draw` | `cc/map-draw/` / `cc/geo/` | ⚪ mostly **shelved** — interactive/report antigenic maps are done in **kateri** (Dart app, separate repo, driven over a socket via `py/ae/utils/kateri.py`). **A headless C++ Cairo renderer (`cc/map-draw/` + `map-draw` CLI / `ae_backend.map_draw`) was revived** for the Linux **whocc-chains** batch path (#7) where kateri can't run. `cc/draw/cairo-surface.*` kept (shared); **geographic** maps = `cc/geo/` + `geo-draw` (done) |
 | 2 | hidb (historical influenza DB) | `hidb-5` | `cc/hidb/` | 🟢 done — reader + authoring (make/convert/stat), `ae_backend.hidb` |
 | 3 | TAL (phylo tree drawing / sig pages) | `acmacs-tal` | `cc/tal/` + `tal-draw` + `py/ae/tal/` | 🟢 feature-complete (core) — tree render, clades/time-series, colouring, aa-transitions, settings-v3 `.tal` reader, signature pages |
 | 4 | ssm-report (seasonal report) | `ssm-report` | `py/ae/report/` | 🟡 vcm engine consolidated; all figures generate on ae (kateri maps / `stat` / `geo-draw` / `tal-draw`); adjust ported (`ae.adjust` + kateri drag). Remaining: a full assembled-report run + geo clade colouring (#1). See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) |
 | 5 | webserver | `acmacs-webserver` | `py/ae/webserver/` | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data verified |
 | 6 | CLI wrappers over `chart_v3` | various `bin/chart-*` | `bin/` | 🟢 done |
 
-> Note: **antigenic-map drawing lives in `kateri`** (a Dart/Flutter viewer + PDF generator,
-> `github.com/drserajames/kateri`), not in `ae` C++ — ae drives it over a Unix socket
-> (`ae.utils.kateri`: send `CHRT`, `set_style`, `pdf`/`get_chart`). Don't look for a C++ map
-> renderer in `ae`; the only ae-side "map drawing" is the geographic world map (`cc/geo`).
+> Note: **interactive/report antigenic-map drawing lives in `kateri`** (a Dart/Flutter viewer +
+> PDF generator, `github.com/drserajames/kateri`) — ae drives it over a Unix socket
+> (`ae.utils.kateri`: send `CHRT`, `set_style`, `pdf`/`get_chart`). The **one** C++ antigenic-map
+> renderer in ae is the headless `cc/map-draw/` (`map-draw` CLI / `ae_backend.map_draw`), revived
+> for the **Linux whocc-chains batch path** (#7) where kateri (macOS-only) can't run — not for the
+> interactive/report path. The other ae-side "map drawing" is the geographic world map (`cc/geo`).
 
 **Coordination essentials (full rules in `TODO.md`):**
 - `meson.build` is the main conflict risk — keep edits in a commented `# --- <subsystem> ---`
