@@ -30,6 +30,54 @@ TEST_CASE("best stress", "[stress]") {
     REQUIRE(std::abs(chart.projections().best().stress() - 66.12473) < 10e-4);
 }
 
+// ----------------------------------------------------------------------
+
+// Regression: setting a viewport on a semantic style with no other members used to
+// serialize as "name": {,"V": [...]} -- a spurious leading comma before the
+// first/only member -- which chart.export() (and any downstream json parser) rejects.
+TEST_CASE("semantic style export: viewport as sole member", "[styles][export]") {
+    const char* ae_root = std::getenv("AE_ROOT");
+    REQUIRE(ae_root != nullptr);
+
+    ae::chart::v3::Chart chart{std::filesystem::path{ae_root} / "test" / "chart1.ace"};
+    chart.styles().find("empty-style-with-viewport").viewport = ae::draw::v2::Viewport{1.0, 2.0, 3.0, 4.0};
+
+    const auto exported = chart.export_to_json();
+    REQUIRE_NOTHROW([&]() { ae::chart::v3::Chart{std::string_view{exported}}; }());
+
+    ae::chart::v3::Chart reloaded{std::string_view{exported}};
+    const auto* style = reloaded.styles().find_if_exists("empty-style-with-viewport");
+    REQUIRE(style != nullptr);
+    REQUIRE(style->viewport.has_value());
+    REQUIRE(style->viewport.value() == ae::draw::v2::Viewport{1.0, 2.0, 3.0, 4.0});
+    REQUIRE(style->modifiers.empty());
+}
+
+// Combination of members must also serialize/round-trip correctly (priority, a
+// modifier, legend, and viewport all present on the same style).
+TEST_CASE("semantic style export: viewport combined with other members", "[styles][export]") {
+    const char* ae_root = std::getenv("AE_ROOT");
+    REQUIRE(ae_root != nullptr);
+
+    ae::chart::v3::Chart chart{std::filesystem::path{ae_root} / "test" / "chart1.ace"};
+    auto& style = chart.styles().find("combined-style");
+    style.priority = 3;
+    style.viewport = ae::draw::v2::Viewport{-1.0, -2.0, 5.0, 6.0};
+    auto& modifier = style.modifiers.emplace_back();
+    modifier.parent = "combined-style";
+    modifier.selector.as_object()["C"] = std::string_view{"test-clade"};
+
+    const auto exported = chart.export_to_json();
+    REQUIRE_NOTHROW([&]() { ae::chart::v3::Chart{std::string_view{exported}}; }());
+
+    ae::chart::v3::Chart reloaded{std::string_view{exported}};
+    const auto* reloaded_style = reloaded.styles().find_if_exists("combined-style");
+    REQUIRE(reloaded_style != nullptr);
+    REQUIRE(reloaded_style->priority == 3);
+    REQUIRE(reloaded_style->viewport.value() == ae::draw::v2::Viewport{-1.0, -2.0, 5.0, 6.0});
+    REQUIRE(reloaded_style->modifiers.size() == 1);
+}
+
 int main(int argc, const char* const* argv)
 {
     return Catch::Session().run( argc, argv );

@@ -418,7 +418,7 @@ static inline void export_semantic_plot_spec(fmt::memory_buffer& out, const ae::
             auto comma_R2 = put_int(out, style.priority, not_zero, "z", false);
             comma_R2 = put_str(out, style.title, not_empty, "t", comma_R2);
             if (style.viewport.has_value()) {
-                comma_R1 = put_comma(out, comma_R1);
+                comma_R2 = put_comma(out, comma_R2);
                 fmt::format_to(std::back_inserter(out), "\"V\": [{}, {}, {}, {}]", ae::format_double(style.viewport->x), ae::format_double(style.viewport->y), ae::format_double(style.viewport->width),
                                ae::format_double(style.viewport->height));
             }
