@@ -1,3 +1,6 @@
+"""
+ae.semantic.older_than — mark and style antigens older than 6/12 months before the conference.
+"""
 import sys, datetime, calendar
 import ae_backend
 
@@ -17,6 +20,7 @@ def attributes(chart: ae_backend.chart_v3.Chart, conferencence_date: datetime.da
     print(f">>>> {ags}", file=sys.stderr)
 
 def older_6_months_date(conferencence_date: datetime.date) -> datetime.date:
+    """First-of-month date six months before the conference month."""
     date = conferencence_date.replace(day=1)
     if date.month > 6:
         return date.replace(month=date.month - 6)
@@ -24,6 +28,7 @@ def older_6_months_date(conferencence_date: datetime.date) -> datetime.date:
         return date.replace(year=date.year - 1, month=date.month + 6)
 
 def older_12_months_date(conferencence_date: datetime.date) -> datetime.date:
+    """First-of-month date twelve months before the conference."""
     return conferencence_date.replace(year=conferencence_date.year - 1, day=1)
 
 # ======================================================================
@@ -37,10 +42,12 @@ def style(chart: ae_backend.chart_v3.Chart, priority: int = 1000):
         style.add_modifier(selector={attr: True}, outline="grey", fill="grey", lower=True, only="antigens")
 
 def since_6m_label(conferencence_date: datetime.date) -> str:
+    """`<Month> <Year>` label for the 6-months-ago cutoff."""
     date = older_6_months_date(conferencence_date=conferencence_date)
     return f"{calendar.month_name[date.month]} {date.year}"
 
 def since_12m_label(conferencence_date: datetime.date) -> str:
+    """`<Month> <Year>` label for the 12-months-ago cutoff."""
     date = older_12_months_date(conferencence_date=conferencence_date)
     return f"{calendar.month_name[date.month]} {date.year}"
 

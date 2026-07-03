@@ -1,3 +1,6 @@
+"""
+ae.utils.datetime — parse flexible date strings and derive antigen date ranges.
+"""
 import sys, datetime, calendar
 from datetime import datetime, date, timedelta
 from typing import Optional
@@ -25,6 +28,9 @@ def parse_date(source: date | str, default_month: int = 1, default_day: int = 1)
 # ----------------------------------------------------------------------
 
 def get_antigen_date_range(chart: ae_backend.chart_v3.Chart, first: Optional[date | str] = None, last: Optional[date | str] = None, limit_by_chart: bool = False) -> list[date]:
+    """Resolve `[first, last]` dates for a chart's test antigens: default to the chart's own
+    test-antigen date range, override with `first`/`last` if given, and — with
+    `limit_by_chart` — clamp them to the chart range."""
     chart_first, chart_last = (parse_date(date) for date in chart.antigen_date_range(test_only=True))
     if not first:
         first = chart_first

@@ -1,8 +1,13 @@
+"""
+ae.semantic.front_style — compose a front (composite) plot style from background styles.
+"""
 import ae_backend.chart_v3
 
 # ======================================================================
 
 def add(chart: ae_backend.chart_v3.Chart, style_name: str, references: list[str], title: str, title_style: dict[str, object] = {}, show_legend: bool = True, legend_counter: bool = True, style_priority: int = 1) -> ae_backend.chart_v3.SemanticStyle:
+    """Build a front style `style_name` that layers the named background `references`, sets
+    its (styled) title and legend visibility/counter, and returns it."""
     style = chart.styles()[style_name]
     style.priority = style_priority
     for ref in references:
@@ -28,6 +33,8 @@ def _title_style(plot_title, title_style: dict[str, object]):
 # ----------------------------------------------------------------------
 
 def legend_style(legend: ae_backend.chart_v3.SemanticLegend, legend_style: dict[str, object]):
+    """Apply the `point_size` / `interline` / `text_size` overrides from `legend_style` onto
+    a `SemanticLegend`."""
     # "legend_style": {"point_size": 10.0, "interline": 0.4, "text_size": 20.0},
     if (point_size := legend_style.get("point_size")) is not None:
         legend.point_size = point_size

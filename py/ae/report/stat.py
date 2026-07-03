@@ -193,6 +193,7 @@ def _continent_resolver(locdb):
     """location name -> continent, "UNKNOWN" when unresolved (AD's continent fallback).
     AD's single locdb.continent(location) is two steps in ae: location->country->continent."""
     def resolve(location):
+        """Resolve a location to its continent via country (`"UNKNOWN"` if unresolved)."""
         if not location:
             return "UNKNOWN"
         country = locdb.country(location)
@@ -247,6 +248,8 @@ def _import_ae_backend():
 # ----------------------------------------------------------------------
 
 def main(argv=None):
+    """CLI entry point: write `stat.json[.xz]` (antigen/sera counts) from hidb over a date
+    range. Returns a process exit code."""
     import argparse
     parser = argparse.ArgumentParser(description="Write stat.json[.xz] (antigen/sera counts) from hidb.")
     parser.add_argument("output", help="output file (stat.json.xz, or .json for plain)")

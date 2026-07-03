@@ -1,3 +1,6 @@
+"""
+ae.chart.merge — merge several charts into one, with validation and optional reporting.
+"""
 import math
 import sys
 from pathlib import Path
@@ -17,6 +20,8 @@ def merge(sources: list[Path]|list[ae_backend.chart_v3.Chart], match: str, merge
     sd_limit = math.nan if (sd_limit is None or math.isnan(sd_limit)) else float(sd_limit)
 
     def get(src: Path|ae_backend.chart_v3.Chart) -> ae_backend.chart_v3.Chart:
+        """Load `src` (a path or a Chart) as a Chart, applying `duplicates_distinct` if
+        requested."""
         if not isinstance(src, ae_backend.chart_v3.Chart):
             src = ae_backend.chart_v3.Chart(src)
         if duplicates_distinct:
@@ -24,6 +29,7 @@ def merge(sources: list[Path]|list[ae_backend.chart_v3.Chart], match: str, merge
         return src
 
     def report_chart(chart: ae_backend.chart_v3.Chart) -> str:
+        """`<name> <nAg>:<nSr>` one-line summary of a chart."""
         return f"{chart.name()} {chart.number_of_antigens()}:{chart.number_of_sera()}"
 
     if len(sources) < 2:

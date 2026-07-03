@@ -1,3 +1,6 @@
+"""
+ae.utils.org — convert between Org-mode tables and lists of dicts.
+"""
 import sys
 from typing import Any
 
@@ -44,6 +47,9 @@ def _convert_value(value: str, field_name: str) -> str | bool | int | float:
 
 
 def dict_to_org_table(data: list[dict[str, object]], field_order: list, add_org_mode_wrapper: bool = True) -> str:
+    """Render a list of dicts as an aligned Org-mode table: the columns in `field_order`
+    first (then any extra keys), numbers right-justified and text left-justified, optionally
+    wrapped in `# -*- Org -*-` markers."""
     field_size: dict[str, int] = {field: len(field) for field in field_order}
     for en in data:
         for field, val in en.items():

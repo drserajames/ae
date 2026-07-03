@@ -12,22 +12,29 @@ from ae.report.conference_data_base import ConferenceData as _ConferenceDataBase
 
 
 class ConferenceData(_ConferenceDataBase):
+    """Per-report `ConferenceData` skeleton — copy into a report dir and fill in the
+    season-specific values (placeholders here)."""
 
     # --- required by chart_modifier ---------------------------------------
     def conferencence_date(self):
+        """The WHO CC meeting date (placeholder — set per report)."""
         return parse_date("YYYY-MM-DD")            # the meeting date
 
     def time_series(self):
+        """The report's month time-series window (placeholder — set per report)."""
         return TimeSeriesRange(first="YYYY-MM", last_inclusive="YYYY-MM", period="month")
 
     def current_vaccine_years(self) -> list[str]:
+        """Current-season vaccine-period codes (placeholder — set per report)."""
         return ["YYYYMM", "YYYYMM"]                # vaccine-period codes
 
     # --- required by geographic.make_geo (only if you render geo maps) ----
     def geographic_settings(self) -> dict:
+        """Geographic-map settings (placeholder — set per report)."""
         return {}                                  # (geo-draw colours by continent)
 
     def geographic_coloring(self, subtype: str) -> dict:
+        """Geographic-map colouring for a subtype (placeholder — set per report)."""
         return {}
 
     # --- report assembly (report.py drives latex.* with these) ------------

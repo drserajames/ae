@@ -1,3 +1,6 @@
+"""
+ae.semantic.reference — set the reference (`R`) semantic attribute on reference antigens.
+"""
 import sys
 import ae_backend
 

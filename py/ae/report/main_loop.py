@@ -1,5 +1,16 @@
 # Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/main_loop.py — Phase 1 engine/library tier.
 # async command loop + kateri task. See py/ae/report/MIGRATION.md.
+"""
+ae.report.main_loop — the async command loop and command-marking decorators.
+
+`main_loop()` is the entry point a report driver script calls: it parses the CLI, starts
+the kateri and socket-server tasks (unless the chosen command opts out), and runs a
+`MainLoop`. Commands are ordinary methods on the driver's commander marked with the
+`@command` decorator; `@no_kateri`, `@headless` and `@no_loop` tune how the loop runs them.
+`MainLoop` runs the command once and, unless `@no_loop`, keeps running — a
+`MainModuleWatcher` reloads changed source and re-runs. Ported from the vcm ssm-report
+tooling.
+"""
 import sys
 import os
 import tempfile
@@ -15,6 +26,10 @@ from .modules import Modules
 # ======================================================================
 
 def main_loop(start_kateri: bool = True) -> NoReturn:
+    """Entry point for a report driver script: parse the CLI (`--command-list`, or a command
+    name plus `-e/--exit-on-exception`), chdir to the driver's directory, spin up the kateri
+    + socket-server tasks (unless the command is `@no_kateri`), and run the async `MainLoop`.
+    Exits the process; never returns normally."""
 
     commander = Modules.commander()
 
@@ -49,15 +64,19 @@ def command(cmd: Callable) -> Callable:
     return cmd
 
 def is_command(name: str, parent=None) -> bool:
+    """Whether attribute `name` on `parent` (default `__main__`) is marked `@command`."""
     if parent is None:
         parent = sys.modules["__main__"]
     return getattr(getattr(parent, name), _command_attr, False)
 
 def list_commands(parent=None, order: list[str]=[]) -> list[str]:
+    """Sorted list of command names on `parent` (default `__main__`), with the names in
+    `order` placed first."""
     if parent is None:
         parent = sys.modules["__main__"]
 
     def key(cmd_name: str):
+        """Sort key placing `order` commands first (in order), then alphabetically."""
         try:
             ind = order.index(cmd_name)
         except ValueError:
@@ -87,6 +106,8 @@ def no_loop(cmd: Callable) -> Callable:
 
 # base class for tasks, e.g. kateri
 class Task:
+    """Base class for the loop's async tasks (e.g. kateri, socket server). Subclasses
+    override `start` and `running`."""
 
     async def start(self, **kwargs):
         """Start the task"""
@@ -98,18 +119,25 @@ class Task:
         return False
 
     def name(self):
+        """Display name of the task (its class)."""
         return self.__class__
 
 # ----------------------------------------------------------------------
 
 class MainLoop (Modules):
+    """The report's async run loop (a `Modules` subclass): runs the requested command once,
+    then — unless the command is `@no_loop` — watches source files and re-runs on change."""
 
     def __init__(self, command: str, exit_on_exception: bool = False):
+        """Set the command name to run and whether command/reload errors should propagate
+        rather than be reported."""
         super().__init__(exit_on_exception=exit_on_exception)
         self.command = command
         self.stop = False
 
     async def do(self):
+        """Run the command (awaiting it if it is a coroutine) and set `stop` from its
+        `@no_loop` marker. Reports — or, with `exit_on_exception`, re-raises — any error."""
         try:
             cmd = getattr(self.main_module().commander(), self.command)
             if asyncio.iscoroutinefunction(cmd):
@@ -124,6 +152,8 @@ class MainLoop (Modules):
                 ae.utils.traceback.report_exception()
 
     def run(self, tasks: list[Task]) -> NoReturn:
+        """Create a temporary Unix socket and run the async `main` under asyncio; exit the
+        process when it finishes or on Ctrl-C."""
         with tempfile.TemporaryDirectory() as td:
             self.socket_name = os.path.join(td, 'sock')
             try:
@@ -138,6 +168,8 @@ class MainLoop (Modules):
             sys.exit(0)
 
     async def main(self, tasks: list[Task]):
+        """Start the given tasks plus a `MainModuleWatcher`, wait for the first to finish,
+        cancel the rest, and re-raise any task exception."""
         running_tasks = [asyncio.create_task(task.start(main_loop=self, socket_name=self.socket_name), name=task.name()) for task in tasks + [MainModuleWatcher(tasks)]]
         done, pending = await asyncio.wait(running_tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
@@ -152,11 +184,16 @@ class MainLoop (Modules):
 # ----------------------------------------------------------------------
 
 class MainModuleWatcher (Task):
+    """Task that waits for the other tasks (kateri) to come up, runs the command once, then
+    polls for source changes and reloads until the loop is told to stop."""
 
     def __init__(self, dependencies: list[Task]):
+        """Record the tasks to wait on before running the command."""
         self.dependencies = dependencies
 
     async def start(self, main_loop: MainLoop, **ignored):
+        """Wait for the dependency tasks to be running, run the command once, then loop
+        reloading changed modules until `main_loop.stop`."""
         # wait for tasks (e.g. kateri) to activate
         while not all(dep.running() for dep in self.dependencies):
             await asyncio.sleep(0.1)

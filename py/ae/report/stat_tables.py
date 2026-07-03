@@ -1,5 +1,12 @@
 # Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/stat.py — Phase 1 engine/library tier.
 # stat.json.xz -> tabs/csv/html (still shells hidb5-stat; Phase 2 will wire to ae.report.stat). See py/ae/report/MIGRATION.md.
+"""
+ae.report.stat_tables — render stat.json (antigen/sera counts) into tab / CSV / HTML tables.
+
+Takes the computed stat (per virus-type/lab/continent/period antigen and sera counts) and
+writes the WHO CC statistics tables the report and its web pages use, comparing against the
+previous report's stat. Ported from the vcm ssm-report tooling.
+"""
 import sys
 from pathlib import Path
 import datetime
@@ -32,6 +39,9 @@ sVirusTypeOrder = ['all', 'A(H1N1)', 'A(H3N2)', 'B', 'BVICTORIA', 'BYAMAGATA']
 # ----------------------------------------------------------------------
 
 def make_stat(output_dir: Path, hidb_dir: Path, time_series: TimeSeriesRange, previous_stat_dir: Path, make_all_names: bool = False, make_tabs: bool = True, make_csv: bool = True, make_webpage: bool = True):
+    """Update the stat tables in `output_dir`: compute the current stat from hidb over
+    `time_series`, load the previous stat, and write the tab / CSV / HTML outputs as
+    requested."""
     print(f">>> Updating stat in {output_dir} start={time_series.front_YMD()} end={time_series.back_YMD()}", file=sys.stderr)
     stat = _compute_stat(output_dir=output_dir, hidb_dir=hidb_dir, time_series=time_series)
     previous_stat = _load_previous_stat(previous_stat_dir=previous_stat_dir)
@@ -116,6 +126,8 @@ def _make_header_tab(period):
 def _make_line_tab(date, data_antigens, data_sera, data_sera_unique, period, has_previous, previous_data_antigens, previous_data_sera, previous_data_sera_unique):
 
     def diff_current_previous(continent):
+        """Increase in this continent's antigen count over the previous stat (warns to
+        stderr if negative)."""
         diff = data_antigens.get(continent, 0) - previous_data_antigens.get(continent, 0)
         if diff < 0:
             print(f"> {_format_date(date, period)} {continent}: Current: {data_antigens.get(continent, 0)} Previous: {previous_data_antigens.get(continent, 0)}", file=sys.stderr)
@@ -216,6 +228,7 @@ def _make_webtable(output, stat, virus_type, lab, period):
         data_sera = stat['sera'].get(virus_type, {}).get(lab, {})
 
         def make_total():
+            """Write the HTML TOTAL row (per-continent totals plus sera and unique-sera)."""
             output.write('<tr class="total"><td class="date">TOTAL</td><td class="number">{continents}</td><td class="number">{serum}</td><td class="number">{serum_unique}</td></tr>\n'.format(continents='</td><td class="number">'.join(str(data_antigens['all'].get(continent, '')) for continent in sContinentsForTables[:-2]), serum=str(data_sera.get('all', {}).get('all', '')), serum_unique=str(data_sera_unique.get('all', {}).get('all', ''))))
 
         output.write('<table class="{period}" style="border: 1px solid #A0A0A0; border-collapse: collapse;">\n')
@@ -237,6 +250,8 @@ def _make_webtable(output, stat, virus_type, lab, period):
 sReYearMonth = {'month': re.compile(r'^\d{6}$', re.I), 'year': re.compile(r'^\d{4}$', re.I)}
 
 def make_dates(data, period, **sorting):
+    """Sorted list of the date keys in `data` matching the period (`YYYYMM` for month,
+    `YYYY` for year); pass `reverse=True` etc. via `**sorting`."""
     rex = sReYearMonth[period]
     return sorted((date for date in data if rex.match(date)), **sorting)
 

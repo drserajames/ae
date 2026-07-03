@@ -42,9 +42,11 @@ class Figure:
     ray-casting point-in-polygon test, used by `Point.inside()`."""
 
     def __init__(self, vertices):
+        """Store the polygon vertices (first two coordinates of each)."""
         self.vertices = [list(v)[:2] for v in vertices]
 
     def contains(self, point) -> bool:
+        """Ray-casting point-in-polygon test; False for a None point."""
         if point is None:
             return False
         x, y = point[0], point[1]
@@ -70,6 +72,8 @@ class Point:
     __slots__ = ("point_no", "no", "kind", "coords", "_obj")
 
     def __init__(self, point_no, no, kind, obj, coords):
+        """Bind a selection point: its global layout index, antigen/serum index, kind
+        ("antigen"/"serum"), underlying object and coordinates."""
         self.point_no = point_no      # global layout index
         self.no = no                  # antigen index, or serum index
         self.kind = kind              # "antigen" | "serum"
@@ -77,17 +81,21 @@ class Point:
         self._obj = obj               # the ae_backend Antigen/Serum
 
     def __getattr__(self, name):
+        """Delegate unknown attributes to the underlying antigen/serum."""
         return getattr(self._obj, name)
 
     @property
     def x(self):
+        """The point's x coordinate (None if disconnected)."""
         return self.coords[0] if self.coords else None
 
     @property
     def y(self):
+        """The point's y coordinate (None if disconnected)."""
         return self.coords[1] if self.coords else None
 
     def inside(self, figure: Figure) -> bool:
+        """Whether the point lies inside `figure`."""
         return figure.contains(self.coords)
 
 # ----------------------------------------------------------------------
@@ -96,6 +104,8 @@ class Adjust:
     """Programmatic adjustment of one projection of a chart."""
 
     def __init__(self, chart, projection_no: int = 0, ae_backend=None):
+        """Open `chart` (a `Chart` or a path) for adjusting projection `projection_no`.
+        Raises ValueError if the chart has no projection to adjust."""
         self._be = ae_backend or _import_ae_backend()
         if isinstance(chart, (str, Path)):
             chart = self._be.chart_v3.Chart(str(chart))
@@ -110,19 +120,23 @@ class Adjust:
 
     @property
     def projection(self):
+        """The projection being adjusted."""
         return self.chart.projection(self.projection_no)
 
     @property
     def layout(self):
+        """The projection's layout."""
         return self.projection.layout()
 
     def coordinates(self, point_no):
+        """Coordinates of one point as a list, or None if it is disconnected."""
         c = self.layout[point_no]
         return list(c) if c is not None else None
 
     # -- selection ------------------------------------------------------
 
     def figure(self, vertices) -> Figure:
+        """Build a `Figure` (closed polygon) from `vertices`."""
         return Figure(vertices)
 
     def select_antigens(self, predicate=None) -> list[int]:
@@ -222,6 +236,7 @@ class Adjust:
         return self.projection.relax_capturing_intermediates(rough=rough)
 
     def stress(self) -> float:
+        """Current stress of the projection."""
         return self.projection.stress()
 
     # -- comparison / output --------------------------------------------

@@ -1,5 +1,15 @@
 # Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/modules.py — Phase 1 engine/library tier.
 # hot-reload module machinery. See py/ae/report/MIGRATION.md.
+"""
+ae.report.modules — source hot-reload machinery for the report driver.
+
+`Modules` is the base class of the report's `__main__`-driven command loop. It snapshots
+every imported non-stdlib, non-Homebrew module at start-up and, on each pass, reloads any
+whose source file changed on disk — plus, transitively, the modules that reference them
+and the `__main__` driver itself — then re-runs the report. This lets a long-running
+report session pick up edits to the driver and its helpers without a restart. Ported from
+the vcm ssm-report tooling (see py/ae/report/MIGRATION.md).
+"""
 import sys, datetime, traceback
 from pathlib import Path
 import importlib.util, importlib.machinery
@@ -10,26 +20,40 @@ import ae.utils.traceback
 # ======================================================================
 
 class Modules:
+    """Base class providing live source hot-reloading for the report's `__main__` driver.
+    Subclasses (e.g. `VcmDirs`) add report-specific behaviour and a `do()` coroutine; the
+    running driver calls `reload_modules_if_updated()` between passes."""
 
     def __init__(self, exit_on_exception: bool = False):
+        """Snapshot the `__main__` driver module. `exit_on_exception` re-raises reload
+        errors instead of reporting them and continuing."""
         self._main_module = sys.modules['__main__']
         self._main_module_path = self._main_module.__file__
         self._modules_to_reload = None
         self.exit_on_exception = exit_on_exception
 
     def main_module(self):
+        """The current `__main__` driver module object (replaced in place on reload)."""
         return self._main_module
 
     def modules_to_reload(self):
+        """Lazily-built watch-set: a list of `{"m": module, "t": mtime}` for every imported
+        module with a source file outside `/opt/homebrew` — i.e. project code, not the
+        stdlib or Homebrew-installed dependencies."""
         if not self._modules_to_reload:
             self._modules_to_reload = [{"m": mod, "t": Path(mod.__file__).stat().st_mtime} for name, mod in sys.modules.items() if getattr(mod, "__file__", None) and not mod.__file__.startswith("/opt/homebrew")]
         return self._modules_to_reload
 
     async def reload_modules_if_updated(self):
+        """Reload every watched module whose source mtime changed since the last pass (and,
+        transitively, modules referencing it, and the `__main__` driver), then re-run the
+        report via `do()`. No-op if nothing changed."""
 
         reloading_printed = False
 
         def reloading_message():
+            """Print the ">>>> reloading" banner once per pass (idempotent via the
+            enclosing `reloading_printed` flag)."""
             nonlocal reloading_printed
             if not reloading_printed:
                 print(f">>>> reloading [{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]", file=sys.stderr)
@@ -51,6 +75,9 @@ class Modules:
             await self.do()
 
     def reload_referencing(self, name: str, reloaded: set[str]):
+        """Reload every watched module that has module `name` bound as an attribute (i.e.
+        imported it), recursing so transitive importers are refreshed too. `reloaded` is
+        the set of already-reloaded module names, guarding against reference cycles."""
         just_reloaded = []
         for mod_en2 in self.modules_to_reload():
             if mod_en2['m'].__name__ not in reloaded:  # break infinite loop of modules referencing each other
@@ -64,6 +91,9 @@ class Modules:
             self.reload_referencing(mod4_n, reloaded)
 
     def reload_main_module(self):
+        """Re-execute the `__main__` driver from its source file, replacing
+        `self._main_module`. On failure, re-raise if `exit_on_exception` else report the
+        traceback and carry on."""
         try:
             print(f">>>>    __main__ {self._main_module_path}", file=sys.stderr)
             main_module_name = Path(self._main_module_path).stem
@@ -80,6 +110,8 @@ class Modules:
 
     @classmethod
     def commander(cls):
+        """The report's command dispatcher — `__main__`'s `commander()` (see
+        ae.report.commander)."""
         return sys.modules['__main__'].commander()
 
 # ======================================================================

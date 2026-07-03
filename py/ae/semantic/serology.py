@@ -1,3 +1,6 @@
+"""
+ae.semantic.serology — find serology antigens, set their attribute, and build the serology style.
+"""
 import sys, pprint
 from typing import Optional
 import ae_backend
@@ -61,6 +64,7 @@ def collect_data_for_styles(chart: ae_backend.chart_v3.Chart):
 # ----------------------------------------------------------------------
 
 def default_field_order():
+    """Column order for the serology data org-table report."""
     return ["no", "designation", "lox", "loy", "fill", "label", "label_size", "size", "outline_width"]
 
 # ======================================================================

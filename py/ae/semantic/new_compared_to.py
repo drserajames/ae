@@ -1,3 +1,6 @@
+"""
+ae.semantic.new_compared_to — mark and style antigens new since the previous chart(s).
+"""
 import sys
 import ae_backend
 from .style import style_with_one_modifier

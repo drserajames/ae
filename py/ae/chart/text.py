@@ -1,3 +1,6 @@
+"""
+ae.chart.text — render a chart's titer table as aligned text.
+"""
 import re
 
 import ae_backend.chart_v3, ae_backend.virus
@@ -8,6 +11,9 @@ from ..utils.num_digits import num_digits
 # ======================================================================
 
 def text(chart: ae_backend.chart_v3.Chart) -> str:
+    """Return the chart info followed by its full antigen×serum titer table (antigen
+    name/passage/date/ref/seq flags down the side, sera across the top) and a serum key,
+    all formatted as aligned text."""
     # ag_no, name, passage, date, ref, seq, sera...]
     header_prefix = ["", "", "", "", "", ""]
     all_antigens = chart.select_all_antigens()

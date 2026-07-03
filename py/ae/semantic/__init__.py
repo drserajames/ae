@@ -1,3 +1,4 @@
+"""ae.semantic — semantic-attribute and plot-style helpers for antigenic charts."""
 from . import clade
 from . import continent
 from . import front_style

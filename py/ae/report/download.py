@@ -1,5 +1,14 @@
 # Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/download.py — Phase 1 engine/library tier.
 # chart download/relax/orient/merge (ae_backend.chart_v3). See py/ae/report/MIGRATION.md.
+"""
+ae.report.download — fetch and prepare the source chart for a report directory.
+
+`Downloader` pulls the per-dir source chart — the latest (or a pinned / exactly-reproduced)
+incremental from the antigenic chain over ssh, or a seed from the previous report — then
+populates it from seqdb and can merge, relax, grid-test, orient and write `downloaded.ace`.
+Its methods return `self` for chaining, and `self.updated` tracks whether the chart changed.
+Ported from the vcm ssm-report tooling.
+"""
 import sys, os, subprocess
 from pathlib import Path
 from typing import Callable
@@ -17,12 +26,20 @@ Chart = ae_backend.chart_v3.Chart
 # ======================================================================
 
 class Downloader:
+    """Fetches and prepares the per-dir source chart. Chain the builder methods (each returns
+    `self`): typically `from_chain(...).populate_from_seqdb().export_downloaded()`.
+    `self.updated` records whether the chart actually changed, gating the later steps."""
 
     CHAIN_ROOT = Path("/syn/eu/ac/results/chains-202105")
 
     # ----------------------------------------------------------------------
 
     def from_chain(self, subtype_dir_name: str, chain_name: str | None = None):
+        """Download this subtype's chart from the incremental chain over ssh into
+        `downloaded.raw.ace`, skipping the transfer when the sha1 already matches. Honours
+        `$VCM_CHAIN_REPRODUCE` (fetch the chain file whose sha1 matches this dir's recorded
+        one, reconstructing an earlier report's exact chart) and `$VCM_CHAIN_INCREMENTAL`
+        (pin to an older chain point by filename substring)."""
         subtype_dir: Path = self.CHAIN_ROOT.joinpath(subtype_dir_name)
         local_ace_file = ae.report.dirs.VcmDirs.downloaded_raw_filename()
         local_sha1_filename = local_ace_file.with_suffix(".sha1")
@@ -76,6 +93,9 @@ class Downloader:
     # ----------------------------------------------------------------------
 
     def use_previous(self, previous: Path, rotate: float | None = None):
+        """Seed the chart from the `previous` report's chart (optionally rotating its
+        projection), populate from seqdb and export — but only when `downloaded.ace` does not
+        already exist."""
         if not ae.report.dirs.VcmDirs.downloaded_filename().exists():
             self.chart = Chart(previous)
             self.updated = True
@@ -92,6 +112,7 @@ class Downloader:
     # ----------------------------------------------------------------------
 
     def orient_to(self, orient_to: str | Path | Chart):
+        """Orient the chart's projection to a master chart (a path or a `Chart`)."""
         if isinstance(orient_to, Chart):
             master = orient_to
         else:
@@ -100,6 +121,8 @@ class Downloader:
         return self
 
     def populate_from_seqdb(self, even_if_not_updated: bool = False):
+        """Populate the chart's sequences from seqdb — only when the chart changed, unless
+        `even_if_not_updated`."""
         if even_if_not_updated or self.updated:
             with timeit(f"populating from seqdb"):
                 self.chart.populate_from_seqdb()
@@ -107,6 +130,8 @@ class Downloader:
         return self
 
     def export_downloaded(self, even_if_not_updated: bool = False):
+        """Write the chart to `downloaded.ace` — only when it changed, unless
+        `even_if_not_updated`."""
         if even_if_not_updated or self.updated:
             self.chart.write(ae.report.dirs.VcmDirs.downloaded_filename())
         return self
@@ -114,6 +139,8 @@ class Downloader:
     # ----------------------------------------------------------------------
 
     def merge(self, sources: list[Path], remove_antigens: MaybeCallable = None, remove_sera: MaybeCallable = None, match: str = "strict", merge_type: str = "simple", report: bool = True):
+        """Merge `sources` into the chart (combining cheating assays, keeping duplicates
+        distinct), optionally removing the selected antigens/sera afterwards."""
         self.chart = ae.chart.merge(sources=sources, match=match, merge_type=merge_type, combine_cheating_assays=True, duplicates_distinct=True, report=False)
         if remove_antigens is not None or remove_sera is not None:
             self.chart.remove_antigens_sera(antigens=self.chart.select_antigens(remove_antigens) if remove_antigens else None, sera=self.chart.select_sera(remove_sera) if remove_sera else None)
@@ -123,6 +150,8 @@ class Downloader:
         return self
 
     def is_the_same_as(self, filename: Path):
+        """Whether `filename`'s chart matches the current one in antigen, serum, titer-layer
+        and source counts (clears `updated` when it does)."""
         if not filename.exists():
             return False
         downloaded_chart = Chart(filename)
@@ -155,6 +184,8 @@ class Downloader:
         return self
 
     def grid(self, report: bool = True):
+        """Run the grid test and, if any trapped/hemisphering points are found, move them
+        (marking the chart updated)."""
         if (grid_test := self.chart.grid_test()).count_trapped_hemisphering():
             for en in grid_test.trapped_hemisphering():
                 print(en)
@@ -175,6 +206,7 @@ class Downloader:
         return self
 
     def remove_styles(self):
+        """Remove all plot styles from the chart."""
         self.chart.styles().remove()
         return self
 

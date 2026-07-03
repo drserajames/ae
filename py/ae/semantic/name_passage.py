@@ -1,3 +1,10 @@
+"""
+ae.semantic.name_passage — set a semantic attribute on antigens matched by name + passage.
+
+`attributes` matches configured strains (by name, across cell/egg/reassortant passages) and
+tags the best match with a semantic key, returning a `Result` that reports what was matched.
+Used by the serology (and similar) selections.
+"""
 import sys, pprint
 import ae_backend
 from ..utils.num_digits import num_digits
@@ -9,8 +16,12 @@ from .name_generator import NameGenerator
 sPassages = ["cell", "egg", "reassortant"]
 
 class Result:
+    """Accumulates the antigens matched per name/passage during an `attributes` run and
+    formats a report of them."""
 
     def __init__(self, chart: ae_backend.chart_v3.Chart):
+        """Bind the result to `chart` and record its antigen-count width and whether it has
+        titer layers."""
         self.data: dict[str, object] = {}        # {name: {"year": year, "surrogate": False, passage: [antigens]}}
         self.chart = chart
         self._ag_no_num_digits = num_digits(self.chart.number_of_antigens())
@@ -20,9 +31,12 @@ class Result:
         return f"{header_prefix or ''}{name}"
 
     def __bool__(self):
+        """True if any matches were recorded."""
         return bool(self.data)
 
     def report(self, header_prefix: str = None) -> str:
+        """Formatted multi-line listing of the matched antigens per name/passage (empty
+        string if none)."""
         if not self.data:
             return ""
         return "\n".join(self._format_entry(name, header_prefix) for name in sorted(self.data, key=self._sorting_key))

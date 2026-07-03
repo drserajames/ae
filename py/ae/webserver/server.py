@@ -132,6 +132,8 @@ def titer_table(path: os.PathLike | str) -> dict:
 
 
 class ChartHandler(BaseHTTPRequestHandler):
+    """HTTP request handler serving chart data and HTML pages from the chart directory
+    (`root`, injected by `ChartServer` via a bound subclass)."""
     server_version = "ae-chart-server/1.0"
 
     # injected by ChartServer
@@ -178,6 +180,8 @@ class ChartHandler(BaseHTTPRequestHandler):
     # -- routing --------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802 — http.server API
+        """Route a GET request: `/` → index page, `/api/*` → JSON chart-data endpoints,
+        other paths → HTML pages; errors are returned as JSON or HTML per route."""
         parts = urlsplit(self.path)
         route = parts.path.rstrip("/") or "/"
         query = parse_qs(parts.query)
@@ -246,6 +250,7 @@ class ChartHandler(BaseHTTPRequestHandler):
 
     # quieter default logging
     def log_message(self, fmt: str, *args) -> None:
+        """Suppress per-request logging when the server is in `quiet` mode, else log normally."""
         if self.server.quiet:  # type: ignore[attr-defined]
             return
         super().log_message(fmt, *args)
@@ -275,6 +280,8 @@ class ChartServer(ThreadingHTTPServer):
         keyfile: str | None = None,
         quiet: bool = False,
     ) -> None:
+        """Bind a threaded chart server serving `root` on `host:port`, optionally over TLS
+        (`certfile`/`keyfile`). Raises NotADirectoryError if `root` is not a directory."""
         self.root = Path(root).resolve()
         if not self.root.is_dir():
             raise NotADirectoryError(f"served root is not a directory: {self.root}")
@@ -292,6 +299,7 @@ class ChartServer(ThreadingHTTPServer):
 
     @property
     def url(self) -> str:
+        """The server's base URL (`scheme://host:port/`)."""
         host, port = self.server_address[:2]
         return f"{self.scheme}://{host}:{port}/"
 
@@ -319,6 +327,7 @@ def serve(
 
 # convenience for tests: run a server in a background thread
 def serve_in_thread(server: ChartServer) -> threading.Thread:
+    """Start `server.serve_forever()` on a daemon thread and return it (convenience for tests)."""
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return thread

@@ -1,3 +1,12 @@
+"""
+ae.semantic.vaccine — find vaccine strains and set their `V` semantic attribute + styles.
+
+`find` matches the report's configured vaccine strains against a chart's antigens (grouped
+by passage: cell / egg / reassortant), `set_semantic` tags the chosen ones with the `V`
+semantic attribute (a code encoding year, passage and surrogate/current flags), and
+`collect_data_for_styles` / `update` / `style` turn that into the `-vaccines*` plot styles.
+Vaccine definitions come from acmacs-data's `semantic-vaccines.py`.
+"""
 import sys, pprint, json
 from typing import Optional
 import ae_backend.chart_v3
@@ -8,23 +17,33 @@ from .name_generator import NameGenerator
 # ======================================================================
 
 class Vaccine:
+    """One vaccine strain across its passage variants: name/year/surrogate flags plus the
+    matched antigen `Entry` lists per passage (`cell` / `egg` / `reassortant`, from
+    `PASSAGES`)."""
 
     class Entry:
+        """One matched antigen for a vaccine: its antigen index `no`, the `Antigen`, and the
+        titer `layers` it appears in."""
 
         def __init__(self, no: int, antigen: ae_backend.chart_v3.Antigen, layers: list):
+            """Record the antigen index, object and layer list."""
             self.no = no
             self.antigen = antigen
             self.layers = layers
 
         def __str__(self):
+            """`<no> <designation> (layers: N)` summary."""
             return f"{self.no:4d} {self.antigen.designation()} (layers: {len(self.layers)})"
 
         def to_dict(self):
+            """Plain-dict form (`no`, `designation`, `layers`)."""
             return {"no": self.no, "designation": self.antigen.designation(), "layers": self.layers}
 
     # ----------------------------------------------------------------------
 
     def __init__(self, name: str, year: Optional[str], surrogate: bool):
+        """Create an empty vaccine; each passage attribute in `PASSAGES` starts as an empty
+        list."""
         self.name = name
         self.year = year
         self.surrogate = surrogate
@@ -35,9 +54,13 @@ class Vaccine:
             setattr(self, passage, [])
 
     def __bool__(self):
+        """True if any passage has at least one matched antigen."""
         return any(bool(getattr(self, passage, None)) for passage in PASSAGES)
 
     def semantic_vaccine(self, entry: Entry, current_vaccine_years: list[str] = []):
+        """Set the `V` semantic attribute on `entry`'s antigen — a code combining the year,
+        the passage letter (egg/cell/reassortant/none), a surrogate `s`, and a trailing `C`
+        when the year is in `current_vaccine_years`."""
         if entry.antigen.reassortant():
             passage = "reassortant"
         elif entry.antigen.passage().is_egg():
@@ -53,9 +76,12 @@ class Vaccine:
         entry.antigen.semantic.vaccine(val)
 
     def __repr__(self):
+        """JSON dump of the vaccine's name/year/surrogate and its cell/egg/reassortant entries."""
         return (json.dumps({"name": self.name, "year": self.year, "surrogate": self.surrogate, "cell": [en.to_dict() for en in self.cell], "egg": [en.to_dict() for en in self.egg], "reassortant": [en.to_dict() for en in self.reassortant]}))
 
     def report(self) -> list[str]:
+        """Multi-line human-readable listing of the vaccine and its matched antigens per
+        passage."""
         result = [f"{self.name} [{self.year}]{' <surrogate>' if self.surrogate else ''}"]
         for passage_type in PASSAGES:
             for no, en in enumerate(getattr(self, passage_type, [])):
@@ -68,6 +94,8 @@ class Vaccine:
 
     @classmethod
     def make(cls, chart: ae_backend.chart_v3.Chart, finder: AntigenFinder, name: str, year: str = None, passage: str = None, surrogate: bool = False, **ignored):
+        """Build a `Vaccine` by finding the antigens matching `name`/`passage` with the
+        `AntigenFinder`, grouped into the passage attributes."""
         vaccine = Vaccine(name=name, year=year, surrogate=surrogate)
         for psg, found in finder.find(name=name, passage=passage).items():
             setattr(vaccine, psg, [cls.Entry(**en) for en in found])
@@ -87,6 +115,7 @@ def find(chart: ae_backend.chart_v3.Chart, semantic_attribute_data: list, report
     return data
 
 def report(vaccines_found: list[Vaccine]) -> list[str]:
+    """Concatenated `report()` listings for several vaccines, separated by blank lines."""
     result: list[str] = []
     for en in vaccines_found:
         if result:
@@ -105,9 +134,13 @@ def set_semantic(vaccines_found: list[Vaccine], current_vaccine_years: list[str]
     """
 
     def is_disbaled(vac: Vaccine, selector: dict[str, list[str]]) -> bool:
+        """Whether `vac` matches a disable selector (any of its name/year attributes is in
+        the listed values)."""
         return any(getattr(vac, attr_name, None) in vals for attr_name, vals in selector.items())
 
     def get_index(vac: Vaccine, selector: list[dict[str, str|int]]) -> int:
+        """Chosen passage-list index for `vac` from a `choose` selector (the first entry
+        whose name/year matches), or 0 if none matches."""
         # print(f">>>> get_index {vac}", file=sys.stderr)
         for sel in selector:
             if any(getattr(vac, attr_name, None) == val for attr_name, val in sel.items() if attr_name != "index"):
@@ -144,6 +177,7 @@ def collect_data_for_styles(chart: ae_backend.chart_v3.Chart):
 # ----------------------------------------------------------------------
 
 def default_field_order():
+    """Column order for the vaccine data org-table report."""
     return ["no", "designation", "lox", "loy", "fill", "fill_v1", "fill_v2", "fill_ts", "label", "semantic", "label_size", "size", "outline_width"]
 
 # ----------------------------------------------------------------------
@@ -154,6 +188,8 @@ def update(collected: list[dict[str, object]], user: list[dict[str, object|str]]
     user_ref = {en[match_by]: en for en in user}
 
     def upd(src: Optional[dict[str, object]], upd: dict[str, object]) -> Optional[dict[str, object]]:
+        """Overlay the non-empty fields of `upd` onto a copy of `src` (skipping the match
+        key; warns on a `no` mismatch). Returns None if `src` is None."""
         if not src:
             return None
         res = {**src}
@@ -190,13 +226,18 @@ def style(chart: ae_backend.chart_v3.Chart, style_name: str, data: list[dict[str
 # ----------------------------------------------------------------------
 
 def extract_point_modifier_data(source: dict[str, object], data_key_mapping: dict[str, str], label_modifier: dict) -> dict[str, object]:
+    """Build the kateri point-modifier dict for one vaccine from its data row, applying
+    `data_key_mapping` (e.g. `fill`→`fill_ts`) and merging in the label modifier; keys whose
+    value is None are dropped."""
     def get_float(key: str) -> float:
+        """`source[key]` as a float, or None if absent."""
         if (val := source.get(key)) is not None:
             return float(val)
         else:
             return None
 
     def get_bool(key: str) -> bool:
+        """`source[key]` as a bool (truthy strings t/true/y/yes/1), or None if absent."""
         if (val := source.get(key)) is not None:
             return val.lower() in ["t", "true", "y", "yes", "1"]
         else:

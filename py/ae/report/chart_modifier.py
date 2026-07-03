@@ -1,5 +1,19 @@
 # Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/chart_modifier.py — Phase 1b engine tier.
 # base ChartModifier(ConferenceData) — semantic styling. See py/ae/report/MIGRATION.md.
+"""
+ae.report.chart_modifier — semantic-styling base class for report charts.
+
+`ChartModifier` turns a bare `.ace` chart into a fully-styled one for the seasonal report.
+It writes two kinds of thing onto the chart: **semantic attributes** on antigens/sera
+(clade, reference, passage, continent, older-than, new-compared-to-previous, vaccine,
+serology) and named **styles** — background styles (`-reset`, `-clades*`, `-vaccines*`,
+`-serology`, time-series, serum-circles) and the composed front styles the report and
+kateri render. The `populate_for_prestyle` / `populate_for_style` entry points drive the
+two passes. Most getters here are subtype/chart-specific override hooks (sizes, colours,
+viewports, clade/vaccine/serology data sources); subclasses fill them in. Clade, vaccine
+and serology definitions come from the `semantic_clades` / `semantic_vaccines` acmacs-data
+modules and the per-report `serology` module. Ported from the vcm ssm-report tooling.
+"""
 import sys, json, asyncio
 from pathlib import Path
 from typing import Any, Optional, Callable
@@ -27,6 +41,8 @@ class ChartModifier (conference_data_base.ConferenceData):
     "Base class for adding semantic styles to the chart"
 
     def __init__(self, chart: ae_backend.chart_v3.Chart | Path | None = None):
+        """Load or accept the chart to style: an `ae_backend.chart_v3.Chart`, a `Path` to an
+        `.ace` file, or None to open the report dir's `downloaded.ace`."""
         super().__init__()
         if isinstance(chart, ae_backend.chart_v3.Chart):
             self.chart = chart
@@ -42,19 +58,26 @@ class ChartModifier (conference_data_base.ConferenceData):
         self.vaccine_data_for_sig_pages = []
 
     def populate_for_prestyle(self):
+        """Prestyle pass: add the prestyle semantic attributes, then the prestyle
+        (reset/clade/vaccine) styles."""
         self.populate_with_attributes_for_prestyle()
         self.populate_with_prestyles()
 
     def populate_for_style(self):
+        """Full style pass: add all semantic attributes, then all background/front styles."""
         self.populate_with_attributes_for_style()
         self.populate_with_styles()
 
     def populate_with_attributes_for_prestyle(self):
+        """Set the clade, reference (`R`) and passage (`p`) semantic attributes on
+        antigens/sera."""
         semantic.clade.attributes(chart=self.chart, entries=self.semantic_attribute_clades())
         semantic.reference.attributes(chart=self.chart)  # Set reference ("R") semantic attribute for reference antigens
         semantic.passage.attributes(chart=self.chart)  # Set passage type ("p") semantic attributes for all antigens and sera
 
     def populate_with_attributes_for_style(self):
+        """Prestyle attributes plus older-than, continent (`C9`) / country (`c9`), and the
+        per-previous-chart `new` attributes (previous-previous first, then previous)."""
         self.populate_with_attributes_for_prestyle()
         semantic.older_than.attributes(chart=self.chart, conferencence_date=self.conferencence_date())
         semantic.continent.attributes(chart=self.chart)  # Set continent ("C9") and country ("c9") semantic attributes for all antigens and sera
@@ -63,6 +86,9 @@ class ChartModifier (conference_data_base.ConferenceData):
         # semantic.serum_circle.attributes(chart=self.chart)
 
     def populate_with_prestyles(self):
+        """Rebuild the chart's styles from scratch: the `-reset` and `-vaccines*` background
+        styles, the per-clade background styles, and the by-clade front styles (plain,
+        since-6m, since-12m) across every zoom variant and in plain and `info-` forms."""
         self.chart.styles().remove()
         self.add_reset_style()
         self.add_vaccines_style()
@@ -78,12 +104,18 @@ class ChartModifier (conference_data_base.ConferenceData):
             for clade_style_name in self.semantic_styles_clades():
                 for info in ["", "info-"]:
                     def make_references(before_vaccines: str|None = None):
+                        """Reference list for one by-clade front style: reset (zoom), clade,
+                        new-2/new-1, and the vaccines style (no-label for info maps).
+                        `before_vaccines` inserts extra references just before vaccines."""
                         refs = [f"-reset{zoom_variant}", f"-{clade_style_name}", "-new-2", "-new-1", (vaccines_style_name + "-no-label") if info else vaccines_style_name]
                         if before_vaccines:
                             refs[-1:-1] = before_vaccines
                         return refs
 
                     def make_args(since: str|None = None):
+                        """Front-style kwargs: blank title and no legend for `info-` maps,
+                        else the lab/subtype by-clade title (with `(since …)` when given)
+                        and a counted legend."""
                         if info:
                             return {"title": " ", "show_legend": False}
                         else:
@@ -114,6 +146,8 @@ class ChartModifier (conference_data_base.ConferenceData):
     #     semantic.time_series.style_old_new(chart=self.chart, old_size=self.ts_old_size(), new_size=self.ts_new_size(), priority=self.style_priority("-ts-old-new"))
 
     def populate_with_styles(self):
+        """Prestyles plus the full-report styles: serology, older-than, continent, pale,
+        new-compared-to, and the time-series styles (including old/new sizing)."""
         self.populate_with_prestyles()
         self.add_serology_style()
         semantic.older_than.style(chart=self.chart, priority=self.style_priority("-o6m-grey"))
@@ -135,6 +169,9 @@ class ChartModifier (conference_data_base.ConferenceData):
                 priority += 1
 
     def add_reset_style(self, style_name: str = "-reset"):
+        """Build the per-zoom `-reset` background style: the viewport plus default sizes for
+        test antigens, reference antigens (`R`) and sera; then `reset_style_additions` for
+        chart-specific tweaks."""
         for zoom_variant in self.zoom_variants():
             style = self.chart.styles()[style_name + zoom_variant]
             style.priority = self.style_priority(style_name)
@@ -145,9 +182,15 @@ class ChartModifier (conference_data_base.ConferenceData):
             self.reset_style_additions(style=style, zoom_variant=zoom_variant)
 
     def reset_style_additions(self, style: ae_backend.chart_v3.SemanticStyle, zoom_variant: str):
+        """Hook for chart-specific additions to the reset style (e.g. hiding certain
+        antigens/sera). Default: no-op."""
         pass                    # override (chart specific, e.g. to hide antigens/sera)
 
     def add_vaccines_style(self):
+        """Find the vaccine strains, set their `vaccine` semantic attribute (honouring
+        `vaccine_disable` / `vaccine_choose`), and build the `-vaccines*` background styles
+        — one per clade version, a `-no-label` variant, and a time-series variant. Also
+        records per-vaccine fill/label data for the signature pages."""
         vaccs = semantic.vaccine.find(chart=self.chart, semantic_attribute_data=self.semantic_attribute_vaccines(), report=False)
         # set semantic attribute for the strains with the most layers (or choose another variant if necessary using self.vaccine_choose())
         semantic.vaccine.set_semantic(vaccs, current_vaccine_years=self.current_vaccine_years(), disable=self.vaccine_disable(), choose=self.vaccine_choose())
@@ -174,6 +217,9 @@ class ChartModifier (conference_data_base.ConferenceData):
         # semantic.select_mark.style(chart=chart, style_name="-vic", antigen_selector=lambda ag: "VICTORIA/2570/2019" in ag.name)
 
     def add_serology_style(self):
+        """Find the serology antigens, mark them (`serology` semantic attribute), and build
+        the `-serology` background style and the `serology` front style (map of the chart
+        with serology antigens highlighted)."""
         semantic.serology.remove_serology(self.chart)
         serology_antigens = semantic.serology.find(chart=self.chart, semantic_attribute_data=self.semantic_attribute_serology(), report=self.serology_report())
         for serology_antigen_en in serology_antigens:
@@ -194,12 +240,19 @@ class ChartModifier (conference_data_base.ConferenceData):
         semantic.front_style.add(chart=self.chart, style_name="serology", references=["-reset", f"-{self.serology_clade_style()}", "-pale", "-serology", vaccines_style_name], title=f"{self.title_lab_subtype()} with serology antigens", title_style=self.title_style(), show_legend=True, legend_counter=True, style_priority=self.style_priority("serology"))
 
     def serology_report(self) -> bool:
+        """Whether to print the serology-antigen selection report (default False)."""
         return False
 
     def serology_clade_style(self) -> str:
+        """Clade style used as the base for the serology front map (the first clade style)."""
         return list(self.semantic_styles_clades())[0]
 
     def add_serum_coverage_styles(self, serum_selector: Callable | None = None, fold: float = 2.0, mark_serum: dict[str, str | float | bool] | None = {"size": 36.0, "fill": "black", "outline": "black", "raise_": True}):
+        """Build per-serum coverage styles. For each selected serum (all sera if no
+        `serum_selector`): the empirical and theoretical serum-circle background styles
+        (`-sci-*`), the serum-coverage style (`-sco-*`), and the `sc-*` front styles across
+        zoom variants, optionally marking the serum point (`mark_serum`). `fold` is the
+        titre fold used for the circle radius."""
         clade_style_name = self.style_for_serum_coverage_plot_spec()
         sc_back_style_priority = self.style_priority("-sci")
         sc_front_style_priority = self.style_priority("sc")
@@ -228,6 +281,8 @@ class ChartModifier (conference_data_base.ConferenceData):
             sc_back_style_priority += 1
 
     def title_for_serum_coverage(self, serum_no: int, serum: ae_backend.chart_v3.Serum) -> str:
+        """Title for a serum-coverage map: the lab/subtype by-clade line, the serum
+        designation, and the serum's (last) clade."""
         if clades := serum.semantic.clades():
             clade = clades[-1]
         else:
@@ -235,12 +290,16 @@ class ChartModifier (conference_data_base.ConferenceData):
         return f"{self.title_lab_subtype()} {self.title_by_clade()}\n{serum.designation()}\n{clade}"
 
     def style_for_legacy_plot_spec(self) -> str:
+        """Clade style name matching the legacy plot spec — override per subtype. Raises
+        NotImplementedError in the base."""
         raise NotImplementedError("override in derived (subtype specific)")
 
     def style_for_style_command(self) -> str:
+        """Clade style used by the `style` command (default: the legacy plot-spec style)."""
         return self.style_for_legacy_plot_spec()
 
     def style_for_serum_coverage_plot_spec(self) -> str:
+        """Clade style used for serum-coverage maps (default: the legacy plot-spec style)."""
         return self.style_for_legacy_plot_spec()
 
     def zoom_variants(self) -> list[str]:
@@ -248,29 +307,40 @@ class ChartModifier (conference_data_base.ConferenceData):
         return [""]
 
     def viewport(self, zoom_variant: str) -> list[float]:
+        """Map viewport `[x, y, size]` for a zoom variant — override per chart. Raises
+        NotImplementedError in the base."""
         raise NotImplementedError("override in derived (chart specific)")
 
     def reset_test_antigen_size(self) -> float:
+        """Point size for test antigens in the reset style (default 20)."""
         return 20.0
 
     def reset_reference_antigen_size(self) -> float:
+        """Point size for reference antigens in the reset style (default 20)."""
         return 20.0
 
     def reset_serum_size(self) -> float:
+        """Point size for sera in the reset style (default 20)."""
         return 20.0
 
     def ts_new_size(self) -> float:
+        """Point size for new (this-period) antigens in the time series (default 25)."""
         return 25.0
 
     def ts_old_size(self) -> float:
+        """Point size for old antigens in the time series (default 15)."""
         return 15.0
 
     def vaccine_disable(self) -> dict[str, dict[str, list[str]]]:
+        """Per-subtype map of vaccine strains to disable (not mark as vaccine) — override;
+        default none."""
         # subtype specific
         # {"any": {"name": ["CALIFORNIA/7/2009", "MICHIGAN/45/2015", "BRISBANE/2/2018"]}}
         return {}
 
     def vaccine_choose(self) -> dict[str, list[dict[str, str | int]]]:
+        """Per-chart map choosing which passage variant of a vaccine strain to mark (by
+        name or year → index) — override; default none."""
         # chart specific
         # choose: {"egg": [{"name": "VICTORIA/2570/2019", "index": 1}]} use "name" or "year" as a selector to choose index (default is 0) to get from list for passage
         return {}
@@ -280,30 +350,41 @@ class ChartModifier (conference_data_base.ConferenceData):
         return None
 
     def vaccine_user_data(self) -> list[dict[str, str | bool | int | float]]:
+        """Per-chart vaccine style overrides (fill, label offsets, …) — override. Raises
+        NotImplementedError in the base."""
         raise NotImplementedError("override in derived (chart specific)")
 
     def vaccine_size(self) -> float:
+        """Vaccine marker size (default 40)."""
         return 40.0
 
     def vaccine_label_size(self) -> float:
+        """Vaccine label text size (default 30)."""
         return 30.0
 
     def vaccine_label_color(self) -> str:
+        """Vaccine label colour (default black)."""
         return "black"
 
     def vaccine_outline_width(self) -> float:
+        """Vaccine marker outline width (default 1)."""
         return 1.0
 
     def serology_user_data(self) -> list[dict[str, str | bool | int | float]]:
+        """Per-chart serology style overrides — override. Raises NotImplementedError in the
+        base."""
         raise NotImplementedError("override in derived (chart specific)")
 
     def serology_size(self) -> float:
+        """Serology marker size (default 50)."""
         return 50.0
 
     def serology_label_size(self) -> float:
+        """Serology label text size (default 24)."""
         return 24.0
 
     def serology_outline_width(self) -> float:
+        """Serology marker outline width (default 1)."""
         return 1.0
 
     sStylePriorities: dict[str, int] = {
@@ -326,62 +407,89 @@ class ChartModifier (conference_data_base.ConferenceData):
     }
 
     def style_priority(self, style_name: str) -> int:
+        """Fixed draw-order priority for a named style (0 if unknown). See `sStylePriorities`."""
         return self.sStylePriorities.get(style_name, 0)
 
     def legend_style(self) -> dict[str, float]:
+        """Legend layout parameters (point size, interline spacing, text size)."""
         return {"point_size": 15.0, "interline": 0.4, "text_size": 20.0}
 
     def title_style(self) -> dict[str, Any]:
+        """Map-title text style (top-left offset/origin, size, bold helvetica, black)."""
         return {"offset": [19.0, 12.0], "origin": "tl", "size": 25, "weight": "bold", "slant": "normal", "face": "helvetica", "color": "black", "interline": 0.2}
 
     def subtype(self) -> str:
+        """Chart subtype, e.g. "A(H1N1)" / "A(H3N2)" — override. Raises NotImplementedError
+        in the base."""
         raise NotImplementedError("override in derived: \"A(H1N1)\", \"A(H3N2)\"")
 
     def title_subtype(self) -> str:
+        """Subtype string as shown in titles — override. Raises NotImplementedError in the
+        base."""
         raise NotImplementedError("override in derived")
 
     def title_lab_subtype(self) -> str:
+        """Combined lab + subtype title prefix."""
         return f"{self.title_lab()} {self.title_subtype()}"
 
     def title_by_clade(self) -> str:
+        """The "by clade" title fragment."""
         return "by clade"
 
     def chart_name_prefix(self) -> str:
+        """Short chart directory name (e.g. "h1-cdc"): from `standard_vcm_chart_dir()`, else
+        override in the subclass. Raises NotImplementedError if neither applies."""
         if nam := self.standard_vcm_chart_dir():
             return nam
         else:
             raise NotImplementedError("override in derived, should return e.g. \"h1-cdc\"")
 
     def semantic_attribute_clades(self) -> list[dict[str, str]]:
+        """Clade semantic-attribute definitions for this subtype, from `semantic_clades`
+        (acmacs-data)."""
         return semantic_clades.semantic_attribute_data_for_subtype(self.subtype())["clades"]
 
     def semantic_styles_clades(self) -> dict[str, list[dict[str, str]]]:
+        """Clade plot-spec (style) definitions for this subtype, from `semantic_clades`."""
         return semantic_clades.semantic_plot_spec_data_for_subtype(self.subtype())
 
     def semantic_styles_versions(self) -> set[str]:
+        """Set of clade-style version suffixes present (e.g. `{"v10"}` / `{"ts"}`)."""
         return set(self._clades_version_suffix(semantic_style_name, infix="") for semantic_style_name in self.semantic_styles_clades())
 
     def semantic_attribute_vaccines(self) -> list[dict[str, str]]:
+        """Vaccine semantic-attribute definitions for this subtype, from `semantic_vaccines`."""
         return semantic_vaccines.semantic_attribute_data_for_subtype(self.subtype())["vaccines"]
 
     def semantic_styles_vaccines(self) -> dict[str, list[dict[str, str]]]:
+        """Vaccine plot-spec definitions for this subtype, from `semantic_vaccines`."""
         return semantic_vaccines.semantic_plot_spec_data_for_subtype(self.subtype())
 
     def semantic_attribute_serology(self) -> list[dict[str, str]]:
+        """Serology semantic-attribute definitions for this subtype, from the per-report
+        `serology` module."""
         return serology.semantic_attribute_data_for_subtype(self.subtype())["serology"]
 
     def semantic_styles_serology(self) -> dict[str, list[dict[str, str]]]:
+        """Serology plot-spec definitions for this subtype, from the per-report `serology`
+        module."""
         return serology.semantic_plot_spec_data_for_subtype(self.subtype())
 
     def export_styles(self) -> list[str]:
+        """Front-style names to export as the main maps — override per subtype. Raises
+        NotImplementedError in the base."""
         raise NotImplementedError("override in derived (subtype specific)")
 
     def export_info_styles(self) -> list[str]:
+        """Front-style names to export as info maps — override per subtype. Raises
+        NotImplementedError in the base."""
         raise NotImplementedError("override in derived (subtype specific)")
 
     # ----------------------------------------------------------------------
 
     def serum_coverage_circle_style(self) -> dict:
+        """Default serum-circle appearance for coverage maps: per-passage (egg/cell/
+        reassortant) outline and translucent fill colours, outline width and dash."""
         return {
             "outline": {"egg": "red", "cell": "blue", "reassortant": "orange"},
             "fill": {"egg": "#18FF0000", "cell": "#180000FF", "reassortant": "#18FFA500"},
@@ -392,6 +500,8 @@ class ChartModifier (conference_data_base.ConferenceData):
     # ----------------------------------------------------------------------
 
     def previous_charts(self) -> list[Path]:
+        """Paths of the previous-report charts used for `new`-attribute marking: one for a
+        tc1 report, two otherwise, with any not-found charts dropped."""
         current_name = self.chart_name_prefix()
         if self.tc_ssm_dir_path().name.split("-")[-1] == "tc1":
             # just one previous
@@ -403,12 +513,16 @@ class ChartModifier (conference_data_base.ConferenceData):
         return [pcc for pcc in pc if pcc is not None]
 
     def _clades_version_suffix(self, clade_style_name: str, infix: str):
+        """Version suffix of a clade style name (`clades-v10` → `v10`, `clades-ts` → `ts`)
+        with `infix` prepended, or an empty string for the unversioned `clades` style."""
         if (suffix := clade_style_name.replace("clades-", ""))[0] == "v" or suffix == "ts":
             return infix + suffix
         else:
             return ""
 
     async def export_mapi_for_signature_pages(self, filename: Path, style: str):
+        """Write a `.mapi` JSON file (map viewport plus vaccine markers) for the
+        signature-page renderer, querying kateri for the current viewport under `style`."""
         kateri.communicator.set_style(style)
         viewport_data = await kateri.communicator.get_viewport()
         viewport = [
@@ -425,6 +539,8 @@ class ChartModifier (conference_data_base.ConferenceData):
         print(f">>>> export_mapi_for_signature_pages {viewport}", file=sys.stderr)
 
     def orient_to(self, master: ae_backend.chart_v3.Chart | Path):
+        """Orient this chart's projection to match a `master` chart (an
+        `ae_backend.chart_v3.Chart` or a `.ace` Path)."""
         if isinstance(master, Path):
             if master.exists():
                 master = ae_backend.chart_v3.Chart(master)

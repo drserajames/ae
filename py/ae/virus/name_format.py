@@ -1,3 +1,11 @@
+"""
+ae.virus.name_format — format virus names / antigens / sera via `{...}` format-string keys.
+
+`name_format(x, format)` fills a Python format string from a parsed virus name (and, for an
+antigen/serum, its designation, passage, sequence, etc.). `{?}` in the format string lists
+the available keys. The `MappingName` / `MappingAntigenSerum` `dict` subclasses do the key
+resolution for `str.format_map`.
+"""
 import ae_backend
 
 # ----------------------------------------------------------------------
@@ -15,11 +23,17 @@ def name_format(name: str | ae_backend.chart_v3.Antigen | ae_backend.chart_v3.Se
 # ----------------------------------------------------------------------
 
 class MappingName (dict):
+    """A `format_map` mapping that resolves `{key}` fields from a parsed virus name (its
+    parts, plus derived keys like `location_year_abbreviated`). Unknown keys pass through as
+    the literal `{key}`; `{?}` expands to the list of available keys."""
 
     def __init__(self, parsed_name: ae_backend.virus.VirusNameParsingResult):
+        """Wrap a parsed virus name."""
         self.parsed_name = parsed_name
 
     def __missing__(self, key):
+        """Resolve `{key}`: `{?}` → the list of available keys; a known key → its value;
+        otherwise the literal `{key}`."""
         if key == "?":
             return self._format_keys(self._raw(key))
         elif (value := self._raw(key)) is not None:
@@ -116,12 +130,18 @@ sUSStatesAbbreviations = {
 # ----------------------------------------------------------------------
 
 class MappingAntigenSerum (MappingName):
+    """`MappingName` extended with antigen/serum keys (designation, passage, serum id,
+    sequence `aa`/`nuc`, and per-position `aa-<no>` / `laa-<no>` / `nuc-<no>` / …)."""
 
     def __init__(self, parsed_name: ae_backend.virus.VirusNameParsingResult, ag_sr: ae_backend.chart_v3.Antigen | ae_backend.chart_v3.Serum):
+        """Wrap a parsed name together with its antigen/serum object."""
         super().__init__(parsed_name)
         self.ag_sr = ag_sr
 
     def __missing__(self, key):
+        """Resolve `{key}`, adding antigen/serum keys (designation, passage, sequence
+        `aa`/`nuc`, per-position `aa-<no>` / `laa-<no>` / `nuc-<no>`, …) on top of the name
+        keys."""
         if key == "?":
             if isinstance(self.ag_sr, ae_backend.chart_v3.Antigen):
                 return self._format_keys(set(super()._raw(key)) | {"designation", "passage", "passage_without_date", "reassortant", "annotations", "date", "lab_id", "aa", "aa-<no>", "laa-<no>", "nuc", "nuc-<no>", "lnuc-<no>"})

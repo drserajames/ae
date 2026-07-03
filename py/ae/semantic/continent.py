@@ -1,3 +1,6 @@
+"""
+ae.semantic.continent — set continent/country semantic attributes and build the continent style.
+"""
 import sys
 import ae_backend
 from ae.utils.org import org_table_to_dict
@@ -62,6 +65,10 @@ sContinentStyle = {
     }
 
 def style(chart: ae_backend.chart_v3.Chart, name: str = "-continent", test_only: bool = True, raise_: bool = False, style_type: str = "normal", priority: int = 1000, antigen_fill_opacity: float = 1.0) -> set[str]:
+    """Build the `-continent` background style: fill antigens by their continent (`C9`)
+    attribute using the `style_type` palette (`"normal"`/`"dark"`), optionally test-only
+    (skipping reference antigens), with `antigen_fill_opacity` applied to fills. Returns
+    `{name}`."""
     style = chart.styles()[name]
     style.priority = priority
     if test_only:

@@ -1,3 +1,6 @@
+"""
+ae.utils.load_module — load and cache a Python module from a file path.
+"""
 from pathlib import Path
 import importlib.util, importlib.machinery
 
@@ -6,6 +9,8 @@ import importlib.util, importlib.machinery
 sLoaded = {}
 
 def load(module_file: Path|str):
+    """Import (and memoise) the module at `module_file`, always under the module name `ae`.
+    Returns None (also cached) if the file does not exist."""
     module_file = Path(module_file).resolve()
     try:
         return sLoaded[module_file]

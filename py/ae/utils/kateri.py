@@ -1,3 +1,13 @@
+"""
+ae.utils.kateri — drive the kateri map viewer / PDF generator over its Unix socket.
+
+kateri (a separate Dart/Flutter app) does all antigenic-map rendering for the report; ae
+talks to it over a length-prefixed socket protocol — a 4-byte code (`CHRT`, `COMD`, `LAYT`,
+`PDFB`, `JSON`), then a 4-byte length and a 4-byte-padded payload. `KateriTask` launches the
+app, `SocketServerTask` serves the connection, and the module-level `communicator`
+(`Communicator`) sends charts/commands and awaits replies (chart, viewport, PDF bytes). It
+also handles the live relax animation: an operator's `RLAX` press streams `LAYT` frames back.
+"""
 import sys, os, shutil, asyncio, subprocess, json
 from pathlib import Path
 from typing import Optional, Callable, Any
@@ -17,8 +27,12 @@ KATERI_EXE = os.path.realpath(_kateri) if _kateri else "kateri"
 # ----------------------------------------------------------------------
 
 class KateriTask:
+    """Async task that launches the kateri app (connected via `--socket`, optionally
+    `--headless`) and waits for it to exit."""
 
     def __init__(self, headless: bool = False):
+        """Configure the task; `headless` parks kateri's window off-screen for batch PDF
+        export (no window pop-up / focus steal)."""
         self.kateri = None
         # When True, launch kateri with --headless so it parks its window off-screen and stays out
         # of the Dock/menu-bar (no window pop-up / focus steal). Used by batch PDF-export commands;
@@ -26,6 +40,8 @@ class KateriTask:
         self.headless = headless
 
     async def start(self, socket_name: str, **ignored):
+        """Launch kateri connected to `socket_name` and await its exit; terminate it on
+        cancellation."""
         try:
             cmd = [KATERI_EXE, "--socket", socket_name]
             if self.headless:
@@ -39,20 +55,26 @@ class KateriTask:
             self.kateri = None
 
     def running(self) -> bool:
+        """Whether the kateri subprocess has been started."""
         return self.kateri is not None
 
     def name(self):
+        """Display name of the task (its class)."""
         return self.__class__
 
 # ----------------------------------------------------------------------
 
 class SocketServerTask:
+    """Async task running the Unix-socket server that kateri connects back to."""
 
     def __init__(self):
+        """Initialise with no server or communicator yet."""
         self.socket_server = None
         self.communicator = None
 
     async def start(self, socket_name: str, **ignored):
+        """Start the Unix-socket server (dispatching connections to the module `communicator`)
+        and serve forever."""
         global communicator
         self.socket_server = await asyncio.start_unix_server(communicator.connected, socket_name)
         print(f">>> [server-for-kateri] started pid: {os.getpid()} socket: {socket_name}", file=sys.stderr)
@@ -61,17 +83,23 @@ class SocketServerTask:
         print(f">>> [server-for-kateri] completed", file=sys.stderr)
 
     def running(self) -> bool:
+        """Whether the server is up and the communicator has a live kateri connection."""
         global communicator
         return self.socket_server is not None and communicator is not None and communicator.is_connected()
 
     def name(self):
+        """Display name of the task (its class)."""
         return self.__class__
 
 # ----------------------------------------------------------------------
 
 class Communicator:
+    """Client end of the kateri socket protocol: sends charts and commands, and resolves the
+    futures awaiting kateri's replies. A single module-level instance (`communicator`) is
+    reused across sessions — call `reset()` between them."""
 
     def __init__(self):
+        """Start with no writer, no pending expectations, and command id 0."""
         self.writer: asyncio.StreamWriter = None
         self.expected = []
         self._command_id: int = 0
@@ -90,9 +118,12 @@ class Communicator:
         self._command_id = 0
 
     def send_ace(self, filename: Path):
+        """Send a chart to kateri from an `.ace` file (decompressed via `decat`) as a `CHRT`
+        frame."""
         self._send(b"CHRT", subprocess.check_output(["decat", str(filename)]))
 
     def send_chart(self, chart: ae_backend.chart_v3.Chart):
+        """Send an in-memory `Chart` to kateri as a `CHRT` frame."""
         self._send(b"CHRT", chart.export())
 
     def send_layout(self, coords: list, final: bool):
@@ -109,19 +140,24 @@ class Communicator:
             await self.writer.drain()
 
     def set_style(self, style: str):
+        """Tell kateri to switch to the named plot style."""
         self.send_command({"C": "set_style", "style": style})
 
     def export_to_legacy(self, style: Optional[str] = None):
+        """Ask kateri to export the chart to the legacy plot-spec format (selecting `style`
+        first if given)."""
         if style:
             self.send_command({"C": "set_style", "style": style})
         self.send_command({"C": "export_to_legacy"})
 
     async def get_chart(self) -> ae_backend.chart_v3.Chart:
+        """Request the current chart back from kateri and await it as a `Chart`."""
         futu = asyncio.get_running_loop().create_future()
         self.send_command_expect(command={"C": "get_chart"}, expect={"C": "CHRT", "future": futu})
         return await futu
 
     async def get_viewport(self) -> dict:
+        """Request kateri's current viewport and await it as a dict."""
         futu = asyncio.get_running_loop().create_future()
         self.send_command_expect(command={"C": "get_viewport"}, expect={"C": "JSON", "future": futu})
         viewport = await futu
@@ -135,6 +171,7 @@ class Communicator:
         return result.get("moved", [])
 
     async def get_pdf(self, style: str = None, width: float = 800.0, square: bool = False, viewport_size: float = 0.0) -> bytes:
+        """Request a PDF render (selecting `style` first if given) and await the PDF bytes."""
         if style:
             self.set_style(style=style)
         futu = asyncio.get_running_loop().create_future()
@@ -148,9 +185,12 @@ class Communicator:
     #     self.send_command_expect(command={"C": "pdf", "width": width}, expect={"C": "PDFB", "filename": filename, "open": open})
 
     def quit(self):
+        """Tell kateri to quit."""
         self.send_command({"C": "quit"})
 
     def send_command_expect(self, command: dict[str, Any], expect: dict[str, Any]):
+        """Send a `COMD` and register an `expect` entry (tagged with the command id) to match
+        kateri's eventual reply."""
         command_id = self.send_command(command=command)
         self.expected.append({**expect, "_id": command_id})
 
@@ -175,6 +215,9 @@ class Communicator:
         #     print(f">>>> sent data {data_code} {len(data)} bytes {data} with padding {4 - last_chunk}", file=sys.stderr)
 
     async def connected(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        """Socket connection handler: record the writer, then loop reading kateri's frames
+        (`HELO` / `RLAX` / `PDFB` / `CHRT` / `JSON`) and dispatching replies to their
+        expectations until a `QUIT` or broken pipe."""
         self.writer = writer
         while (request := (await reader.read(4)).decode('utf8').strip()) not in ["", "QUIT"]: # empty request means broken pipe
             # print(f">>>> received from kateri: {request}", file=sys.stderr)
@@ -196,6 +239,7 @@ class Communicator:
         writer.close()
 
     def is_connected(self) -> bool:
+        """Whether a kateri writer is currently attached."""
         return self.writer is not None
 
     async def _read_with_padding(self, reader: asyncio.StreamReader, payload_length: int):

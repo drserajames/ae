@@ -1,3 +1,6 @@
+"""
+ae.semantic.passage — set passage-type (`p`) semantic attributes on antigens/sera.
+"""
 import sys
 import ae_backend
 
