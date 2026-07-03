@@ -125,6 +125,9 @@ sources_py = [
   'cc/py/utils.cc',
   'cc/py/tal.cc', # --- tal (subsystem #3) ---
   'cc/py/hidb.cc', # --- hidb (subsystem #2) ---
+  'cc/py/map-draw.cc', # --- map-draw (subsystem #1, revived) ---
+  'cc/map-draw/draw.cc', # --- map-draw (subsystem #1, revived) ---
+  'cc/draw/cairo-surface.cc', # --- map-draw (subsystem #1, revived) ---
 ]
 
 # --- tal (subsystem #3) — headless tree layout; see cc/tal/PORTING.md ---
@@ -312,6 +315,19 @@ geo_draw = executable(
   link_with : [libae],
   install : true)
 
+# --- map-draw (subsystem #1, revived) — headless antigenic-map renderer, fidelity
+#     port of AD acmacs-map-draw ChartDraw for the chains-202105 web app. Reuses the
+#     shared cc/draw/cairo-surface (Cairo linked here). See cc/map-draw/TODO.md. ---
+sources_map_draw = ['cc/map-draw/draw.cc', 'cc/draw/cairo-surface.cc']
+
+map_draw = executable(
+  'map-draw',
+  sources : ['cc/map-draw/chart-draw-main.cc'] + sources_map_draw,
+  include_directories : include_cc,
+  dependencies : [fmt, range_v3, simdjson, cairo],
+  link_with : [libae],
+  install : true)
+
 # ----------------------------------------------------------------------
 # tests ae
 # ----------------------------------------------------------------------
@@ -388,7 +404,7 @@ ae_backend = python3.extension_module(
   'ae_backend',
   sources : sources_py,
   include_directories : include_cc,
-  dependencies : [python3.dependency(), xxhash, pybind11, xlnt, fmt, range_v3, simdjson],
+  dependencies : [python3.dependency(), xxhash, pybind11, xlnt, fmt, range_v3, simdjson, cairo], # cairo --- map-draw (subsystem #1, revived) ---
   link_with : [libae],
   install : true)
 

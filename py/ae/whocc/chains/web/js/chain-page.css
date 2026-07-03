@@ -1,0 +1,27 @@
+h2 {
+    margin: 0.5em 0.1em;
+}
+
+h3 {
+    margin: 1em 0.5em 0.5em 1em;
+}
+
+hr {
+    margin: 2em 1em;
+}
+
+table {
+    margin-left: 1.5em;
+}
+
+table td {
+    padding-right: 2em;
+}
+
+table tr.title td {
+    font-weight: bold;
+}
+
+table tr.image td {
+    padding-bottom: 0.5em;
+}

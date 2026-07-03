@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -15,9 +16,12 @@ struct _cairo_surface;
 
 namespace ae::draw
 {
-    // Minimal Cairo PDF drawing surface — the first slice of the acmacs-draw
+    // Minimal Cairo drawing surface — the first slice of the acmacs-draw
     // port (see TODO.md subsystem #1). All coordinates and sizes are in device
     // units (PDF points); the caller maps chart coordinates to device coordinates.
+    // The output backend is selected by the filename extension: ".png" writes a
+    // raster image (finalised on destruction), any other extension writes a vector
+    // PDF. (The class name is historical; it drives both backends.)
     class CairoPdf
     {
       public:
@@ -60,6 +64,7 @@ namespace ae::draw
       private:
         _cairo_surface* surface_{nullptr};
         _cairo* context_{nullptr};
+        std::string png_filename_{}; // non-empty => PNG backend; written on destruction
     };
 
 } // namespace ae::draw
