@@ -3,6 +3,58 @@
 
 // ----------------------------------------------------------------------
 
+namespace
+{
+    // "!i" selectors store a raw point index (see ae::py::to_dynamic_value / e.g.
+    // py/ae/semantic/select_mark.py add_modifier(selector={"!i": no}, ...)). Given
+    // points removed (ascending, as produced by to_point_indexes()), return the
+    // renumbered index for a surviving point, or nullopt if this point was removed.
+    std::optional<size_t> reindex_after_removal(size_t index, const ae::point_indexes& to_remove_sorted_ascending)
+    {
+        size_t shift{0};
+        for (const auto no : to_remove_sorted_ascending) {
+            if (*no == index)
+                return std::nullopt;
+            else if (*no < index)
+                ++shift;
+            else
+                break;
+        }
+        return index - shift;
+
+    } // reindex_after_removal
+}
+
+// ----------------------------------------------------------------------
+
+void ae::chart::v3::semantic::Styles::remove_points(const point_indexes& points)
+{
+    if (points.empty())
+        return;
+
+    using namespace std::string_view_literals;
+    for (auto& style : styles_) {
+        auto& modifiers = style.modifiers;
+        for (auto it = modifiers.begin(); it != modifiers.end();) {
+            if (it->selector.is_object() && it->selector.contains("!i"sv)) {
+                if (const auto* point_no = std::get_if<long>(&it->selector["!i"].data())) {
+                    if (const auto new_index = reindex_after_removal(static_cast<size_t>(*point_no), points); new_index.has_value()) {
+                        it->selector["!i"] = static_cast<long>(*new_index);
+                        ++it;
+                        continue;
+                    }
+                    it = modifiers.erase(it);
+                    continue;
+                }
+            }
+            ++it;
+        }
+    }
+
+} // ae::chart::v3::semantic::Styles::remove_points
+
+// ----------------------------------------------------------------------
+
 const ae::chart::v3::semantic::Style* ae::chart::v3::semantic::Styles::find_if_exists(std::string_view name) const
 {
     if (const auto found = std::find_if(begin(), end(), [name](const auto& style) { return style.name == name; }); found != end())

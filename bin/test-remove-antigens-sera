@@ -2,7 +2,7 @@
 """
 Remove few antigens and sera chosen at random from the passed chart and check the result
 """
-import os, sys, pprint, random, argparse, traceback, math
+import os, sys, pprint, random, argparse, traceback, math, json
 from pathlib import Path
 import unittest
 import ae_backend
@@ -26,6 +26,22 @@ class MyTest (unittest.TestCase):
         # print(f">>>> cls.sera_to_remove_chosen {len(cls.sera_to_remove_chosen)} {cls.sera_to_remove_chosen}", file=sys.stderr)
         cls.sera_to_remove = cls.chart_for_removal.select_sera(lambda sr: sr.no in cls.sera_to_remove_chosen)
         print(f">>>> sera_to_remove: ({len(cls.sera_to_remove)}) {cls.sera_to_remove.indexes()}", file=sys.stderr)
+
+        # style fixture (added before removal): one value-based selector (must survive
+        # unchanged), one index-based ("!i") selector on a removed antigen (must be
+        # dropped), one index-based selector on a surviving antigen (must be
+        # renumbered), plus priority/viewport (must survive unchanged).
+        cls.style_removed_index = next(iter(cls.antigens_to_remove_chosen))
+        surviving_antigens = sorted(set(range(cls.chart_orig.number_of_antigens())) - cls.antigens_to_remove_chosen)
+        cls.style_surviving_index = surviving_antigens[len(surviving_antigens) // 2]
+        cls.style_expected_new_index = cls.style_surviving_index - len([no for no in cls.antigens_to_remove_chosen if no < cls.style_surviving_index])
+        style = cls.chart_for_removal.styles()["test-style"]
+        style.priority = 5
+        style.viewport(1.0, 2.0, 3.0, 4.0)
+        style.add_modifier(selector={"C": "test-clade"}, fill="red")
+        style.add_modifier(selector={"!i": cls.style_removed_index}, only="antigens", fill="blue")
+        style.add_modifier(selector={"!i": cls.style_surviving_index}, only="antigens", fill="green")
+
         cls.chart_for_removal.remove_antigens_sera(antigens=cls.antigens_to_remove, sera=cls.sera_to_remove)
         print(f">>>> {cls.chart_for_removal} AG:{cls.chart_for_removal.number_of_antigens()} SR:{cls.chart_for_removal.number_of_sera()}")
 
@@ -83,7 +99,22 @@ class MyTest (unittest.TestCase):
             self.assertEqual(with_nan, p2.disconnected())
 
     def test_styles(self):
-        pass
+        # export() must produce valid JSON (regression for the "{,"V":..." bug: a
+        # style serializing its viewport as the first/only member used to emit a
+        # spurious leading comma)
+        exported = json.loads(self.chart_for_removal.export())
+        style = exported["c"]["R"]["test-style"]
+        # style-level priority/viewport survive point removal unchanged
+        self.assertEqual(style.get("z"), 5)
+        self.assertEqual(style.get("V"), [1, 2, 3, 4])
+        selectors = [modifier["T"] for modifier in style["A"]]
+        # value-based selector: untouched by point removal
+        self.assertIn({"C": "test-clade"}, selectors)
+        # index-based selector on a removed point: dropped, not left dangling/wrong
+        self.assertNotIn({"!i": self.style_removed_index}, selectors)
+        # index-based selector on a surviving point: renumbered to the new point index
+        self.assertIn({"!i": self.style_expected_new_index}, selectors)
+        self.assertEqual(len(style["A"]), 2)
 
     def test_legacy_plot_spec(self):
         pass

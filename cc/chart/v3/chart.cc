@@ -361,7 +361,7 @@ void ae::chart::v3::Chart::remove_antigens(const SelectedAntigens& to_remove)
     titers().remove_antigens(to_remove.indexes);
     const auto points_to_remove = to_point_indexes(to_remove.indexes);
     projections().remove_points(points_to_remove, antigens().size());
-    styles().clear();
+    styles().remove_points(points_to_remove);
     legacy_plot_spec().remove_points(points_to_remove);
 
 } // ae::chart::v3::Chart::remove_antigens
@@ -374,7 +374,7 @@ void ae::chart::v3::Chart::remove_sera(const SelectedSera& to_remove)
     titers().remove_sera(to_remove.indexes);
     const auto points_to_remove = to_point_indexes(to_remove.indexes, antigens().size());
     projections().remove_points(points_to_remove, antigens().size());
-    styles().clear();
+    styles().remove_points(points_to_remove);
     legacy_plot_spec().remove_points(points_to_remove);
 
 } // ae::chart::v3::Chart::remove_sera

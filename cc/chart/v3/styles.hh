@@ -12,6 +12,7 @@
 #include "utils/collection.hh"
 #include "draw/v2/viewport.hh"
 #include "chart/v3/point-style.hh"
+#include "chart/v3/index.hh"
 
 // ----------------------------------------------------------------------
 
@@ -159,6 +160,13 @@ namespace ae::chart::v3::semantic
         auto begin() const { return styles_.begin(); }
         auto end() const { return styles_.end(); }
         void clear() { styles_.clear(); }
+
+        // Update modifier selectors after point removal: value-based selectors
+        // (e.g. {"C": "135K"}) are left unchanged, index-based selectors ({"!i": no})
+        // are renumbered to match the surviving points, or dropped if the point
+        // they refer to was itself removed. Style-level priority/legend/viewport
+        // are untouched.
+        void remove_points(const point_indexes& points);
 
         // find or add style by name
         Style& find(std::string_view name);
