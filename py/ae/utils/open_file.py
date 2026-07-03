@@ -1,9 +1,14 @@
+"""
+ae.utils.open_file — open (possibly compressed) files by content/extension, with backups.
+"""
 import sys, lzma, bz2, gzip, datetime
 from pathlib import Path
 
 # ======================================================================
 
 def for_reading(path :Path):
+    """Open `path` for binary reading, auto-detecting xz / bz2 / gzip / plain by trying each
+    reader (`"-"` = stdin). Raises RuntimeError if none can read it."""
     if path == "-":
         return sys.stdin
     for opener in [lzma.LZMAFile, bz2.BZ2File, gzip.GzipFile, open]:
@@ -20,6 +25,8 @@ def for_reading(path :Path):
 # ----------------------------------------------------------------------
 
 def for_writing(path :Path, do_backup: bool = True):
+    """Open `path` for writing, choosing xz / bz2 / gzip compression by suffix (`"-"` =
+    stdout); backs up an existing file first unless `do_backup` is False."""
     if path == "-":
         return sys.stdout
     if do_backup:
@@ -36,6 +43,8 @@ def for_writing(path :Path, do_backup: bool = True):
 # ----------------------------------------------------------------------
 
 def backup(path: Path):
+    """Move an existing file into a sibling `.backup/` directory under a timestamped name
+    (skips files under `/dev` and never overwrites an existing backup)."""
     if path.exists() and path.parents[len(path.parents) - 2] != "/dev":
         backup_dir = path.resolve().parent.joinpath(".backup")
         backup_dir.mkdir(parents=True, exist_ok=True)

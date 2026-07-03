@@ -1,3 +1,6 @@
+"""
+ae.semantic.select_mark — highlight selected antigens/sera with a marker style.
+"""
 import sys, pprint
 import inspect
 from typing import Callable
@@ -7,6 +10,8 @@ import ae.utils.org
 # ======================================================================
 
 def style(chart: ae_backend.chart_v3.Chart, style_name: str, antigen_selector: Callable = None, serum_selector: Callable = None, style_priority=0, modifier: dict = {"size": 30, "raise": True, "fill": "orange", "outline": "black", "label": {"size": 10}}):
+    """Build a style highlighting the antigens and/or sera matching the selectors (applying
+    `modifier` plus a designation label), and print the selection as an org table."""
     style = chart.styles()[style_name]
     style.priority = style_priority
     selected : list[dict[str, object]] = []

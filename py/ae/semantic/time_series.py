@@ -1,3 +1,6 @@
+"""
+ae.semantic.time_series — build the time-series (month-bucket) plot styles.
+"""
 import sys, datetime, pprint, calendar
 from typing import Optional
 import ae_backend

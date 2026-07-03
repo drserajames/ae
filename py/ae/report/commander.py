@@ -1,5 +1,15 @@
 # Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/commander.py — Phase 1b engine tier.
 # the @command surface (download/populate/prestyle/style/export). See py/ae/report/MIGRATION.md.
+"""
+ae.report.commander — the `@command` surface driven by the report main loop.
+
+`CommanderBasic` gathers the report subcommands a driver script exposes on the CLI /
+interactive loop (see ae.report.main_loop): the pipeline `download` → `populate` →
+`prestyle` → (manual adjust) → `style` → `export`, plus serum-coverage map generation. The
+styling commands drive kateri over its socket; the export commands run headless and write
+PDFs / `.ace` outputs. Subclasses supply the subtype-specific `chart_modifier`. Ported from
+the vcm ssm-report tooling.
+"""
 import sys
 import re
 import json
@@ -19,18 +29,27 @@ from .chart_modifier import ChartModifier
 # ======================================================================
 
 class CommanderBasic:
+    """Base command surface for the report driver. Each `@command` method is a subcommand
+    invoked from the CLI / loop, together covering download → populate → prestyle → adjust
+    → style → export and serum-coverage generation. Subclasses provide `chart_modifier`."""
 
     def chart_modifier(self, chart: ae_backend.chart_v3.Chart | Path | None = None) -> ChartModifier:
+        """Return the subtype-specific `ChartModifier` for a chart — override per 0do. Raises
+        NotImplementedError in the base."""
         raise NotImplementedError("override in derived (0do specific)")
 
     @command
     @no_kateri
     @no_loop
     def download(self):
+        """`download` command: fetch this dir's chart from the incremental chain (no kateri,
+        single-shot)."""
         self.download_from_chain()
 
     @command
     def style(self) -> ChartModifier:
+        """`style` command: build the full styles on the adjusted chart and, if kateri is
+        connected, send it and select the style-command style. Returns the ChartModifier."""
         chart_modifier = self.chart_modifier(ae.report.dirs.VcmDirs.adjusted_filename())
         chart_modifier.populate_for_style()
         if kateri.communicator.is_connected():
@@ -41,6 +60,9 @@ class CommanderBasic:
     @command
     @no_loop
     async def prestyle(self) -> ChartModifier:
+        """`prestyle` command: build prestyles on the downloaded chart; if kateri is
+        connected, export the legacy plot spec, read the chart back, write `prestyled.ace`
+        and link `adjusted.ace`."""
         chart_modifier = self.chart_modifier(ae.report.dirs.VcmDirs.downloaded_filename())
         chart_modifier.populate_for_prestyle()
         if kateri.communicator.is_connected():
@@ -55,6 +77,8 @@ class CommanderBasic:
     @no_loop
     @headless
     async def populate_export(self):
+        """`populate_export` command: populate charts from seqdb then run the full export
+        (headless)."""
         self.populate()
         await self.export()
 
@@ -62,6 +86,7 @@ class CommanderBasic:
     @no_kateri
     @no_loop
     def populate_adjusted(self):
+        """`populate_adjusted` command: repopulate just `adjusted.ace` from seqdb (no kateri)."""
         if (fn := ae.report.dirs.VcmDirs.adjusted_filename()).exists():
             print(f">>> populating {fn}", file=sys.stderr)
             chart = ae_backend.chart_v3.Chart(fn)
@@ -84,6 +109,8 @@ class CommanderBasic:
     @no_loop
     @headless
     async def export(self):
+        """`export` command: style the chart, export each main-map PDF (`out.1.<style>.pdf`),
+        write the signature-page mapi, and save the legacy-exported `styled.ace` (headless)."""
         chart_modifier = self.style()
         # do not await in parallel because current katteri protocol does not allow matching pdfs request and result
         for style_name in chart_modifier.export_styles():
@@ -97,6 +124,7 @@ class CommanderBasic:
     @no_loop
     @headless
     async def export_info(self):
+        """`export_info` command: style the chart and export the info-map PDFs (headless)."""
         chart_modifier = self.style()
         for style_name in chart_modifier.export_info_styles():
             await self.export_pdf(style_name=style_name, output_filename=Path(".").resolve().joinpath(f"out.1.{style_name}.pdf"))
@@ -105,6 +133,9 @@ class CommanderBasic:
     @no_loop
     @headless
     async def export_mapi_for_signature_pages(self, chart_modifier: Optional[ChartModifier] = None):
+        """`export_mapi_for_signature_pages` command: write `sp.mapi` (viewport + vaccine
+        markers) for the signature pages, styling the chart first if none is supplied
+        (headless)."""
         if chart_modifier is None:
             self.populate()
             chart_modifier = self.style()
@@ -141,28 +172,37 @@ class CommanderBasic:
 
     @command
     def serum_coverage_h3_2a2(self):
+        """`serum_coverage_h3_2a2` command: serum coverage restricted to sera of H3 clade
+        3C.2a1b.2a.2."""
         return self.serum_coverage(serum_selector=lambda sr: sr.has_clade("3C.2a1b.2a.2"), fold=2.0)
 
     @command
     @no_loop
     @headless
     async def serum_coverage_export_h3_2a2(self):
+        """`serum_coverage_export_h3_2a2` command: export serum-coverage maps for H3 clade
+        3C.2a1b.2a.2 sera."""
         return await self.serum_coverage_export(serum_selector=lambda sr: sr.has_clade("3C.2a1b.2a.2"), fold=2.0)
 
     # ----------------------------------------------------------------------
 
     def download_from_chain(self):
+        """Download this dir's chart from the incremental chain, populate it from seqdb and
+        write `downloaded.ace`. Returns the Downloader."""
         downloader = ae.report.download.Downloader()
         downloader.from_chain(subtype_dir_name=ae.report.dirs.VcmDirs().subtype_dir_name()).populate_from_seqdb().export_downloaded()
         # downloader.orient_to("master.ace")
         return downloader
 
     def download_from_previous(self, rotate: float | None = None):
+        """Seed this dir's chart from the previous report's chart (optionally rotated),
+        populate from seqdb and write `downloaded.ace`. Returns the Downloader."""
         downloader = ae.report.download.Downloader()
         downloader.use_previous(ae.report.dirs.VcmDirs().find_previous_chart(), rotate=rotate).populate_from_seqdb().export_downloaded()
         return downloader
 
     async def export_pdf(self, style_name: str, output_filename: Path):
+        """Request the PDF for `style_name` from kateri and write it to `output_filename`."""
         data = await kateri.communicator.get_pdf(style=style_name)
         print(f">>> writing pdf to {output_filename}", file=sys.stderr)
         with output_filename.open("wb") as output:
@@ -171,6 +211,8 @@ class CommanderBasic:
         #     subprocess.call(["open", expected["filename"]])
 
     def serum_coverage_output_dir(self, check_existance: bool = False) -> Path | None:
+        """The `serum-coverage/` output directory. With `check_existance`, return it only if
+        it already exists (else None); otherwise create it and return it."""
         output_dir = Path(f"serum-coverage")
         if check_existance:
             return output_dir if output_dir.exists() else None
@@ -179,14 +221,18 @@ class CommanderBasic:
             return output_dir
 
     def serum_coverage_webpage(self, chart_modifier):
+        """Write the per-fold/zoom `gridage-*.json` + `index-*.html` serum-coverage web pages
+        that lay the empirical/theoretical map PDFs in the output dir side by side."""
 
         def fold_val(stem: str):
+            """Extract the fold value from a `…-f<fold>-…` filename stem; raises if absent."""
             folds = [mt.group(1) for field in stem.split("-") if (mt := re.match(r"^f([\d\.]+)$", field))]
             if not folds:
                 raise RuntimeError(f"cannot infer fold from \"{stem}\"")
             return folds[0]
 
         def serum_title(stem: str):
+            """`<serum_no> <designation>` title for a serum-coverage map from its stem."""
             serum_no = int(stem.split("-")[1])
             serum = chart_modifier.chart.serum(serum_no)
             return f"{serum_no} {serum.designation()}"

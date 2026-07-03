@@ -140,6 +140,7 @@ def bezier_gradient(c1: int, c2: int, c3: int, n: int) -> list[int]:
     fact = (1.0, 1.0, 2.0)
 
     def bern(t: float, deg: int, i: int) -> float:
+        """The i-th Bernstein basis polynomial of degree `deg` at `t`."""
         return fact[deg] / (fact[i] * fact[deg - i]) * ((1.0 - t) ** (deg - i)) * (t**i)
 
     out = []
@@ -167,6 +168,8 @@ class DateColorScale:
     gets None (it stays greyed)."""
 
     def __init__(self, start_ym: str, end_ym: str, anchors=VIRIDIS_ANCHORS):
+        """Build the viridis colour scale over the `[start_ym, end_ym)` month window
+        (`YYYY-MM`); raises ValueError for a malformed window."""
         s, e = _ym(start_ym), _ym(end_ym)
         if not s or not e:
             raise ValueError(f"bad time-series window: {start_ym}..{end_ym}")
@@ -175,6 +178,8 @@ class DateColorScale:
         self.scale = bezier_gradient(*anchors, self.n_slots)
 
     def slot_index(self, date_str: str) -> Optional[int]:
+        """Month-slot index for a date (`YYYY-MM…`), or None if the date is outside the
+        window."""
         d = _ym(date_str)
         if not d:
             return None
@@ -182,10 +187,12 @@ class DateColorScale:
         return idx if 0 <= idx < self.n_slots else None
 
     def color_for(self, date_str: str) -> Optional[str]:
+        """`#rrggbb` colour for a date, or None if it is outside the window."""
         idx = self.slot_index(date_str)
         return f"#{self.scale[idx]:06x}" if idx is not None else None
 
     def slot_color(self, idx: int) -> str:
+        """`#rrggbb` colour for month slot `idx`."""
         return f"#{self.scale[idx]:06x}"
 
     def slot_date_range(self, idx: int) -> tuple[str, str]:
@@ -226,6 +233,8 @@ class LeafMatch:
     single section."""
 
     def __init__(self, leaves, leaf_to_ag, leaf_to_sr, serum_owner, strain_to_leaf):
+        """Bind the draw-order leaves, their chart-index maps (`leaf_to_ag` / `leaf_to_sr`),
+        the per-serum owner leaf, and the strain→leaf lookup."""
         self.leaves = leaves
         self.leaf_to_ag = leaf_to_ag
         self.leaf_to_sr = leaf_to_sr
@@ -429,6 +438,8 @@ def assign_prefixes(sections, match) -> dict:
     big = 1 << 30
 
     def first_index(section):
+        """Draw-order index of a section's first leaf (a large value if unmatched, so it
+        sorts last)."""
         idx = match.find_leaf(section["first"])
         return idx if idx is not None else big
 
@@ -441,6 +452,7 @@ def assign_prefixes(sections, match) -> dict:
 
 
 def section_title(section: dict) -> str:
+    """Compose a section's map title: `<prefix>. <label>  <aa_transitions>`."""
     aa = section.get("aa_transitions", "").strip()
     label = section.get("label", "").strip()
     prefix = section.get("prefix", "").strip()

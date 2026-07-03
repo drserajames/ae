@@ -1,3 +1,6 @@
+"""
+ae.semantic.serum_coverage — build serum-coverage (within/outside fold) styles.
+"""
 import sys
 import ae_backend
 

@@ -1,3 +1,11 @@
+"""
+ae.utils.json — JSON dump/load with a compact, wide-line pretty-printer.
+
+Produces AD-style `.ace`-friendly JSON: nested objects/arrays are indented, but "simple"
+small ones — and anything whose multi-line form fits under a width limit — collapse onto a
+single line. At the top level it prepends an Emacs `js-indent-level` marker. `loads` is
+just `json.loads`.
+"""
 import json
 from pathlib import Path
 
@@ -18,6 +26,9 @@ def _json_simple(d):
 # ----------------------------------------------------------------------
 
 def dumps(data: dict, separators=[',', ': '], indent=None, compact=True, sort_keys=False, simple=_json_simple, one_line_max_width=200, object_fields_sorting_key=None):
+    """Serialize `data` to a JSON string. With `compact` and an `indent`, use the wide-line
+    pretty-printer (`_json_dumps`); otherwise fall back to stdlib `json.dumps`. Strips a
+    leading `_` key and, when indenting, prepends the Emacs indent-level marker."""
     # module_logger.info('json.dumps: {!r}'.format(data))
     if isinstance(data, dict):
         data.pop("_", None)
@@ -32,8 +43,10 @@ def dumps(data: dict, separators=[',', ': '], indent=None, compact=True, sort_ke
 # ----------------------------------------------------------------------
 
 class JSONEncoder (json.JSONEncoder):
+    """`json.JSONEncoder` that serialises `Path` objects as their string form."""
 
     def default(self, o):
+        """Encode a `Path` as its string form; defer other types to the base encoder."""
         if isinstance(o, Path):
             r = str(o)
         # elif hasattr(o, "json"):
@@ -49,6 +62,7 @@ def _json_dumps(data, indent=2, indent_increment=None, simple=_json_simple, topl
     """More compact dumper with wide lines."""
 
     def end(symbol, indent):
+        """The closing `symbol` (`}` / `]`) indented to the enclosing level."""
         if indent > indent_increment:
             r = "{:{}s}{}".format("", indent - indent_increment, symbol)
         else:
@@ -56,6 +70,7 @@ def _json_dumps(data, indent=2, indent_increment=None, simple=_json_simple, topl
         return r
 
     def make_one_line(data):
+        """Serialise `data` compactly on a single line (object keys sorted)."""
         if isinstance(data, set):
             s = json.dumps(sorted(data, key=object_fields_sorting_key), cls=JSONEncoder)
         elif isinstance(data, dict):
@@ -69,6 +84,8 @@ def _json_dumps(data, indent=2, indent_increment=None, simple=_json_simple, topl
         return s
 
     def make_object(data):
+        """Serialise a dict as indented multi-line output (with the top-level indent marker
+        when `toplevel`), recursing into values."""
         if toplevel:
             r = ["{{{:<{}s}\"_\":\"-*- js-indent-level: {} -*-\",".format("", indent_increment - 1, indent_increment)]
         else:

@@ -16,6 +16,9 @@ from . import dirs
 
 
 class ConferenceData(dirs.VcmDirs):
+    """Interface of the per-report data the report engine consumes (meeting date, time
+    series, vaccine years, geographic settings). Subclasses `VcmDirs`; a report's concrete
+    `conference_data.py` overrides these methods with the season's values."""
     # --- consumed by chart_modifier.ChartModifier ---
     def conferencence_date(self):
         "datetime.date of the meeting"
@@ -32,11 +35,16 @@ class ConferenceData(dirs.VcmDirs):
         raise NotImplementedError("override in the report's conference_data.py")
 
     def current_vaccine_years(self) -> list[str]:
+        """Vaccine-period year codes for the current season — override in the report's
+        conference_data.py."""
         raise NotImplementedError("override in the report's conference_data.py")
 
     # --- consumed by geographic.make_geo ---
     def geographic_settings(self) -> dict[str, Any]:
+        """Geographic-map settings dict — override in the report's conference_data.py."""
         raise NotImplementedError("override in the report's conference_data.py")
 
     def geographic_coloring(self, subtype: str) -> dict[str, Any]:
+        """Geographic-map colouring for a subtype — override in the report's
+        conference_data.py."""
         raise NotImplementedError("override in the report's conference_data.py")

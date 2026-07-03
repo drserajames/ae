@@ -1,3 +1,6 @@
+"""
+ae.semantic.find — find chart antigens by name and passage (for vaccine/serology selection).
+"""
 from typing import Optional
 import ae_backend
 from .. import virus
@@ -7,8 +10,12 @@ from .. import virus
 PASSAGES = ["cell", "egg", "reassortant"]
 
 class AntigenFinder:
+    """Finds a chart's antigens by name across passages (cell/egg/reassortant), preferring
+    connected, non-distinct antigens and the most-layered match per passage."""
 
     def __init__(self, chart: ae_backend.chart_v3.Chart):
+        """Cache the chart's type/subtype, whether it has titer layers, and its projection
+        layout (used to skip disconnected points)."""
         self.chart = chart
         self.type_subtype = chart.info().type_subtype()
         self.chart_has_layers = self.chart.titers().number_of_layers() > 0

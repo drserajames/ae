@@ -60,6 +60,8 @@ def parse_prefix(prefix: str) -> tuple[str, str, str]:
 
 
 def title_for(prefix: str) -> str:
+    """Human-readable title for a chart-dir prefix (`<subtype>-<assay>-<lab>` → e.g.
+    "A(H3N2) HI CDC")."""
     subtype, assay, lab = parse_prefix(prefix)
     subtype_title = SUBTYPE.get(subtype, (subtype, subtype.upper()))[1]
     assay_title = ASSAY.get(assay, assay.upper().replace("-", " ") if assay else "HI")
@@ -139,6 +141,9 @@ def make_all(report_dir, prefixes: Optional[list[str]] = None, retries: int = 1,
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    """CLI entry point: render the signature pages for a seasonal-report working dir
+    (`report_dir`, with optional per-lab `--prefix`es and tree infix). Returns a process
+    exit code."""
     parser = argparse.ArgumentParser(description="Generate signature pages for a seasonal-report working dir")
     parser.add_argument("report_dir", help="report working dir (e.g. ac/results/ssm/2026-0223-ssm)")
     parser.add_argument("--prefix", action="append", dest="prefixes", metavar="PREFIX",

@@ -1,3 +1,13 @@
+"""
+ae.whocc.torg — convert WHO CC assay tables between the `.torg` intermediate and `.ace`.
+
+`.torg` is an Org-mode text table (metadata header lines plus a pipe-delimited antigen×serum
+titer grid) used as a human-editable intermediate in the xlsx→torg→ace pipeline. The
+`export_to_file` / `generate` / `header` / `table` functions write a `.torg` from a
+`whocc.xlsx.Extractor` (applying the per-directory `DataFix`); `to_ace` parses a `.torg`
+back into an in-memory `.ace` chart dict (antigens, sera, titer table, metadata). The
+remaining helpers map torg row/column labels to ace field keys and normalise titers.
+"""
 import sys, io, re, math, pprint, datetime
 from pathlib import Path
 import ae_backend.whocc
@@ -7,6 +17,9 @@ from . import data_fix, table_dir
 # ======================================================================
 
 def export_to_file(extractor: ae_backend.whocc.xlsx.Extractor, output_dir: Path = None):
+    """Write the `.torg` for this table to its standard path (or under `output_dir`),
+    applying the directory's `ae-whocc-data-fix.py` `DataFix` if present (else a no-op
+    default). Returns the `generate()` info dict with `torg_filename` added."""
     if (data_fix_module_filename := table_dir.subtype_assay_lab_data_fix_pathname(extractor=extractor)).exists():
         data_fixer = load_module.load(data_fix_module_filename).DataFix(extractor)
     else:
@@ -22,6 +35,9 @@ def export_to_file(extractor: ae_backend.whocc.xlsx.Extractor, output_dir: Path 
 # ----------------------------------------------------------------------
 
 def generate(extractor: ae_backend.whocc.xlsx.Extractor, data_fixer: data_fix.DataFix, output: io.FileIO):
+    """Write the full `.torg` document to `output`: the `# -*- Org -*-` metadata header, the
+    column-padded pipe-delimited titer table, and the Emacs local-variables footer. Returns
+    `{"assay", "multivalue_titer"}`."""
     header_data, assay = header(extractor=extractor, data_fixer=data_fixer)
     print("# -*- Org -*-\n",
           "\n".join(f"- {k}: {v}" for k, v in header_data),
@@ -53,6 +69,8 @@ def generate(extractor: ae_backend.whocc.xlsx.Extractor, data_fixer: data_fix.Da
 # ----------------------------------------------------------------------
 
 def header(extractor: ae_backend.whocc.xlsx.Extractor, data_fixer: data_fix.DataFix):
+    """Build the torg metadata header rows (Lab, Date, Assay, Subtype, and optionally
+    Rbc/Lineage), each value passed through the `data_fixer`. Returns `(header_rows, assay)`."""
     assay = data_fixer.assay(extractor.assay())
     header = [
         ["Lab", data_fixer.lab(extractor.lab())],
@@ -69,6 +87,10 @@ def header(extractor: ae_backend.whocc.xlsx.Extractor, data_fixer: data_fix.Data
 # ----------------------------------------------------------------------
 
 def table(extractor: ae_backend.whocc.xlsx.Extractor, data_fixer: data_fix.DataFix):
+    """Build the torg titer grid as a list-of-rows of strings: serum columns across the top
+    (name/passage/serum_id), antigen rows down the side (name/date/passage/lab_id), and the
+    data-fixed titers in the body. Returns `(rows, multivalue_titer)`, where
+    `multivalue_titer` is True if any cell held a dual `HI/PRN` titer pair."""
     ag_col = ["serum_field_name", "name", "date", "passage", "lab_id", "base"]
     sr_row = ["antigen_field_name", "name", "passage", "serum_id", "base"]
 
@@ -116,6 +138,11 @@ def table(extractor: ae_backend.whocc.xlsx.Extractor, data_fixer: data_fix.DataF
 # ======================================================================
 
 def to_ace(torg_filename: Path, prn_read: bool, prn_remove_concentration: bool = False) -> dict:
+    """Parse a `.torg` file into an in-memory `.ace` chart dict (metadata `i`, antigens `a`,
+    sera `s`, titer layer `t`). `prn_read` selects the PRN read of dual `HI/PRN` titers;
+    `prn_remove_concentration` strips Crick concentration suffixes. B charts get their
+    lineage stamped onto each antigen/serum, and antigens homologous to a serum are flagged
+    reference via `detect_reference`. Raises RuntimeError on a bad meta field or empty table."""
     lines = [line.decode("utf-8").strip() for line in open_file.for_reading(torg_filename)]
     lab = None
     subtype = None
@@ -216,6 +243,10 @@ def to_ace(torg_filename: Path, prn_read: bool, prn_remove_concentration: bool =
 # ----------------------------------------------------------------------
 
 def antigen_field(no, cell):
+    """Map an antigen-row header label (top row, column `no`) to its ace field key
+    (`name`→`N`, `date`→`D`, `passage`→`P`, `reassortant`→`R`, `lab_id`→`l`,
+    `annotation`→`a`, `clade`→`c`). Returns `(None, no)` for a `#`-comment column; raises
+    RuntimeError for an unknown label."""
     if cell == "name":
         return "N", no
     elif cell == "date":
@@ -240,6 +271,10 @@ def antigen_field(no, cell):
 sReDelim = re.compile(r"^[\-\+]+$")
 
 def serum_field(no, cell):
+    """Map a serum-column header label (first column, row `no`) to its ace field key
+    (`name`→`N`, `passage`→`P`, `reassortant`→`R`, `serum_id`→`I`, `annotation`→`a`,
+    `species`→`s`). Returns `(None, no)` for a `#`-comment or delimiter row; raises
+    RuntimeError for an unknown label."""
     if cell == "name":
         return "N", no
     elif cell == "passage":
@@ -260,6 +295,9 @@ def serum_field(no, cell):
 # ----------------------------------------------------------------------
 
 def make_antigen_serum_field(key, value, lab):
+    """Coerce a raw torg cell into its ace value for field `key`: list-wrap lab-id/annotation
+    (prefixing a lab-id with `<LAB>#` when it doesn't already start with the lab), pass dates
+    through, drop empties (→None), else return the string unchanged."""
     if key in ["l", "a"]:
         if value:
             if key == "l" and not value.startswith(lab):
@@ -285,6 +323,11 @@ sNormalTiters = ["10", "20", "40", "80", "160", "320", "640", "1280", "2560", "5
                  ]
 
 def check_titer(titer, filename, row_no, column_no, lab, subtype, assay, prn_read=False, warn_if_not_normal=True, convert_prn_low_read=False, prn_titer=None):
+    """Validate and normalise one titer cell, returning the ace titer string. Handles
+    thresholded (`<`/`>`) and `*` missing values, warns on non-standard titers, resolves
+    dual `HI/PRN` (`hi/prn`) cells (choosing the PRN read when `prn_read`), and applies the
+    Crick-PRN low-read conventions for a bare `<`. Raises RuntimeError for an unrecognised
+    titer (or for any titer when `prn_read` is set but no PRN read is present)."""
     if sReTiter.match(titer):
         if prn_read:
              raise RuntimeError(f"PRN Read titer is not available: \"{titer}\" @@ {filename}:{row_no} column {column_no + 1}")
@@ -325,12 +368,16 @@ def check_titer(titer, filename, row_no, column_no, lab, subtype, assay, prn_rea
 sReConc = re.compile(r"\s+\(?10-\d\)?$")
 
 def remove_concentration(entry):
+    """Strip a trailing Crick-PRN concentration suffix (e.g. ` (10-4)`) from an antigen/serum
+    entry's name (`N`) and passage (`P`) in place."""
     entry["N"] = sReConc.sub("", entry["N"])
     entry["P"] = sReConc.sub("", entry["P"])
 
 # ----------------------------------------------------------------------
 
 def fix_name_for_comparison(name):
+    """Upper-case a strain name and 4-digit-normalise its trailing year (`18`→`2018`,
+    `99`→`1999`) so antigen and serum names can be matched robustly."""
     fields = name.upper().split("/")
     try:
         year = int(fields[-1])
@@ -345,6 +392,8 @@ def fix_name_for_comparison(name):
     return "/".join(fields)
 
 def detect_reference(antigens, sera):
+    """Flag as reference (`S`=`R`) every antigen whose name matches a serum name (after
+    `fix_name_for_comparison`) — i.e. antigens that are homologous to a serum."""
     # print("\n".join(fix_name_for_comparison(antigen["N"]) for antigen in antigens), "\n\n", "\n".join(fix_name_for_comparison(serum["N"]) for serum in sera), sep="")
     for antigen in antigens:
         if any(fix_name_for_comparison(serum["N"]) == fix_name_for_comparison(antigen["N"]) for serum in sera):

@@ -15,7 +15,9 @@ sData = {
 }
 
 def semantic_attribute_data_for_subtype(subtype: str) -> dict:
+    """Serology-antigen semantic-attribute data for a subtype (placeholder table here)."""
     return {"serology": sData.get(subtype, [])}
 
 def semantic_plot_spec_data_for_subtype(subtype: str) -> dict:
+    """Serology plot-spec data for a subtype (none in this skeleton)."""
     return {}

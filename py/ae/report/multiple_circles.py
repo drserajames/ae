@@ -75,6 +75,8 @@ class SerumPick:
 
 @dataclass
 class LabConfig:
+    """Per-lab configuration for the multiple-serum-circles figures: the lab directory,
+    title, kateri viewport, the curated `SerumPick`s, the circle fold, and marker sizing."""
     labdir: str
     title: str
     viewport: Sequence[float]          # [center_x, center_y, width] for kateri

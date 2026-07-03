@@ -1,3 +1,6 @@
+"""
+ae.chart.info — human-readable text summary of an antigenic chart.
+"""
 import re
 
 import ae_backend.chart_v3
@@ -5,6 +8,9 @@ import ae_backend.chart_v3
 # ======================================================================
 
 def info(chart: ae_backend.chart_v3.Chart, show_projections: bool = False, show_forced_column_bases: bool = False, show_sources: bool = False) -> str:
+    """Return a multi-line text summary of `chart`: its name, antigen/serum counts and
+    projection count, and optionally the per-projection details (stress, minimum column
+    basis, disconnected/unmovable points), the source charts, and the forced column bases."""
 
     num_projections = chart.number_of_projections()
     nprj = f"projections:{num_projections}" if num_projections else "no projections"

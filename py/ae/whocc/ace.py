@@ -1,3 +1,12 @@
+"""
+ae.whocc.ace — post-parse cleanup of an in-memory `.ace` chart dict.
+
+`DataFixer` runs after a chart is parsed to normalise it: re-parse every antigen and serum
+name and passage through the `ae_backend.virus` parsers (splitting out reassortant / extra
+annotations), mark duplicate antigens `DISTINCT`, and flag reference antigens (those sharing
+a serum's name). It accumulates a change report and the set of unrecognised locations
+(looked up in geonames).
+"""
 import sys, re, pprint
 import ae_backend
 from locdb_v2 import geonames, geonames_make_eval
@@ -6,10 +15,15 @@ from ..utils import json
 # ======================================================================
 
 class DataFixer:
+    """Normalises a parsed `.ace` chart dict in place: antigen/serum names and passages,
+    duplicate marking, and reference-antigen detection. Collects a change report and the
+    unrecognised-location set."""
 
     sDistinct = "DISTINCT"
 
     def __init__(self, ace_data: dict):
+        """Wrap the `.ace` data dict; read the chart's type/subtype and init the report
+        buffers."""
         self.ace_data = ace_data
         self.type_subtype = self.ace_data["c"].get("i", {}).get("V", "")
         if not self.type_subtype:
@@ -18,6 +32,8 @@ class DataFixer:
         self.not_found_locations = set()
 
     def process(self, report: bool = True):
+        """Run the full fix pipeline (names, passages, dates, mark-duplicates-distinct,
+        detect-reference — in that order) and optionally print the report."""
         self.antigen_names()
         self.serum_names()
         self.antigen_passages()
@@ -31,22 +47,27 @@ class DataFixer:
     # ----------------------------------------------------------------------
 
     def antigen_names(self):
+        """Re-parse and normalise every antigen name (via `_name`)."""
         for no, antigen in enumerate(self.ace_data["c"]["a"]):
             self._name(antigen, ag_sr="AG", no=no)
 
     def serum_names(self):
+        """Re-parse and normalise every serum name (via `_name`)."""
         for no, serum in enumerate(self.ace_data["c"]["s"]):
             self._name(serum, ag_sr="SR", no=no)
 
     def antigen_passages(self):
+        """Re-parse and normalise every antigen passage (via `_passage`)."""
         for no, antigen in enumerate(self.ace_data["c"]["a"]):
             self._passage(antigen, ag_sr="AG", no=no)
 
     def serum_passages(self):
+        """Re-parse and normalise every serum passage (via `_passage`)."""
         for no, serum in enumerate(self.ace_data["c"]["s"]):
             self._passage(serum, ag_sr="SR", no=no)
 
     def antigen_dates(self):
+        """Placeholder for antigen-date normalisation (currently a no-op)."""
         pass
         # for no, antigen in enumerate(self.ace_data["c"]["a"]):
         #     if orig_date := antigen.get("D"):
@@ -65,6 +86,8 @@ class DataFixer:
                 antigen["S"] += "R"
 
     def mark_duplicates_as_distinct(self):
+        """Tag every antigen after the first that shares an identical full name (name +
+        reassortant + annotations + passage) with the `DISTINCT` annotation."""
         full_names = {}
         for no, antigen in enumerate(self.ace_data["c"]["a"]):
             full_name = " ".join(str(part) for part in (antigen.get(part_name) for part_name in ["N", "R", "a", "P"]) if part)
@@ -79,6 +102,8 @@ class DataFixer:
                         self.report_data.append(f">>  AG {no:3d} distinct \"{full_name}\", see AG {nos[0]}")
 
     def report(self):
+        """Print the accumulated change messages and any unrecognised locations (with
+        geonames lookups for each)."""
         if self.report_data or self.not_found_locations:
             print()
         if self.report_data:

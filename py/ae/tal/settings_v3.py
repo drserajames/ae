@@ -210,6 +210,8 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list,
     visited: set = set()  # sub-array names already walked (so builtin hooks aren't doubled)
 
     def walk(program) -> None:
+        """Recursively walk a `.tal` settings program — expanding each referenced sub-array
+        once — accumulating the canvas height and width from its draw items."""
         nonlocal canvas_height, width
         for item in program:
             if isinstance(item, str):
@@ -429,6 +431,9 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
     node_mods: list = []
 
     def run(program) -> None:
+        """Recursively execute a `.tal` settings program: expand references (skipping
+        `?`-disabled ones), handle builtins such as `clades-whocc`, and collect the schema
+        and node modifiers."""
         for item in program:
             if isinstance(item, str):
                 if item.startswith("?"):

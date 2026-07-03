@@ -1,3 +1,6 @@
+"""
+ae.semantic.serum_circle — set serum-circle semantic attributes and build serum-circle styles.
+"""
 import sys
 import ae_backend
 

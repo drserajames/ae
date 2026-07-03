@@ -24,6 +24,16 @@
 #
 # Decoupled from ConferenceData: make_geo takes a TimeSeriesRange directly.
 
+"""
+ae.report.geographic — build the report's geographic time-series maps via geo-draw.
+
+The Python glue extracts per-month `{location, count}` (optionally per-clade) records from
+hidb, writes geo-draw's `--data` JSON, and drives geo-draw to render one PDF per month
+(`geo/<subtype>-<YYYY-MM>.pdf`) for the report to embed. Supports colouring by continent
+(dots) or by clade (per-location pies / AA-rule colouring), resolving clades/sequences from
+the subtype's seqdb. Ported from the vcm tooling and rewired for ae's `cc/geo` renderer.
+"""
+
 import calendar
 import json
 import os
@@ -167,6 +177,8 @@ class _CladeResolver:
     If seqdb is unavailable, every lookup returns "unknown" (geo still renders, all one bucket)."""
 
     def __init__(self, ae_backend, seqdb_subtype: str):
+        """Open the subtype's seqdb (None if unavailable → every clade becomes "unknown")
+        and initialise the per-antigen clade cache."""
         self._cache: dict[tuple, str] = {}
         self._clades_file = os.environ.get("AC_CLADES_JSON_V2")
         try:
@@ -176,6 +188,8 @@ class _CladeResolver:
             self._seqdb = None
 
     def clade(self, ag) -> str:
+        """Resolve a hidb antigen's clade via the subtype's seqdb (name/reassortant/passage
+        match), memoised; "unknown" if there is no match or no seqdb."""
         if self._seqdb is None:
             return "unknown"
         # hidb antigen exposes name() and readonly passage/reassortant fields.
@@ -274,6 +288,8 @@ class _Coloring:
     (name, reassortant, passage)."""
 
     def __init__(self, ae_backend, seqdb_subtype: str, spec: dict):
+        """Normalise the colouring `spec` into a default plus ordered rules, and open the
+        subtype's seqdb (None if unavailable → default colouring only)."""
         self._default, self._rules = _norm_coloring(spec)
         self._cache: dict[tuple, dict] = {}
         try:
@@ -302,6 +318,9 @@ class _Coloring:
         return None
 
     def color(self, ag) -> dict:
+        """Resolve a hidb antigen's fill/outline colouring by evaluating the ordered
+        `aa`/`sequenced` rules against its seqdb sequence (later matches win), memoised;
+        the default colouring if unsequenced or unmatched."""
         name = ag.name()
         passage = getattr(ag, "passage", "") or ""
         reassortant = getattr(ag, "reassortant", "") or ""
@@ -384,6 +403,8 @@ def _resolve_geo_draw() -> str:
 # ----------------------------------------------------------------------
 
 def make_index_html(output_file, prefixes, safari):
+    """Write an HTML index page linking each subtype's geographic map PDFs — as `<img>` for
+    Safari, else embedded `<object>` — grouped by subtype under `prefixes`."""
     with Path(output_file).open("w") as f:
         f.write("<html><head><style>\nimg {border: 1px solid black;}\nul {list-style-type: none;}\nli {margin: 0.5em 0; }\nobject {width: 800px; height: 415px; }\n</style><title>Geographic maps</title></head><body>\n")
         for vt in sorted(prefixes):

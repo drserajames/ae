@@ -1,3 +1,6 @@
+"""
+ae.semantic.pale — build the `-pale` background style that fades points to pale colours.
+"""
 import ae_backend
 
 # ======================================================================

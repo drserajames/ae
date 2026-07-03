@@ -44,6 +44,7 @@ REFERENCE_MARK_STYLE = {"edge_color": "#1f78b4", "label_color": "#1f78b4", "labe
 
 
 class SignaturePageError(RuntimeError):
+    """Raised on a signature-page construction error."""
     pass
 
 
@@ -205,6 +206,8 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
             shutil.copyfile(m, str(work / f"map{i}.pdf"))
 
         def boxed(i: int) -> str:
+            """LaTeX for one grid cell: the i-th map PDF bounded to the cell
+            (keepaspectratio), optionally framed with a thin black border."""
             # Bound the map by BOTH the cell width and height (keepaspectratio): kateri's
             # auto-fit maps aren't always square, so a width-only fit would make a tall map
             # overflow the cell and spill the grid to a 2nd page.

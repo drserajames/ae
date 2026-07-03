@@ -1,3 +1,12 @@
+"""
+ae.sequences.source.fasta — read and write FASTA sequence files.
+
+The `reader` iterates a FASTA file yielding `(metadata, sequence)`, parsing each defline in
+turn as a GISAID (`_|_`-delimited), naomi (` | `-delimited) or plain name; the name/date/
+passage parsers come from ae.sequences.source.parse. `write` emits selected seqdb sequences
+back to FASTA (AA or nucleotide). `add_metadata_to_sequence` copies a parsed metadata dict
+onto a raw `Sequence`. Consumed by the seqdb-population pipeline.
+"""
 import sys, re, io, pprint
 from pathlib import Path
 from typing import Union
@@ -7,15 +16,20 @@ from .parse import Context, parse_name, parse_date, parse_passage
 
 # ======================================================================
 
-class Error (RuntimeError): pass
+class Error (RuntimeError):
+    """Raised on a malformed FASTA defline."""
+    pass
 
 # ======================================================================
 # reader
 # ======================================================================
 
 class reader:
+    """Iterating reader over a FASTA file, yielding `(metadata, sequence)`. Each defline is
+    tried as a GISAID name, then a naomi name, then a regular name."""
 
     def __init__(self, filename: Path):
+        """Open `filename` for reading; infer a NIID lab hint from a `niid-` filename prefix."""
         self.reader_ = ae_backend.raw_sequence.FastaReader(filename)
         self.messages = []
         self.unrecognized_locations = set()
@@ -25,6 +39,8 @@ class reader:
             self.lab_hint = None
 
     def __iter__(self):
+        """Yield `(metadata, sequence)` for each FASTA entry, parsing the defline via the
+        GISAID → naomi → regular parsers. The metadata dict may carry an "excluded" key."""
         for en in self.reader_:
             self.context = Context(self, filename=Path(en.filename), line_no=en.line_no)
             metadata = \
@@ -34,9 +50,11 @@ class reader:
             yield metadata, en.sequence # metadata may contain "excluded" key to manually exclude the sequence
 
     def raw(self):
+        """The underlying `ae_backend.raw_sequence.FastaReader`."""
         return self.reader_
 
     def get_and_clear_messages(self):
+        """Return the accumulated parse messages and reset the buffer."""
         messages = self.messages
         self.messages = []
         return messages
@@ -56,6 +74,9 @@ def read_names(filename: Path):
 sRePassageAtEnd = re.compile(r"^(.+)_(E|EGG|CELL|SIAT|MDCK|OR)$", re.I)
 
 def regular_name_parser(name: str, lab_hint: str, context: Context):
+    """Parse a plain (non-GISAID/naomi) defline into metadata: apply the lab hint, split a
+    trailing NIID passage suffix (`_EGG`/`_CELL`/`_SIAT`/… → ae passage codes with `?`), then
+    `parse_name` the remainder."""
     # print(f">>> regular_name_parser \"{name}\"")
     metadata = {"name": name}
     if lab_hint:
@@ -77,7 +98,12 @@ def regular_name_parser(name: str, lab_hint: str, context: Context):
 # ======================================================================
 
 def write(filename_or_stream: Union[io.TextIOWrapper, Path], selected: ae_backend.seqdb.Selected, aa: bool, wrap_pos: int = 0, truncate_at: int = 0, name=lambda ref: ref.seq_id(), expand_too_short = False):
+    """Write `selected` seqdb sequences to a FASTA file or stream (`"-"` = stdout). `aa`
+    chooses amino-acid vs nucleotide sequence; `wrap_pos` wraps lines; `truncate_at` clips;
+    `name` maps a ref to its defline; `expand_too_short` pads short sequences to the group
+    max length (`X` for AA, `-` for nucleotides)."""
     def do_wrap(data: str):
+        """Wrap `data` at `wrap_pos` characters per line (no-op when `wrap_pos` is 0)."""
         if wrap_pos:
             return "\n".join(data[i:i + wrap_pos] for i in range(0, len(data), wrap_pos))
         else:
@@ -111,6 +137,9 @@ def write(filename_or_stream: Union[io.TextIOWrapper, Path], selected: ae_backen
 # ======================================================================
 
 def gisaid_name_parser(name: str, context: Context) -> str:
+    """Parse a GISAID-style `_|_`-delimited defline into metadata, or None if it isn't
+    GISAID-shaped. Handles the manually-excluded (`x=`) 19-field form. Raises Error on an
+    unexpected field count."""
     fields = [en.strip() for en in name.split("_|_")]
     if len(fields) == 1:
         return None             # not a gisaid
@@ -126,6 +155,8 @@ def gisaid_name_parser(name: str, context: Context) -> str:
 # ----------------------------------------------------------------------
 
 def gisaid_extract_fields(fields: list, context: Context):
+    """Turn GISAID `key=value` fields into a metadata dict (single-letter keys mapped via
+    `sGisaidFieldKeys`, values cleaned by `gisaid_fix_field`), then run the field parsers."""
     metadata = {"name": fields[0]}
     for field in fields[1:-1]:
         key, value = field.split("=", maxsplit=1)
@@ -134,6 +165,8 @@ def gisaid_extract_fields(fields: list, context: Context):
     return gisaid_parse_fields(metadata=metadata, context=context)
 
 def gisaid_parse_subtype(subtype: str, metadata: dict, context: Context):
+    """Normalise a GISAID subtype code to ae form (`A_H3N2` → `A(H3N2)`, with an `H3N0`
+    special case; `B…` → `B`). Records a message and returns empty for an invalid subtype."""
     subtype = subtype.upper()
     if len(subtype) >= 8 and subtype[0] == "A":
         if subtype[5] != "0" and subtype[7] == "0": # H3N0
@@ -147,13 +180,17 @@ def gisaid_parse_subtype(subtype: str, metadata: dict, context: Context):
         return ""
 
 def parse_lineage(lineage, metadata: dict, context: Context):
+    """Upper-case a B-lineage string."""
     # print(f"parse_lineage \"{lineage}\"")
     return lineage.upper()
 
 def gisaid_parse_lab(lab: str, metadata: dict, context: Context):
+    """Map a GISAID full lab name to its short code via `sGisaidLabs` (unchanged if unknown)."""
     return sGisaidLabs.get(lab.upper(), lab)
 
 def gisaid_parse_fields(metadata: dict, context: Context):
+    """Run each configured field parser (`sGisaidFieldParsers`) over the metadata in place
+    (name last, as it consumes the others); returns the metadata dict."""
     for field_name, parser in sGisaidFieldParsers:
         if field_value := metadata.get(field_name):
             if res := parser(field_value, metadata=metadata, context=context): # parse_name always returns None and updates metadata
@@ -163,6 +200,7 @@ def gisaid_parse_fields(metadata: dict, context: Context):
 sReSpaces = re.compile(r"\s+")
 
 def gisaid_fix_field(value: str):
+    """Collapse whitespace and strip enclosing double quotes from a raw GISAID field value."""
     value = sReSpaces.sub(" ", value.strip()) # collapse spaces (and tabs, simdjson does not like unescaped tabs)
     if value and value[0] == '"' and value[-1] == '"': # enclosed in double quotes (see EPI_ISL_2455085)
         value = value[1:-1]     # also '"' -> ''
@@ -214,6 +252,8 @@ sGisaidLabs = {
 # ======================================================================
 
 def naomi_name_parser(name: str, context: Context) -> str:
+    """Parse a naomi-style ` | `-delimited (7-field) defline into metadata, or None if not
+    naomi-shaped. Raises Error on an unexpected field count."""
     fields = [en.strip() for en in name.split(" | ")]
     if len(fields) == 1:
         return None             # not a naomi
@@ -225,6 +265,8 @@ def naomi_name_parser(name: str, context: Context) -> str:
 # ----------------------------------------------------------------------
 
 def naomi_extract_fields(fields: list, context: Context):
+    """Build a metadata dict from naomi's positional fields (name, date, passage, lab,
+    subtype) and run the field parsers."""
     metadata = {
         "name": fields[0].strip(),
         "date": fields[1].strip(),
@@ -239,6 +281,9 @@ def naomi_extract_fields(fields: list, context: Context):
 # ======================================================================
 
 def add_metadata_to_sequence(metadata: dict, sequence: ae_backend.raw_sequence.Sequence):
+    """Copy parsed metadata fields (name, host, geography, accession, date, subtype, passage,
+    reassortant, lab/lab_id, GISAID ids, and B lineage) onto a raw `Sequence`, skipping empty
+    values; warns to stderr if no name is present."""
     if not metadata.get("name"):
         print(f">> NO NAME in metadata: {metadata}", file=sys.stderr)
     else:

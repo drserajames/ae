@@ -1,3 +1,6 @@
+"""
+ae.semantic.clade — set clade semantic attributes on antigens/sera and build clade styles.
+"""
 import sys, pprint
 from typing import Any
 
@@ -27,11 +30,14 @@ def attributes(chart: ae_backend.chart_v3.Chart, entries: list[dict[str, str]]):
     """expected entries: [{"name": "3C.2a1b.2a.2 156S", "clade": "3C.2a1b.2a.2", "aa": "156S", **ignored}]"""
 
     def set_by_clade_aa(name: str, clade: str, aa: str):
+        """Add clade attribute `name` to every antigen/serum matching both `clade` and the
+        amino-acid `aa`."""
         for selector in [chart.select_antigens, chart.select_sera]:
             for no, ag_sr in selector(lambda en: en.has_clade(clade) and en.aa[aa]):
                 ag_sr.semantic.add_clade(name)
 
     def set_by_aa(name: str, aa: str):
+        """Add clade attribute `name` to every antigen/serum matching the amino-acid `aa`."""
         for selector in [chart.select_antigens, chart.select_sera]:
             for no, ag_sr in selector(lambda en: en.aa[aa]):
                 ag_sr.semantic.add_clade(name)
