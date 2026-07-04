@@ -80,6 +80,8 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         params.clades_label_scale = get_double(clades["label_scale"], 0.0);
         params.clades_width_ratio = get_double(clades["width_ratio"], 0.0);
     }
+    params.dash_column_width_ratio = get_double(config["dash_column_width_ratio"], 0.0);
+    params.dash_fill_fraction = get_double(config["dash_fill_fraction"], 0.0);
     if (const auto& time_series = config["time_series"]; time_series.is_object()) {
         params.time_series = get_bool(time_series["show"]);
         params.time_series_interval = get_string(time_series["interval"], "month");

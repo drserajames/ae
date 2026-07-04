@@ -399,7 +399,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                ? static_cast<double>(time_series.slots.size()) * params.time_series_slot_width * height
                : 0.34 * drawable_w)
         : 0.0;
-    const double dash_col_w = 0.022 * drawable_w;                       // width of one dash-bar column
+    const double dash_col_w_ref = 0.022 * drawable_w;                  // DEFAULT dash-bar column pitch (legend/label fonts scale off this, so narrower columns don't shrink the text)
+    const double dash_col_w = (params.dash_column_width_ratio > 0.0 ? params.dash_column_width_ratio : 0.022) * drawable_w; // width of one dash-bar column
     const double dash_w = static_cast<double>(params.dash_bars.size()) * dash_col_w;
     const int n_right = (label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0) + (dash_w > 0.0)
                         + (grey_dash_w > 0.0) + (hz_marker_w > 0.0);
@@ -774,9 +775,9 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             Color{0x03569b}, Color{0xe72f27}, Color{0xffc808}, Color{0xa2b324}, Color{0xa5b8c7},
             Color{0x049457}, Color{0xf1b066}, Color{0x742f32}, Color{0x9e806e}, Color{0x75ada9},
             Color{0x675b2c}, Color{0xa020f0}, Color{0x8b8989}, Color{0xe9a390}, Color{0xdde8cf}, Color{0x00939f}};
-        const double dash_len = dash_col_w * 0.6;
+        const double dash_len = dash_col_w * (params.dash_fill_fraction > 0.0 ? params.dash_fill_fraction : 0.6);
         const double dash_lw = std::clamp(vstep * 0.6, 0.15, 2.5); // thin marks, AD-like white space
-        const double pos_fs = std::clamp(dash_col_w * 0.5, 6.0, 11.0);
+        const double pos_fs = std::clamp(dash_col_w_ref * 0.5, 6.0, 11.0); // font off the DEFAULT column width, not the (tunable) actual one
         for (std::size_t b = 0; b < params.dash_bars.size(); ++b) {
             const DashBarAAAt& bar = params.dash_bars[b];
             const double col_x = x_dash0 + (static_cast<double>(b) + 0.5) * dash_col_w;
@@ -842,7 +843,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             // matrix) and HORIZONTAL: each position+aa label stacked, in its resolved aa colour
             // (AD draws each label in colors.get(aa); h3_aabar_legend_top). Fall back to the .tal
             // label colour, or a bare position number when no legend is present.
-            const double leg_fs = std::clamp(dash_col_w * 0.42, 5.0, 9.0);
+            const double leg_fs = std::clamp(dash_col_w_ref * 0.42, 5.0, 9.0); // font off the DEFAULT column width, not the (tunable) actual one
             // The legend sits just ABOVE the bar top (AD), not at the very top of the page — the
             // old vmargin anchor left a big gap (the date-label band). Anchor the block so its last
             // label ends a small gap above the bar top (= dev_y(0.5)), then draw downward as before.
