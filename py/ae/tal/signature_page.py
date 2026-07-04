@@ -177,10 +177,6 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
         # height), the tree its natural width (its aspect × height), and let the page WIDTH
         # grow with the number of map columns — so 2-col B/Vic is narrow, 4-col H3 is wide.
         cell_mm = max(20.0, avail_h / rows - row_overhead)
-        tree_w_mm = _pdf_aspect(tree_pdf) * avail_h
-        grid_w_mm = cols * cell_mm + (cols - 1) * col_gap_mm
-        paper_w = 2.0 * margin_mm + tree_w_mm + panel_gap_mm + grid_w_mm
-        tree_w_frac = tree_w_mm / (paper_w - 2.0 * margin_mm)
         # Page HEIGHT = the tightly-packed map grid + margins + a small spill guard. The grid is
         # composed below (auto_width branch) as a \vtop{\offinterlineskip ...} with NO inter-row
         # baselineskip glue, so N rows pack into ~rows*cell_mm. This matches AD's ~199mm sig page;
@@ -189,13 +185,20 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
         # 4-col/10-map 3-row grid is the tightest — verified by sweep). => ~202mm, +1.5% vs AD.
         sig_rowgap_mm = 1.5  # vertical gap between map rows (\vskip in the tight grid below)
         grid_h_mm = rows * cell_mm + (rows - 1) * sig_rowgap_mm
+        # Size the tree to the GRID height. NB: sizing it to the FULL text height (taller than the
+        # grid, to squeeze out the last ~3% of vertical fill) widens the tree column enough to push
+        # the page to a 2nd page (verified: spills h1-cdc). Grid height is the single-page-safe max.
+        tree_w_mm = _pdf_aspect(tree_pdf) * grid_h_mm
+        grid_w_mm = cols * cell_mm + (cols - 1) * col_gap_mm
+        paper_w = 2.0 * margin_mm + tree_w_mm + panel_gap_mm + grid_w_mm
+        tree_w_frac = tree_w_mm / (paper_w - 2.0 * margin_mm)
         paper_h = grid_h_mm + 2.0 * margin_mm + 4.0
     else:
         # Fixed paper: size each cell to fit both the right panel's width and the height.
         right_panel_mm = 0.48 * (paper_w - 2.0 * margin_mm)
         cell_mm = max(10.0, min(right_panel_mm / cols - 3.0, avail_h / rows - row_overhead))
         tree_w_frac = 0.5
-    # For the auto-width sig page the tree matches the (tight) grid height; otherwise avail_h.
+    # Auto-width sig page: tree matches the (tight) grid height (single-page safe); otherwise avail_h.
     tree_h_frac = round((grid_h_mm if auto_width else avail_h) / (paper_h - 2.0 * margin_mm), 3)
     grid_panel_frac = round((cols * cell_mm + cols * col_gap_mm + 2.0) / (paper_w - 2.0 * margin_mm), 3)
 
@@ -530,13 +533,10 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
     return str(path), size
 
 
-def _mapi_viewport_size(mapi_path) -> Optional[float]:
-    """AD's sp.mapi square viewport SIZE (its zoom). kateri centres its auto-fit at this size so
-    the maps frame like AD — passing AD's raw-frame viewport coords directly mis-frames the map
-    (kateri renders the transformed layout, and AD's sp.mapi is off-centre from the cloud)."""
-    from ae.tal import section_maps as SM
-    raw = SM.viewport_from_mapi(mapi_path)  # [x, y, size, size]
-    return float(raw[2]) if raw else None
+# (Removed `_mapi_viewport_size`: the section maps no longer read AD's sp.mapi — the sig-map
+# viewport is now sourced from ae's own `-reset` style, see make_section_signature_page. AD's
+# sp.mapi files in a report dir are AD data copied from the source report; the port must not
+# depend on them.)
 
 
 def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int] = None, map_width: float = 800.0,
@@ -581,22 +581,33 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         leaf_names = SM.leaf_names_from_taldraw(tree, names_settings, TAL_DRAW, tmpdir)
         match = SM.match_leaf_names(leaf_names, chart_obj)
         section_prefixes = SM.assign_prefixes(sections, match)  # A/B/C in tree order (AD set_prefix)
-        _, available_styles = SM.report_styles_from_ace(chart)
+        reset_vp, available_styles = SM.report_styles_from_ace(chart)
         vaccine_marks = SM.vaccine_marks_from_ace(chart)
-        # Framing: kateri auto-fits/centres each map; we just give it AD's sp.mapi ZOOM (square
-        # side) so the maps frame like AD. An explicit `viewport` arg still overrides.
-        mapi_path = Path(chart).parent / "sp.mapi"
-        mapi_size = _mapi_viewport_size(mapi_path) if mapi_path.exists() else None
-        vp = list(viewport) if viewport else None
-        print(f"  [sigp] viewport: {'explicit ' + str([round(x, 2) for x in vp]) if vp else ('kateri auto-fit @ AD size ' + str(mapi_size) if mapi_size else 'kateri auto-fit')}", file=_sys.stderr)
+        # Framing (Sarah's decision, 2026-07-03): frame every section map with the SAME
+        # viewport as the MAIN-REPORT clade maps — the chart's `-reset` style viewport — so a
+        # sig-page map is centred/zoomed IDENTICALLY to that lab's main map. This is a
+        # deliberate divergence from AD's sig framing, which used the per-lab sp.mapi
+        # `loc:viewport` (off-centre from the cloud); we drop it for internal consistency
+        # between the report's main maps and its signature-page maps.
+        #   `reset_vp` = the chart's `-reset` V ([x, y, size, size]), read by
+        # report_styles_from_ace above — the exact list the main clade maps carry as their
+        # style viewport. build_section_styles stores it via `style.viewport(*vp)`, the same
+        # call/mechanism the `-reset` style uses, so the sig style's viewport is byte-identical
+        # to the main map's (no corner->centre conversion needed — the stored `-reset` V is
+        # already in kateri's style-viewport convention). An explicit `viewport` arg overrides;
+        # if a chart has no `-reset` style (not ae.report-styled) fall back to kateri auto-fit.
+        vp = list(viewport) if viewport else (list(reset_vp) if reset_vp else None)
+        print(f"  [sigp] viewport: {('explicit ' if viewport else 'main -reset ') + str([round(x, 2) for x in vp]) if vp else 'kateri auto-fit'}", file=_sys.stderr)
         styled = SM.build_section_styles(chart_obj, sections, match, scale, vp,
                                          available_styles=available_styles, vaccine_marks=vaccine_marks,
                                          serum_circles=serum_circles, serum_circle_fold=serum_circle_fold)
         for s in styled:
             print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
 
+        # viewport_size=0: the explicit per-style viewport (above) frames each map, so kateri
+        # must NOT also auto-fit/centre at a square size (that's what shifted the cluster).
         map_pdfs = render_section_maps_via_kateri(chart_obj, [s["name"] for s in styled], tmpdir / "maps",
-                                                  width=map_width, viewport_size=mapi_size or 0.0)
+                                                  width=map_width, viewport_size=0.0)
 
         # Pass 2: the final tree settings with AD sig-page overrides — title top-left,
         # no aa-at-pos legend, no aa colour-bar dash columns, clades left of the matrix,
@@ -611,9 +622,14 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         # No captions (titles are inside each map), a black frame per map, sans text;
         # the page title is drawn by the tree (above), not the composite.
         columns = math.ceil(len(map_pdfs) / 3)
+        # margin_mm=2 (vs the 6mm default): the composed page height is grid_h + 2*margin + 4,
+        # while the available text height (=grid_h + 4) is INDEPENDENT of margin, so shrinking the
+        # margin raises the tree's fill fraction of the page (tree height is locked to grid_h)
+        # WITHOUT eating into the 4mm single-page spill guard. Closes most of the AD tree-height
+        # gap (the residual is tal-draw's own canvas fill, owned by the tree subsystem).
         compose_grid(tree_pdf, map_pdfs, output, captions=None,
                      page_title=None, tree_caption=tree_caption, columns=columns, frame=True, sans=True,
-                     auto_width=True)
+                     auto_width=True, margin_mm=2.0)
         return Path(output)
     finally:
         if not keep_temp:

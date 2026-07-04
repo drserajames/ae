@@ -91,8 +91,11 @@ namespace ae::geo
         }
 
         const Color land{WHITE};     // white land fill (AD look: white map, grey coastlines)
-        const Color coast{0x808080}; // grey coastline
-        const double coast_w = std::max(0.4, image_width / 2000.0);
+        // P2: AD (acmacs-map-draw geographic-settings.cc:18-19) draws the continent outline in
+        // grey63 (#A1A1A1) at width image_width/1600 (= 0.5 at AD's reference width 800). Was
+        // #808080 grey50 / image_width/2000 (too dark, too thin).
+        const Color coast{0xA1A1A1}; // grey63 continent outline (AD)
+        const double coast_w = image_width / 1600.0;
         const double point_outline_w = std::max(0.5, image_width / 1500.0);
 
         ae::draw::CairoPdf pdf{output, image_width, image_height};

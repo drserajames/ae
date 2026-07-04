@@ -208,8 +208,20 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             if (clade.sections.empty())
                 continue;
             const auto* style = params.clade_styles.count(clade.name) ? &params.clade_styles.at(clade.name) : nullptr;
-            const double incl = style ? style->section_inclusion_tolerance : 0.0;
-            const double excl = style ? style->section_exclusion_tolerance : 0.0;
+            // AD defaults (acmacs-tal clades.hh:74-75): section_inclusion_tolerance{10}, section_exclusion_tolerance{5}.
+            // ae's CladeStyle struct (draw-tree.hh:44-45) + the settings.cc:115-116 reader default these to 0 when
+            // the .tal omits them — and H1's C.1.7 / C.1.7.1 / C.1.7.2 / D.4 set ONLY section-exclusion-tolerance,
+            // never inclusion. With incl=0 no runs merge, so C.1.7's 14 contiguous runs (interior gaps == 2 leaves:
+            // a single interspersed non-C.1.7 leaf between runs) stayed fragmented and the draw below picked only the
+            // LARGEST run — [10776..11096], a stub ~21% of the true [10118..11646] extent, with real C.1.7 leaves
+            // both above and below it (FINDINGS-TREE r8 FIX 1: a MEMBERSHIP bug, not a pos_y bug — proved by dumping
+            // compute_clade_sections). Restore AD's defaults: treat a missing/0 tolerance as AD's 10 / 5, so nearby
+            // runs merge into one full-extent band exactly like AD's Clades::make_sections. Verified across
+            // H1/H3/BVic: every SHOWN clade then collapses to exactly ONE kept band whose largest == full span; only
+            // C.1.7-family + D.4 change (each toward AD's full extent), H3/BVic are byte-unchanged. Explicit per-clade
+            // tolerances (B(5a.1)=20, C(5a.2)=300, D=50/100, …) still win — B(5a.1)'s stray distant runs stay excluded.
+            const double incl = (style && style->section_inclusion_tolerance > 0.0) ? style->section_inclusion_tolerance : 10.0;
+            const double excl = (style && style->section_exclusion_tolerance > 0.0) ? style->section_exclusion_tolerance : 5.0;
             // merge adjacent sections whose gap <= inclusion tolerance
             std::vector<CladeBand> bands;
             for (const auto& section : clade.sections) {
@@ -234,8 +246,16 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             std::size_t longest = 0;
             for (const auto& b : kept) longest = std::max(longest, b.size);
             const int slot = style ? style->slot : -1;
+            // Default all-clades label scale when neither a per-clade nor an all-clades `label.scale`
+            // is given (H1's report .tal sets neither for C.1.7 / D / C.1.9 — their `?scale` keys are
+            // disabled). AD's real struct default is 0.7 (acmacs-tal clades.hh:36 parameters::Label
+            // scale{0.7}); label_size = slot.width * 0.7. The r6 fallback of 0.88 rendered every
+            // default-scaled clade (D and the clades to its right, C.1.9, …) ~26% too big vs AD (r7
+            // item #1). Restore AD's 0.7. Clades with an explicit `scale` (D.1-D.5/D.3.1.1 → 0.5,
+            // C.1.7.1/.2 & C.1.9.x → 0.3) read it via style->label_scale and are unaffected.
+            // H3/BVic set clades_label_scale (1.4) so they take that branch, not this fallback.
             const double lscale = (style && style->label_scale > 0.0) ? style->label_scale
-                                    : (params.clades_label_scale > 0.0 ? params.clades_label_scale : 1.0);
+                                    : (params.clades_label_scale > 0.0 ? params.clades_label_scale : 0.7);
             const int rot = style ? style->rotation_degrees : 90;
             const double offx = style ? style->label_offset_x : 0.002;
             const double offy = style ? style->label_offset_y : 0.0;
@@ -362,21 +382,13 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double margin = 0.03 * width;
     const double drawable_w = width - 2.0 * margin;
     const double gap = 0.012 * width;
-    // Reserve extra WHITESPACE to the left of the tree for the auto-placed aa-transition labels
-    // (they need room to sit beside their — mostly backbone — branches with short, non-crossing
-    // leaders). Sized to the widest single substitution (labels stack one per line) + breathing
-    // room. The tree is shifted right by this; labels are NOT confined to a rigid column.
-    double aa_left = 0.0;
-    if (params.mrca_labels_auto_place && !params.mrca_labels.empty()) {
-        std::size_t maxlen = 0;
-        for (const auto& l : params.mrca_labels) {
-            std::size_t cur = 0, best = 0;
-            for (char c : l.text) { if (c == ' ') { best = std::max(best, cur); cur = 0; } else ++cur; }
-            maxlen = std::max(maxlen, std::max(best, cur));
-        }
-        const double fs = 0.0095 * height;
-        aa_left = static_cast<double>(maxlen) * fs * 0.62 + fs * 3.0; // estimate + generous breathing room
-    }
+    // AD reserves NO dedicated left band for the aa-transition labels: the tree fills the whole
+    // drawable width (root at the left margin) and the labels are placed into whatever whitespace
+    // exists beside their branches (the auto-placer below uses gx0 = margin and tethers, and is
+    // free to overlap sparse tree ink — allowed-B label-placement difference). A left reserve here
+    // shrinks the tree and shifts the root right, so the tree no longer extends as far LEFT as AD
+    // and the title ends up beside the root rather than above it (Sarah r5 items #1/#2). Keep it 0.
+    const double aa_left = 0.0;
     // hz-section marker: the AD sig page draws the section letters (A/B/C) + brackets in a
     // column on the RIGHT, adjacent to the maps (hz_section_labels). The old left reserve
     // (used only to inset the matrix separators) stays when no right marker is drawn.
@@ -388,9 +400,17 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // AD clade column width = (max_slot + 2) * slot.width (a fraction of height). Honour it so
     // brackets land at slot.width*(slot+1); fall back to the old fraction when no slot.width given.
     const double clade_slot_px = params.clades_slot_width > 0.0 ? params.clades_slot_width * height : 0.0;
+    // AD (clades.cc:34) sets width_to_height_ratio = (number_of_slots+2)*slot.width and IGNORES any
+    // configured width-to-height-ratio for the clade column; slot.width defaults to 0.02 (fraction of
+    // height). The report .tal gives only a width-to-height-ratio (0.092 for H1) and NO slot.width, so
+    // ae used to honour 0.092 -> a 92px column that COMPRESSED the slot pitch (15.3px) and the labels
+    // below AD's true 0.02*height (~19px) -> labels too small (r6 #1) AND the deepest label spilled
+    // past the narrow column into the dash bar (r6 #2). Match AD: derive the column width from the AD
+    // slot.width (0.02*height) when no explicit slot.width is given, leaving AD's 2-slot right margin
+    // for the deepest rotated label. (number_of_slots = clade_max_slot+1, so width = (clade_max_slot+3).)
     const double clade_w = (params.clades && !visible_clades.empty())
         ? (clade_slot_px > 0.0 ? static_cast<double>(clade_max_slot + 2) * clade_slot_px
-           : (params.clades_width_ratio > 0.0 ? params.clades_width_ratio * height : 0.09 * drawable_w))
+           : static_cast<double>(clade_max_slot + 3) * 0.02 * height)
         : 0.0;
     // AD sizes the time-series column as n_slots * slot.width (slot.width a fraction of
     // height); honour it so the column is AD's narrow width, falling back to 0.34·drawable.
@@ -406,6 +426,20 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                         + (grey_dash_w > 0.0) + (hz_marker_w > 0.0);
     const double tree_w = drawable_w - aa_left - hz_w - label_w - clade_w - ts_w - dash_w - grey_dash_w - hz_marker_w - gap * n_right;
 
+    // AD (conf/tal.json:93-105) sets the grey matches-chart-antigen dash-bar just 0.005·treeH to the
+    // RIGHT of the time-series — a thin gap, not a full inter-column gap. treeH = the tree band height
+    // (same formula as vmargin/top_reserve/bottom_reserve below; those vars aren't declared yet here).
+    // r7 item #6 — sig-page (hz_section_labels) tree band extended top+bottom to fill more of the
+    // strip like AD (measured AD sig tree [0.035, 0.932] of the composed page vs ae [0.047, 0.925]):
+    // top reserve 0.022 → 0.012 (title still fits just above the tree), bottom reserve 0.075 → 0.066
+    // (still clears the rotated date labels + viridis date-key). Keep these two literals in sync with
+    // the top_reserve / bottom_reserve block below (marker_treeH must equal the tree band height).
+    const double marker_treeH = height - 2.0 * (0.008 * height)
+        - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
+                                        : (params.title.empty() ? 0.0 : 0.035 * height))
+        - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.066 * height : 0.017 * height) : 0.0);
+    const double grey_gap = 0.005 * marker_treeH;   // AD time-series → grey-bar gap (was the full 0.012·width)
+
     double cursor = margin + aa_left + tree_w;
     double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0}, x_dash0{0.0}, x_grey0{0.0}, x_hzmark0{0.0};
     if (params.clades_before_time_series) {
@@ -414,10 +448,13 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         if (label_w > 0.0)     { cursor += gap; x_label0 = cursor;  cursor += label_w; }
         if (clade_w > 0.0)     { cursor += gap; x_clade0 = cursor;  cursor += clade_w; }
         if (ts_w > 0.0)        { cursor += gap; x_ts0 = cursor;     cursor += ts_w; }
-        if (grey_dash_w > 0.0) { cursor += gap; x_grey0 = cursor;   cursor += grey_dash_w; }
-        // hz-section markers on the RIGHT of the time series (AD), hugging the grey-dash/matrix
-        // (small gap) so the brackets sit close to the time series rather than out by the maps.
-        if (hz_marker_w > 0.0) { cursor += gap * 0.25; x_hzmark0 = cursor; cursor += hz_marker_w; }
+        if (grey_dash_w > 0.0) { cursor += grey_gap; x_grey0 = cursor;   cursor += grey_dash_w; }
+        // hz-section markers on the RIGHT of the time series (AD), hugging the grey-dash/matrix.
+        // AD runs the bracket's top/bottom arms right up to (and the section-letter halo slightly
+        // INTO) the grey-dash table edge, so start the marker column with a small NEGATIVE offset:
+        // x_hzmark0 sits just inside the grey column's right edge, the arm-left-end overlapping the
+        // table dashes like AD rather than floating a gap to its right (Sarah r6 sig section item #5a).
+        if (hz_marker_w > 0.0) { cursor -= gap * 0.25; x_hzmark0 = cursor; cursor += hz_marker_w; }
     }
     else {
         // AD layout-tree-only order: labels, time-series matrix, clades, then aa dash-bars.
@@ -464,11 +501,17 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // Signature pages (hz_section_labels) extend the matrix UP toward the maps (small top band)
     // and reserve a deeper BOTTOM band for the date-colour key (#4) under the matrix; standalone
     // trees keep the symmetric date-label bands.
+    // AD insets the matrix by just the rotated date-label band (~0.017·height) top and bottom, so the
+    // tree fills almost the whole canvas (measured AD matrix band = [0.025,0.975] of height once the
+    // 0.008 vmargin is added). A larger reserve here shrinks the tree and leaves blank space at the
+    // bottom. Sig pages (hz_section_labels) keep their own deeper bands (out of scope here).
+    // r7 item #6: sig-page bottom reserve 0.075 → 0.066, top reserve 0.022 → 0.012 so the tree +
+    // time-series fill more of the strip vertically like AD (kept in sync with marker_treeH above).
     const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0)
-        ? (params.hz_section_labels ? 0.075 * height : 0.045 * height)
+        ? (params.hz_section_labels ? 0.066 * height : 0.017 * height)
         : 0.0;
     const double top_reserve = (ts_w > 0.0 || dash_w > 0.0)
-        ? (params.hz_section_labels ? 0.022 * height : 0.045 * height)
+        ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
         : (params.title.empty() ? 0.0 : 0.035 * height);
 
     // --- vertical (shared) + tree horizontal transforms ---
@@ -501,7 +544,12 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // --- title (top-left, near the very top; acmacs-tal Title draws at offset [5,5]) ---
     if (!params.title.empty()) {
         const double title_fs = std::clamp(0.015 * height, 8.0, 26.0);
-        pdf.text(margin, title_fs * 0.95, params.title, title_fs, BLACK, /*center=*/false); // near the very top (AD offset [5,5])
+        // Sit the title ABOVE the tree (Sarah r5 item #2): AD places it so its bottom meets the
+        // tree top (matrix/leaf band starts at vmargin+top_reserve). ae had y=0.95*fs, which put the
+        // glyph-box bottom (y is the box TOP here) ~4pt below the tree top, so it overlapped/occluded
+        // the root backbone and read as "beside" the tree. Raise it so the box clears the tree top.
+        const double title_y = std::min(title_fs * 0.6, vmargin + top_reserve - title_fs);
+        pdf.text(margin, std::max(title_y, 1.0), params.title, title_fs, BLACK, /*center=*/false);
     }
 
     // hz-section separators are no longer drawn here: AD draws the faint grey top/bottom rules
@@ -585,36 +633,116 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     //     matrix, deeper clades stepping right), with horizontal arms to the matrix side and a
     //     name label rotated clockwise (top-to-bottom), sized slot.width * per-clade scale. ---
     if (clade_w > 0.0 && !clade_plan.empty()) {
-        const double slot_px = clade_slot_px > 0.0 ? clade_slot_px : clade_w / static_cast<double>(clade_max_slot + 2);
+        // Slot spacing: AD uses a FIXED slot.width = 0.02 * clades-area-height (acmacs-tal
+        // clades.hh:66 SlotParameters width{0.02}; clades.cc:269 pos_x = viewport.left() +
+        // slot.width*(slot+1)) — NOT ae's old clade_w/(max_slot+2), which bunched the brackets
+        // tighter than AD (measured 0.016w vs AD 0.024w). Adopt AD's value; clamp to
+        // clade_w/(max_slot+1) so the deepest bracket can never overrun the clade column into the
+        // dash-bar column (keeps clade/dash alignment intact — the stated risk).
+        const double clades_area_h = height - 2.0 * vmargin - top_reserve - bottom_reserve;
+        // AD slot.width = 0.02 (fraction of the clades area height); the bracket staircase steps at
+        // slot.width*(slot+1) and the label size = slot.width*scale. Do NOT compress to fit a narrow
+        // column (the old min(..., clade_w/(max_slot+1)) shrank pitch+font below AD) — clade_w is now
+        // sized to AD's (max_slot+3)*0.02*height so the full-pitch staircase + 2-slot label margin fit.
+        const double slot_px = clade_slot_px > 0.0 ? clade_slot_px : 0.02 * clades_area_h;
         // Arrowhead: an ABSOLUTE size tied to page height, not slot_px, so every subtype gets the
         // same head (H1's wide clade slot otherwise produced oversized heads vs H3). ~1.4px @1000.
-        const double ahw = std::clamp(0.0012 * height, 0.8, 1.8);  // arrowhead half-width (narrower -> sharper)
-        const double ahl = ahw * 4.8;                             // arrowhead length (long, crisp apex; AD double_arrow)
+        // AD double_arrow (acmacs-draw Surface::arrow): arrow_width{3.0px} = head FULL width, and
+        // ARROW_WIDTH_TO_LENGTH_RATIO=2.0 => head length = 2*full = 4*half. Rendered half-width ~1.44pt
+        // @1000. Match it: half-width 0.00144*height, length 4*half.
+        const double ahw = std::clamp(0.00144 * height, 0.9, 2.0);  // arrowhead half-width (= AD arrow_width/2)
+        const double ahl = ahw * 4.0;                              // arrowhead length (AD 2.0 ratio on full width)
         const double line_to = ts_w > 0.0 ? x_ts0 : x_clade0;    // grey lines start at the matrix (AD horizontal_line)
         // When the clades column sits LEFT of the matrix (AD sig page), slot 0 (shallow) hugs the
         // matrix edge and deeper clades step toward the tree (left); arms still run right to the
         // matrix and the name label sits to the LEFT of the bracket.
         const bool clades_left = params.clades_before_time_series;
         const double clade_right_edge = x_clade0 + clade_w;
-        for (const auto& plan : clade_plan) {
+        // --- pre-pass: declutter clade LABELS that share a slot and would overlap along the leaf
+        //     axis. AD's sub-clade labels (C.1.7.1/.2, C.1.9.1/.4/.2, …) sit at well-separated band
+        //     centres; ae's ported sections place some adjacent tips close together, so two rotated
+        //     labels centred on their bands overprint into garbled text ("C.1.C1.7.2"). Spread each
+        //     overlapping cluster apart with a small gap, centred on the cluster's mean, so the labels
+        //     read cleanly like AD. Only the TEXT moves — the brackets stay on their true bands. ---
+        std::vector<double> label_cy(clade_plan.size());
+        std::vector<double> label_half(clade_plan.size()); // half text-extent along the leaf axis
+        for (std::size_t i = 0; i < clade_plan.size(); ++i) {
+            const auto& pl = clade_plan[i];
+            const CladeBand* mb = &pl.bands.front();
+            for (const auto& b : pl.bands) if (b.size > mb->size) mb = &b;
+            label_cy[i] = dev_y(static_cast<double>(mb->first_v + mb->last_v) / 2.0) + pl.offset_y * height;
+            const double fs = std::max(slot_px * pl.label_scale, 2.5);
+            const std::string nm = clade_display_for(clade_sections[pl.rank].name);
+            const double tw = pdf.text_size(nm, fs).first;
+            // half text-extent along the leaf axis. text_size under-reports the rendered rotated
+            // advance by ~10-12%, so use 0.6·tw (not tw/2) or two adjacent sub-labels still touch.
+            label_half[i] = (pl.rotation == 0) ? fs * 0.6 : tw * 0.6;
+        }
+        {
+            std::unordered_map<int, std::vector<std::size_t>> by_slot;
+            for (std::size_t i = 0; i < clade_plan.size(); ++i) by_slot[clade_plan[i].slot].push_back(i);
+            const double decl_gap = 0.004 * height; // gap between separated labels (~4px @1000)
+            for (auto& [slot, idxs] : by_slot) {
+                if (idxs.size() < 2) continue;
+                std::sort(idxs.begin(), idxs.end(), [&](std::size_t a, std::size_t b) { return label_cy[a] < label_cy[b]; });
+                std::size_t k = 0;
+                while (k < idxs.size()) {
+                    std::size_t j = k; // grow a cluster of mutually-overlapping labels
+                    while (j + 1 < idxs.size()
+                           && label_cy[idxs[j + 1]] - label_cy[idxs[j]] < label_half[idxs[j]] + decl_gap + label_half[idxs[j + 1]])
+                        ++j;
+                    if (j > k) {
+                        double mean = 0.0, span = 0.0;
+                        for (std::size_t m = k; m <= j; ++m) mean += label_cy[idxs[m]];
+                        mean /= static_cast<double>(j - k + 1);
+                        for (std::size_t m = k; m < j; ++m) span += label_half[idxs[m]] + decl_gap + label_half[idxs[m + 1]];
+                        label_cy[idxs[k]] = mean - span / 2.0;
+                        for (std::size_t m = k + 1; m <= j; ++m)
+                            label_cy[idxs[m]] = label_cy[idxs[m - 1]] + label_half[idxs[m - 1]] + decl_gap + label_half[idxs[m]];
+                    }
+                    k = j + 1;
+                }
+            }
+        }
+        for (std::size_t plan_index = 0; plan_index < clade_plan.size(); ++plan_index) {
+            const auto& plan = clade_plan[plan_index];
             const Clade& clade = clade_sections[plan.rank];
             const double cx = clades_left
                 ? clade_right_edge - slot_px * (static_cast<double>(plan.slot) + 1.0)
                 : x_clade0 + slot_px * (static_cast<double>(plan.slot) + 1.0); // AD pos_x
-            const double clade_fs = std::clamp(slot_px * plan.label_scale, 3.0, 11.0);      // label_size = slot.width * scale (AD); 11 cap bites only H1's wide derived slot, leaving H3/BVic (7.0/9.8px) untouched
-            // ONE arrow per clade, spanning its LARGEST contiguous band (the AD reference brackets
-            // only the main block — not the whole first..last extent, which a stray distant
-            // section would over-stretch, e.g. H1 B(5a.1)). Collapses the tiny-section clutter too.
+            // AD clades.cc:287 label_size = slot.width * scale with NO upper clamp; the prior
+            // ae cap (14) bit H1 (slot_px ~15.3) and made the labels smaller than AD (r6 item #1).
+            // slot_px*label_scale <= 0.02*clades_area_h (<= ~20px) by construction, so no guard needed
+            // beyond a tiny floor. H3/BVic slot_px (7-9.8) are unaffected (well below the old cap).
+            const double clade_fs = std::max(slot_px * plan.label_scale, 2.5);
+            // ONE arrow per clade, spanning its LARGEST band. After the AD-default merge (incl=10)
+            // above, every SHOWN H1/H3/BVic clade collapses to exactly ONE kept band, so largest ==
+            // the full section extent (C.1.7 now [10118..11646], not the old [10776..11096] stub).
+            // The largest-band pick is retained purely as a safety net: it still excludes any stray
+            // distant run that survives merge+exclude (e.g. B(5a.1)) from over-stretching the bracket,
+            // matching AD's per-section draw for the single kept section.
             const CladeBand* main_band = &plan.bands.front();
             for (const auto& b : plan.bands) if (b.size > main_band->size) main_band = &b;
             const long ext_first = main_band->first_v, ext_last = main_band->last_v;
             {
-                const double y0 = dev_y(static_cast<double>(ext_first)), y1 = dev_y(static_cast<double>(ext_last));
+                // AD's clade double-arrow spans the FULL vertical extent of the section: from
+                // pos_y_above(first) = the TOP edge of the first leaf's row (half a row above its
+                // centre) to pos_y_below(last) = the BOTTOM edge of the last leaf's row (half a row
+                // below its centre) — see acmacs-tal layout.cc:253-268 / clades.cc:271-272. ae drew
+                // centre-to-centre (dev_y(first)..dev_y(last)), one whole vertical_step too short
+                // (missing half a row at each end), so short clades like C.1.7 read as a stub arrow
+                // (r7 item #2). Extend by half a row-step at each end to reach the row edges = AD.
+                const double y0 = dev_y(static_cast<double>(ext_first)) - 0.5 * vstep;
+                const double y1 = dev_y(static_cast<double>(ext_last)) + 0.5 * vstep;
                 // two faint GREY horizontal lines at the clade's top & bottom, from the matrix
                 // start across to the bracket arrow (AD horizontal_line, terminates at pos_x).
+                // P1: AD (clades.hh:79, parameters.hh:14) draws the two horizontal clade arms as
+                // GREY 0.5px (Line default width 0.5). Same px→pt scale as the hz-section marker
+                // (which uses line_width 1.0 directly and matched AD @600dpi), so 0.5 → 0.5.
+                // Gated by main's clades_horizontal_lines toggle (PR #29).
                 if (params.clades_horizontal_lines) {
-                    pdf.line(line_to, y0, cx, y0, GREY, 0.4);
-                    pdf.line(line_to, y1, cx, y1, GREY, 0.4);
+                    pdf.line(line_to, y0, cx, y0, GREY, 0.5);
+                    pdf.line(line_to, y1, cx, y1, GREY, 0.5);
                 }
                 // vertical double-arrow spine with FILLED triangular heads (AD double_arrow).
                 // The spine runs only between the two arrowhead BASES, so the tips are pure
@@ -622,31 +750,49 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 // than two full heads the head length is capped to half the band so the two heads
                 // meet base-to-base at the centre (points still at the extremes), instead of
                 // overlapping into an inward-pointing bowtie; no spine is drawn in that case.
-                const double head_len = std::min(ahl, (y1 - y0) * 0.5);
+                // AD draws FULL-length heads regardless of band height and a spine ONLY between the
+                // head bases (Surface::arrow: line(la,lb) where la,lb are the head attachment points).
+                // For a band shorter than two heads the bases cross, so no spine is drawn and the two
+                // narrow full-length heads overlap into a thin double-arrow — NOT the fat base-to-base
+                // filled diamond a half-band cap produced (the ♦ vs ↕ bug on C.1.7.1/C.1.7.2).
+                const double head_len = ahl;
+                // P1: AD (clades.hh:23-36, parameters.hh:14) draws the arrow SPINE at the Line
+                // default width — BLACK ~1.0px (vs the 0.5px grey arms). Same 1:1 px→pt scale as
+                // the hz-section marker's line_width 1.0. Raised 0.4 → 1.0 (clade brackets were
+                // too thin — known r6 residual).
                 if (y1 - head_len > y0 + head_len)
-                    pdf.line(cx, y0 + head_len, cx, y1 - head_len, BLACK, 0.6);
-                pdf.filled_triangle(cx, y0, cx - ahw, y0 + head_len, cx + ahw, y0 + head_len, BLACK); // top head (up)
-                pdf.filled_triangle(cx, y1, cx - ahw, y1 - head_len, cx + ahw, y1 - head_len, BLACK); // bottom head (down)
+                    pdf.line(cx, y0 + head_len, cx, y1 - head_len, BLACK, 1.0);
+                pdf.filled_triangle(cx, y0, cx - ahw, y0 + head_len, cx + ahw, y0 + head_len, BLACK); // top head (apex up at y0)
+                pdf.filled_triangle(cx, y1, cx - ahw, y1 - head_len, cx + ahw, y1 - head_len, BLACK); // bottom head (apex down at y1)
             }
             {
                 const std::string name = clade_display_for(clade.name);
-                // label centred on the clade's whole vertical extent (AD vpos=middle), shifted by
-                // the per-clade offset (fractions of height); rotation 90 = clockwise (top->bottom),
-                // 0 = horizontal. Placed just right of the arrow.
-                const double center_y = dev_y(static_cast<double>(ext_first + ext_last) / 2.0) + plan.offset_y * height;
+                // label centred on the clade's vertical extent (AD vpos=middle), shifted by the
+                // per-clade offset, then decluttered (see pre-pass) so same-slot labels don't overlap.
+                const double center_y = label_cy[plan_index];
+                // NO halo behind the clade name (r7 item #3): AD draws the clade labels with a plain
+                // transparent background (acmacs-tal Clades::draw calls surface.text with no halo) —
+                // the label sits in the white clade column beside its arrow. The r3 white-halo box was
+                // an ae-only addition Sarah has now reverted; pass halo_width 0 so the background is
+                // transparent (matches AD).
                 if (plan.rotation == 0) {
                     const double tw0 = pdf.text_size(name, clade_fs).first;
                     // horizontal: right of the arrow normally, left of it when clades sit left of the matrix
                     const double tx = clades_left ? (cx - ahw - clade_fs * 0.1 - tw0 + plan.offset_x * height)
                                                   : (cx + ahw + clade_fs * 0.1 + plan.offset_x * height);
-                    pdf.text(tx, center_y + clade_fs * 0.32, name, clade_fs, BLACK, /*center=*/false);
+                    pdf.text(tx, center_y + clade_fs * 0.32, name, clade_fs, BLACK, /*center=*/false, /*monospace=*/false, /*halo_width=*/0.0, WHITE);
                 }
                 else {
-                    // clockwise (top→bottom), vertically centred; just left of the spine when clades_left
+                    // clockwise (top→bottom), vertically centred; placed BESIDE the double-arrow with a
+                    // small gap, not overlapping it. AD's clade labels (C.1.7, D.2, …) sit clear to the
+                    // LEFT of their double-arrow spine when clades_left (a visible gap between the label's
+                    // right edge and the arrow), so anchor at cx - ahw - 1.05·fs (arrow half-width + a
+                    // ~1·fs clearance). (r6 briefly moved this to cx - 0.78·fs to overlap the arrow — that
+                    // was mis-aimed; AD does NOT overlap, so reverted to the beside-the-arrow offset.)
                     const double tx = clades_left ? (cx - ahw - clade_fs * 1.05 + plan.offset_x * height)
                                                   : (cx + ahw + clade_fs * 0.1 + plan.offset_x * height);
                     const double tw = pdf.text_size(name, clade_fs).first;
-                    pdf.text_rotated(tx, center_y - tw / 2.0, name, clade_fs, BLACK, 90.0);
+                    pdf.text_rotated(tx, center_y - tw / 2.0, name, clade_fs, BLACK, 90.0, /*halo_width=*/0.0, WHITE);
                 }
             }
         }
@@ -678,8 +824,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                     pdf.line(x_ts0, dev_y(it->second + 0.5), hz_x1, dev_y(it->second + 0.5), GREY, 0.4);
             }
         }
-        for (std::size_t i = 0; i <= n_slots; ++i) // vertical separators, drawn OVER the horizontals (AD medium grey)
-            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, GREY50, 0.35);
+        for (std::size_t i = 0; i <= n_slots; ++i) // vertical separators (AD SlotSeparator default = BLACK, 0.5px)
+            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, BLACK, 0.5);
         const double dash_w = std::clamp(vstep * 0.5, 0.15, 2.5); // thin marks (AD line_width 0.1) -> more white space
         for (const auto& node : layout.leaves) {
             const Leaf& leaf = tree.leaf(node_index_t{node.node});
@@ -720,6 +866,32 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         const double month_w = pdf.text_size("Sep", slot_fs).first;
         const double year_w = pdf.text_size("24", slot_fs).first;
         const double pair_gap = slot_fs * 0.35;                  // normal inter-line gap
+
+        // --- date-colour key (AD): a horizontal viridis gradient at the bottom date band, keying the
+        //     date→colour scale used to colour antigens in the section maps. Sig pages only. Drawn
+        //     BEFORE the date text so the month/year tokens render ON TOP of the bar (Sarah r6 sig:
+        //     "text on top, bar behind/overlapping upward"). Anchored at the YEAR-token top so the bar
+        //     sits behind the year token and extends down, the month name staying on white above it. ---
+        if (params.hz_section_labels) {
+            // viridis quadratic-bezier gradient (anchors #440154, #40ffff, #fde725), per-term trunc
+            const auto viridis = [](double t) -> Color {
+                const double u = 1.0 - t;
+                const auto ch = [&](int a, int b, int c) { return static_cast<int>(u * u * a + 2.0 * u * t * b + t * t * c); };
+                return Color{static_cast<unsigned>((ch(0x44, 0x40, 0xfd) << 16) | (ch(0x01, 0xff, 0xe7) << 8) | ch(0x54, 0xff, 0x25))};
+            };
+            // Sarah's explicit choice: the viridis date bar spans vertically behind BOTH date rows
+            // of the bottom band — the month token AND the year token sit ON the gradient (text drawn
+            // on top). Deliberate deviation from AD (AD covers only the month row). key_y = month-token
+            // top (bottom+2), key_h spans down to the year-token bottom (month_w + pair_gap + year_w),
+            // with a ~1px pad each side.
+            const double key_y = bottom + 1.0;                             // just above the month-token top
+            const double key_h = month_w + pair_gap + year_w + 2.0;        // both rows: month top → year bottom
+            const int nseg = 72;
+            for (int i = 0; i < nseg; ++i) {
+                const Color col = viridis((i + 0.5) / nseg);
+                pdf.rectangle(x_ts0 + (static_cast<double>(i) / nseg) * ts_w, key_y, ts_w / nseg + 0.6, key_h, col, 0.0, col);
+            }
+        }
         for (std::size_t i = 0; i < n_slots; ++i) {
             const std::string& slot_first = time_series.slots[i].first;     // "YYYY-MM-DD"
             const double lx = x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + xoff;
@@ -735,37 +907,23 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
             const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1]
                                      : (slot_first.size() >= 7 ? slot_first.substr(5, 2) : std::string{});
             if (clockwise) {
-                // top band: year ends just above the matrix; month directly above year (tight pair)
-                pdf.text_rotated(lx, top - 2.0 - year_w, yy, slot_fs, BLACK, 90.0);
+                // AD reads "Mon YY" top-to-bottom (month token first/higher, year token below it) in
+                // BOTH date bands. The two bands are mirror-images about the matrix, so the token that
+                // is "nearest the matrix" differs between them, but the on-page READING ORDER is the
+                // same: month above, year below. (Sarah r6 item #4 — the top band was emitting year
+                // above month, i.e. reversed "YY Mon"; the bottom band was already correct.)
+                // top band (above the matrix): month higher, year just above the matrix edge.
                 pdf.text_rotated(lx, top - 2.0 - year_w - pair_gap - month_w, mon, slot_fs, BLACK, 90.0);
-                // bottom band: year just below the matrix; month directly below year (tight pair)
-                pdf.text_rotated(lx, bottom + 2.0, yy, slot_fs, BLACK, 90.0);
-                pdf.text_rotated(lx, bottom + 2.0 + year_w + pair_gap, mon, slot_fs, BLACK, 90.0);
+                pdf.text_rotated(lx, top - 2.0 - year_w, yy, slot_fs, BLACK, 90.0);
+                // bottom band (below the matrix): month just below the matrix, year below month.
+                pdf.text_rotated(lx, bottom + 2.0, mon, slot_fs, BLACK, 90.0);
+                pdf.text_rotated(lx, bottom + 2.0 + month_w + pair_gap, yy, slot_fs, BLACK, 90.0);
             }
             else { // anticlockwise fallback: combined token
                 const std::string label = fmt::format("{} {}", mon, yy);
                 pdf.text_rotated(lx, bottom_anchor_y, label, slot_fs, BLACK, angle);
                 pdf.text_rotated(lx, top_anchor_y, label, slot_fs, BLACK, angle);
             }
-        }
-
-        // --- date-colour key (#4, AD): a horizontal viridis gradient under the matrix, keying the
-        //     date→colour scale used to colour antigens in the section maps. Sig pages only. ---
-        if (params.hz_section_labels) {
-            // viridis quadratic-bezier gradient (anchors #440154, #40ffff, #fde725), per-term trunc
-            const auto viridis = [](double t) -> Color {
-                const double u = 1.0 - t;
-                const auto ch = [&](int a, int b, int c) { return static_cast<int>(u * u * a + 2.0 * u * t * b + t * t * c); };
-                return Color{static_cast<unsigned>((ch(0x44, 0x40, 0xfd) << 16) | (ch(0x01, 0xff, 0xe7) << 8) | ch(0x54, 0xff, 0x25))};
-            };
-            const double key_y = height - 0.040 * height;   // below the bottom date labels
-            const double key_h = 0.013 * height;
-            const int nseg = 72;
-            for (int i = 0; i < nseg; ++i) {
-                const Color col = viridis((i + 0.5) / nseg);
-                pdf.rectangle(x_ts0 + (static_cast<double>(i) / nseg) * ts_w, key_y, ts_w / nseg + 0.6, key_h, col, 0.0, col);
-            }
-            // AD draws just the gradient bar — no bounding box, no date labels under it.
         }
     }
 
@@ -893,29 +1051,43 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         name_y.reserve(layout.leaves.size());
         for (const auto& ln : layout.leaves)
             name_y.emplace(ln.name, ln.y);
-        // AD section marker: a "]" bracket — the vertical SPINE on the RIGHT, top & bottom arms
-        // pointing LEFT toward the grey-dash/matrix, and the section LETTER at the TOP just to the
-        // RIGHT of the spine (outside the bracket), level with the top arm.
-        const double spine_x = x_hzmark0 + hz_marker_w * 0.50;  // spine on the RIGHT
-        const double arm_len = hz_marker_w * 0.45;              // arms point LEFT, toward the matrix
-        const double label_fs = std::clamp(hz_marker_w * 0.7, 8.0, 18.0);
+        // AD HzSectionMarker::draw (acmacs-tal cc/hz-sections.cc:249-281): per shown section a "]"
+        // that OPENS toward the dash table. The vertical SPINE is on the FAR (map) side — the right
+        // edge of the thin marker strip — and BOTH arms run LEFT from the spine to the dash-table's
+        // right edge (a black continuation of the grey section-separator lines, via AD's
+        // draw_horizontal_line_between(time_series, marker)). The section LETTER (A,B,C… over shown
+        // sections) is centred ON the spine, just below the top arm, in a white box that erases the
+        // spine locally. AD constants (conf/tal.json:14-15,102): line_width 1.0, label_size 2.5,
+        // marker strip width_to_height_ratio 0.005 (× the element viewport height = the tree band).
+        const double strip_w = 0.005 * marker_treeH;        // AD width_to_height_ratio (marker viewport height)
+        const double x_table = x_ts0 + ts_w;                // dash-table right edge = arm LEFT end
+        const double x_spine = x_hzmark0 + strip_w;         // marker strip right edge = spine / arm RIGHT end
+        const double marker_lw = 1.0;                       // AD hz-section-marker line_width
+        const double label_fs  = 2.5 * strip_w;             // AD label_size × strip width (≈0.0125·treeH)
         for (const auto& section : params.hz_sections) {
             const auto itf = name_y.find(section.first), itl = name_y.find(section.last);
             if (itf == name_y.end() || itl == name_y.end())
                 continue;
-            double y0 = dev_y(itf->second - 0.5), y1 = dev_y(itl->second + 0.5);
-            if (y0 > y1)
-                std::swap(y0, y1);
-            pdf.line(spine_x, y0, spine_x, y1, BLACK, 0.7);              // spine (right)
-            pdf.line(spine_x - arm_len, y0, spine_x, y0, BLACK, 0.7);    // top arm -> left (matrix)
-            pdf.line(spine_x - arm_len, y1, spine_x, y1, BLACK, 0.7);    // bottom arm -> left
+            double y_top = dev_y(itf->second - 0.5), y_bot = dev_y(itl->second + 0.5); // gap-lines above/below
+            if (y_top > y_bot)
+                std::swap(y_top, y_bot);
+            pdf.line(x_table, y_top, x_spine, y_top, BLACK, marker_lw);   // top arm    (table -> spine)
+            pdf.line(x_table, y_bot, x_spine, y_bot, BLACK, marker_lw);   // bottom arm  (table -> spine)
+            pdf.line(x_spine, y_top, x_spine, y_bot, BLACK, marker_lw);   // spine       (far/right side)
             if (!section.prefix.empty()) {
-                // letter at the TOP, just to the RIGHT of the spine, level with the top arm (AD)
-                const auto [tw, th] = pdf.text_size(section.prefix, label_fs);
-                const double lx = spine_x + label_fs * 0.12;
-                const double ly = y0 + th * 1.15;
-                pdf.rectangle(lx - label_fs * 0.08, ly - th * 1.05, tw + label_fs * 0.16, th * 1.2, WHITE, 0.0, WHITE);
-                pdf.text(lx, ly, section.prefix, label_fs, BLACK, /*center=*/false);
+                // r10 — letter sits BELOW the top arm, inside the bracket, matching AD exactly
+                // (hz-sections.cc:270-271). Sarah's r8 straddle (glyph centred ON the arm) read too
+                // HIGH, overlapping the horizontal arm; she asked to bring the letter + white box down
+                // to the AD position. AD (surface y DOWN, text anchored at BASELINE, spine = right):
+                //   white box  = top-left {right-0.7w, y_top+0.5h}, size {1.4w, 2.0h}
+                //                 → spans y ∈ [y_top+0.5h, y_top+2.5h], entirely below the arm.
+                //   letter baseline at y_top+2.0h → glyph box [y_top+1.0h, y_top+2.0h], inside the box.
+                // ae's pdf.text y is the glyph-box TOP (not baseline), y increasing downward, so
+                // glyph-box-top = y_top+1.0h reproduces AD's [y_top+1.0h, y_top+2.0h]. The white box
+                // (top y_top+0.5h, height 2.0h) leaves the arm itself visible above it.
+                const auto [w, h] = pdf.text_size(section.prefix, label_fs);
+                pdf.rectangle(x_spine - w * 0.7, y_top + h * 0.5, w * 1.4, h * 2.0, WHITE, 0.0, WHITE);
+                pdf.text(x_spine - w * 0.5, y_top + h * 1.0, section.prefix, label_fs, BLACK, /*center=*/false);
             }
         }
     }
@@ -1388,7 +1560,7 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
         for (const auto& p : done) {
             // leader to the branch midpoint (p.nx,p.ny); attach point (p.cx,p.cy) chosen above.
             if (std::abs(p.cx - p.nx) > p.fs * 0.4 || std::abs(p.cy - p.ny) > p.fs * 0.4)
-                pdf.line(p.nx, p.ny, p.cx, p.cy, GREY, 0.3);
+                pdf.line(p.nx, p.ny, p.cx, p.cy, BLACK, 0.3); // AD LabelTether{BLACK, 0.3px}; thin => renders mid-grey (was light GREY 0xBEBEBE = too pale)
             // stacked text: one substitution per line, each vertically CENTRED in its row so the
             // glyphs fill the collision box (pdf.text anchors the glyph top at y; a cap is ~0.72*fs
             // tall, so top = row-centre - 0.36*fs). This makes the box match the rendered text, so
