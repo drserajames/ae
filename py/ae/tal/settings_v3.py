@@ -670,6 +670,19 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     if legend:
                         bar["legend"] = legend
                     schema.setdefault("dash_bars", []).append(bar)
+            elif name == "dash-bar-style":
+                # Global geometry override for the dash-bar columns: pack the columns tighter
+                # (`column-width-ratio`, fraction of the drawable width; C++ default 0.022) and/or
+                # make the coloured bars fill more/less of each column (`fill-fraction`; C++ default
+                # 0.6). Both keys optional; only emit a key when present so an absent one keeps the
+                # C++ built-in default (legend/position fonts are unaffected — they stay on the
+                # default column width).
+                cwr = cmd.get("column-width-ratio")
+                if isinstance(cwr, (int, float)):
+                    schema["dash_column_width_ratio"] = float(cwr)
+                ff = cmd.get("fill-fraction")
+                if isinstance(ff, (int, float)):
+                    schema["dash_fill_fraction"] = float(ff)
             elif name == "nodes":
                 select_raw, apply_raw = cmd.get("select", {}), cmd.get("apply", {})
                 if not isinstance(select_raw, dict) or not isinstance(apply_raw, dict):
