@@ -1,5 +1,9 @@
+#include <optional>
+#include <string>
+
 #include "py/module.hh"
 #include "py/dynamic.hh"
+#include "py/sd-gate.hh"
 #include "chart/v3/selected-antigens-sera.hh"
 #include "chart/v3/merge.hh"
 
@@ -28,13 +32,18 @@ namespace ae::py
     // ----------------------------------------------------------------------
 
     static inline std::pair<std::shared_ptr<Chart>, ae::chart::v3::merge_data_t> merge(std::shared_ptr<Chart> chart1, std::shared_ptr<Chart> chart2, std::string_view match,
-                                                                                       std::string_view merge_type, bool cca, double sd_limit)
+                                                                                       std::string_view merge_type, bool cca, std::optional<double> sd_limit,
+                                                                                       std::optional<std::string> sd_denominator_arg)
     {
         using namespace ae::chart::v3;
+        // Context-dependent SD-gate defaults resolved by the shared helper (see py/sd-gate.hh,
+        // doc/merge-types.org) so merge and Chart.set_titers_from_layers never diverge.
+        const auto [sd_limit_value, denom] = resolve_sd_gate(sd_limit, sd_denominator_arg);
         merge_settings_t settings{
             .match_level = antigens_sera_match_level(match),
             .combine_cheating_assays_ = cca ? combine_cheating_assays::yes : combine_cheating_assays::no,
-            .sd_limit = sd_limit,
+            .sd_limit = sd_limit_value,
+            .sd_denominator_ = denom,
         };
 
         if (merge_type == "simple" || merge_type == "type1")
@@ -316,7 +325,11 @@ void ae::py::chart_v3_antigens(pybind11::module_& chart_v3_submodule)
         .def("report", &common_antigens_sera_t::report, "indent"_a = 0)                                                     //
         ;
     chart_v3_submodule.def("merge", &ae::py::merge, "chart1"_a, "chart2"_a, "match"_a = "auto", "merge_type"_a = "simple", "combine_cheating_assays"_a = false,
-                           "sd_limit"_a = std::numeric_limits<double>::quiet_NaN());
+                           "sd_limit"_a = std::nullopt, "sd_denominator"_a = std::nullopt,
+                           pybind11::doc(R"(Across-layer titer-merge SD gate (lispmds rule 5: SD > sd_limit -> "*").
+Context-dependent defaults: neither arg -> threshold 1.0, population (n) denominator = legacy AD parity.
+sd_limit given, sd_denominator omitted -> sample (n-1, Racmacs) denominator. Explicit sd_denominator
+("population"/"sample") always wins. sd_limit=float("nan") disables the gate.)"));
 
     // ----------------------------------------------------------------------
 

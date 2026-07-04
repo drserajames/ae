@@ -1,5 +1,6 @@
 #include "py/module.hh"
 #include "py/chart-v3.hh"
+#include "py/sd-gate.hh"
 #include "chart/v3/common.hh"
 #include "chart/v3/selected-antigens-sera.hh"
 #include "chart/v3/procrustes.hh"
@@ -281,6 +282,26 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         // ----------------------------------------------------------------------
 
         .def("titers", pybind11::overload_cast<>(&Chart::titers), pybind11::return_value_policy::reference_internal) //
+
+        .def(
+            "set_titers_from_layers",
+            [](Chart& chart, std::optional<double> sd_limit, std::optional<std::string> sd_denominator) {
+                if (*chart.titers().number_of_layers() < 2)
+                    throw std::invalid_argument{"set_titers_from_layers: chart has fewer than 2 layers, nothing to re-merge (this must be a merged multi-layer chart)"};
+                const auto [limit, denom] = resolve_sd_gate(sd_limit, sd_denominator);
+                return new TiterMergeReport{chart.titers().set_from_layers(chart, limit, denom)};
+            },                                             //
+            "sd_limit"_a = std::nullopt, "sd_denominator"_a = std::nullopt, //
+            pybind11::doc(R"(Recompute the merged titers in place from the preserved layers, applying the across-layer
+SD gate (lispmds rule 5: a cell whose across-layer log2 titers have SD > sd_limit becomes "*").
+Lets a merged multi-layer chart be re-gated instantly (e.g. an sd_limit sweep) without re-merging
+the source tables. Also restores the forced column bases when the layers contain more-than-thresholded
+titers, exactly as a fresh merge would. Returns the titer-merge report.
+
+Context-dependent defaults (shared with chart_v3.merge): neither arg -> threshold 1.0, population (n)
+denominator = legacy AD parity. sd_limit given, sd_denominator omitted -> sample (n-1, Racmacs)
+denominator. Explicit sd_denominator ("population"/"sample") always wins. sd_limit=float("nan")
+disables the gate. Raises if the chart has fewer than 2 layers.)")) //
 
         .def("styles", pybind11::overload_cast<>(&Chart::styles), pybind11::return_value_policy::reference_internal) //
         // implement in kateri! .def("semantic_style_to_legacy", &Chart::semantic_style_to_legacy, "style_name"_a) //
