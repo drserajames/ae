@@ -1,0 +1,9 @@
+#!/bin/sh
+# WHO-data gate — commit-msg: scan the commit message text.
+# $1 is the path to the file holding the proposed commit message.
+# Paired with .githooks/pre-commit (staged contents). Install both with:
+#     git config core.hooksPath .githooks
+# See tools/WHO-DATA-GATE.md. Bypassing this gate is forbidden.
+set -e
+ROOT="$(git rev-parse --show-toplevel)"
+exec python3 "$ROOT/tools/who-data-gate.py" --message-file "$1" --quiet

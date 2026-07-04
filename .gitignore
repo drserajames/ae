@@ -7,3 +7,6 @@ __pycache__
 *~
 *.save
 .claude/
+# WHO-data gate: local private current-season strain list — must never be committed
+.who-strain-list
+.who-strain-list.txt

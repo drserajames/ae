@@ -1,0 +1,46 @@
+name: who-data-gate
+
+# Mechanical gate blocking pre-publication WHO CC influenza data (strain names,
+# amino-acid substitutions, clade tokens, or any private-list strain) from landing
+# in this PUBLIC repo — in file contents OR commit messages.
+# See tools/WHO-DATA-GATE.md. This check must stay green; do not bypass it.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need history to scan PR/push commit messages
+
+      - name: Scan tracked file contents
+        run: python3 tools/who-data-gate.py --all --quiet
+
+      - name: Scan commit messages in this push / PR
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="origin/${{ github.base_ref }}..${{ github.event.pull_request.head.sha }}"
+            git fetch --quiet origin "${{ github.base_ref }}" || true
+          else
+            BEFORE="${{ github.event.before }}"
+            case "$BEFORE" in
+              ""|0000000000000000000000000000000000000000) RANGE="HEAD" ;;
+              *) RANGE="${BEFORE}..${{ github.sha }}" ;;
+            esac
+          fi
+          echo "Scanning commit messages in range: $RANGE"
+          FAIL=0
+          # NUL-delimited so multi-line messages stay intact.
+          while IFS= read -r -d '' MSG; do
+            python3 tools/who-data-gate.py --message "$MSG" --quiet || FAIL=1
+          done < <(git log --format=%B%x00 $RANGE 2>/dev/null || true)
+          exit $FAIL

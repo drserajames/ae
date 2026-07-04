@@ -1,0 +1,28 @@
+# who-data-gate allowlist  (WHO-data-clean by construction: no strain/AA/clade specifics)
+#
+# Lines are '#'-commented. Section headers switch mode:
+#   [allow-literal]  exact tokens (case-insensitive) that are genuine, NON-WHO
+#                    false positives and should pass everywhere (now and future).
+#   [allow-regex]    Python regexes; a matched token passes if it fullmatch()es one.
+#   [skip-path]      fnmatch globs of paths that are NOT scanned at all.
+#
+# For already-public tokens that merely need grandfathering, do NOT list them here —
+# they live (as hashes, no plaintext) in who-data-gate-baseline.txt. Regenerate that
+# with:  tools/who-data-gate.py --update-baseline
+#
+# Hex colour codes (#rrggbb) and 0x.. literals are masked automatically before the
+# rules run, so they need no entry here.
+
+[allow-literal]
+# (add genuine non-WHO code tokens here, e.g. an identifier that trips the AA rule)
+# Invented placeholder strain names used as examples in the gate's own code/docs:
+A/Somewhere/123/2021
+A/Location/123/2021
+B/Place Name/7/17
+B/Some Place/7/17
+
+[allow-regex]
+# (add categorical false-positive patterns here)
+
+[skip-path]
+# Vendored third-party is skipped by default (subprojects/**); add more if needed.
