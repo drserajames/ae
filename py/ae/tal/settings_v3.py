@@ -497,6 +497,10 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     clades["slot_width"] = float(slot["width"])
                 if isinstance(cmd.get("width-to-height-ratio"), (int, float)):
                     clades["width_ratio"] = float(cmd["width-to-height-ratio"])
+                # AD horizontal_line: the two faint grey lines at each clade's top/bottom.
+                # Emit only when explicitly disabled; absent => C++ default (drawn).
+                if cmd.get("horizontal-lines") is False:
+                    clades["horizontal_lines"] = False
                 all_clades = cmd.get("all-clades")
                 if isinstance(all_clades, dict):
                     al = all_clades.get("label")
