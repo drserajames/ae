@@ -3,6 +3,7 @@
 
 #include "py/module.hh"
 #include "py/dynamic.hh"
+#include "py/sd-gate.hh"
 #include "chart/v3/selected-antigens-sera.hh"
 #include "chart/v3/merge.hh"
 
@@ -30,35 +31,18 @@ namespace ae::py
 
     // ----------------------------------------------------------------------
 
-    static inline ae::chart::v3::sd_denominator parse_sd_denominator(std::string_view denom)
-    {
-        using namespace ae::chart::v3;
-        if (denom == "population")
-            return sd_denominator::population;
-        else if (denom == "sample")
-            return sd_denominator::sample;
-        AD_WARNING("unrecognized sd_denominator \"{}\" (expected \"population\" or \"sample\"), using \"population\"", denom);
-        return sd_denominator::population;
-    }
-
     static inline std::pair<std::shared_ptr<Chart>, ae::chart::v3::merge_data_t> merge(std::shared_ptr<Chart> chart1, std::shared_ptr<Chart> chart2, std::string_view match,
                                                                                        std::string_view merge_type, bool cca, std::optional<double> sd_limit,
                                                                                        std::optional<std::string> sd_denominator_arg)
     {
         using namespace ae::chart::v3;
-        // Context-dependent defaults (see doc/merge-types.org): hands-off (neither supplied) reproduces
-        // AD — threshold 1.0 with a population denominator. Supplying a threshold but no denominator falls
-        // back to the sample (n-1, Racmacs) denominator. An explicit sd_denominator always wins. An
-        // explicitly-supplied NaN sd_limit disables the gate (denominator then moot).
-        const bool limit_supplied = sd_limit.has_value();
-        const auto denom = sd_denominator_arg
-                               ? parse_sd_denominator(*sd_denominator_arg)                        // explicit wins
-                               : (limit_supplied ? sd_denominator::sample                         // tuning → sample
-                                                 : sd_denominator::population);                   // hands-off → AD
+        // Context-dependent SD-gate defaults resolved by the shared helper (see py/sd-gate.hh,
+        // doc/merge-types.org) so merge and Chart.set_titers_from_layers never diverge.
+        const auto [sd_limit_value, denom] = resolve_sd_gate(sd_limit, sd_denominator_arg);
         merge_settings_t settings{
             .match_level = antigens_sera_match_level(match),
             .combine_cheating_assays_ = cca ? combine_cheating_assays::yes : combine_cheating_assays::no,
-            .sd_limit = sd_limit.value_or(1.0),                                                   // hands-off → 1.0
+            .sd_limit = sd_limit_value,
             .sd_denominator_ = denom,
         };
 
