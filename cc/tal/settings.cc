@@ -79,6 +79,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         params.clades_slot_width = get_double(clades["slot_width"], 0.0);
         params.clades_label_scale = get_double(clades["label_scale"], 0.0);
         params.clades_width_ratio = get_double(clades["width_ratio"], 0.0);
+        params.clades_horizontal_lines = get_bool(clades["horizontal_lines"], true);
     }
     params.dash_column_width_ratio = get_double(config["dash_column_width_ratio"], 0.0);
     params.dash_fill_fraction = get_double(config["dash_fill_fraction"], 0.0);

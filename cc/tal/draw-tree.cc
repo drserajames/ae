@@ -612,8 +612,10 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
                 const double y0 = dev_y(static_cast<double>(ext_first)), y1 = dev_y(static_cast<double>(ext_last));
                 // two faint GREY horizontal lines at the clade's top & bottom, from the matrix
                 // start across to the bracket arrow (AD horizontal_line, terminates at pos_x).
-                pdf.line(line_to, y0, cx, y0, GREY, 0.4);
-                pdf.line(line_to, y1, cx, y1, GREY, 0.4);
+                if (params.clades_horizontal_lines) {
+                    pdf.line(line_to, y0, cx, y0, GREY, 0.4);
+                    pdf.line(line_to, y1, cx, y1, GREY, 0.4);
+                }
                 // vertical double-arrow spine with FILLED triangular heads (AD double_arrow).
                 // The spine runs only between the two arrowhead BASES, so the tips are pure
                 // triangle apexes with no line poking through to the point. For a band shorter
