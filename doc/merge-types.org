@@ -47,6 +47,55 @@ layout from their source layouts. Then the points of the first chart
 (including common points) are fixed and the merge is *relaxed*,
 i.e. points found only in the second chart are allowed to move.
 
+* Across-layer titer combination (the titer table merge)
+
+The merge types above concern *projection* handling. Independently, whenever a merge
+produces a *layered* table (any merge stacks the source tables as layers), each
+antigen×serum cell's titer is combined *across the layers* by the lispmds algorithm
+(=Titers::merge_titers=, steps 1–9). The steps, verbatim from the code:
+
+: 1. If there are > and < titers, result is *
+: 2. If there are just *, result is *
+: 3. If there are just thresholded titers, result is min (<) or max (>) of them
+: 4. Convert > and < titers to their next values, i.e. <40 to 20, >10240 to 20480
+: 5. Compute SD, if SD > limit, result is *
+: 6. If there are no < nor >, result is mean of log titers.
+: 7..9. thresholded/regular reconciliation
+
+** Rule 5 — the SD gate, and its two knobs
+
+Rule 5 drops a cell to =*= when the standard deviation of its across-layer log2 titers
+exceeds a limit. Its purpose is real: a cell titrated e.g. 40 and 320 for the same
+antigen×serum is an inconsistent repeat, and averaging it launders a titration
+disagreement into a confident-looking titer. Two parameters control it:
+
+- =sd_limit= — the SD ceiling (log2 scale). =NaN= disables the gate (rule 5 skipped).
+- =sd_denominator= — the SD denominator: =population= (÷n, as the legacy AD toolkit
+  =acmacs-chart-2=) or =sample= (÷(n−1), R's =sd()= / Racmacs). Sample SD is larger, so
+  at a common limit it drops *more* cells; the two differ only near the boundary.
+
+** Context-dependent defaults
+
+The Python merge API (=ae_backend.chart_v3.merge=, and the =ae.chart.merge= wrapper)
+resolves the pair of options as follows — the observable behaviour is exactly:
+
+| =sd_limit= supplied? | =sd_denominator= supplied? | effective threshold | effective denominator |
+|----------------------+----------------------------+---------------------+-----------------------|
+| no                   | no                         | 1.0                 | population ← AD parity |
+| yes                  | no                         | as given            | sample (Racmacs)      |
+| no                   | yes                        | 1.0                 | as given              |
+| yes                  | yes                        | as given            | as given              |
+
+Rationale: leave both alone and you reproduce AD/lispmds exactly (population SD @ 1.0,
+the hands-off default). The moment a caller sets a threshold they are tuning the gate,
+so — absent an explicit denominator — the sample (n−1, Racmacs) denominator is used. An
+explicit =sd_denominator= always wins. =sd_limit=float("nan")= still means "no gate".
+
+The C++ =merge_settings_t= holds only the hands-off concrete defaults
+(=sd_limit=1.0=, =sd_denominator=population=); the "threshold-supplied ⇒ sample"
+fallback lives one layer up, in the pybind binding (=cc/py/chart-v3-antigens.cc=), which
+needs to know whether each kwarg was actually passed.
+
 * COMMENT ---- local vars
 :PROPERTIES:
 :VISIBILITY: folded

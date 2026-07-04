@@ -15,6 +15,10 @@ namespace ae::chart::v3
 {
     class Chart;
 
+    // Denominator for the across-layer titer-merge SD gate (lispmds rule 5, "if SD > limit → *").
+    // population = ÷n (matches legacy AD / acmacs-chart-2); sample = ÷(n-1) (matches Racmacs / R sd()).
+    enum class sd_denominator { population, sample };
+
     // ----------------------------------------------------------------------
 
     class data_not_available : public std::runtime_error
@@ -346,8 +350,8 @@ namespace ae::chart::v3
         layer_indexes layers_with_serum(serum_index aSerumNo) const;       // returns list of layer indexes that have non-dont-care titers for the serum, may throw data_not_available
         template <typename Ind> layer_indexes layers_with(Ind no) const { if constexpr (std::is_same_v<Ind, antigen_index>) return layers_with_antigen(no); else return layers_with_serum(no); }
         void create_layers(layer_index num_layers, antigen_index num_antigens);
-        titer_merge_report set_from_layers(Chart& chart, double sd_limit = std::numeric_limits<double>::quiet_NaN());
-        titer_merge_report set_from_layers_report(more_than_thresholded mtt = more_than_thresholded::to_dont_care, double sd_limit = std::numeric_limits<double>::quiet_NaN()) const;
+        titer_merge_report set_from_layers(Chart& chart, double sd_limit = 1.0, sd_denominator denom = sd_denominator::population);
+        titer_merge_report set_from_layers_report(more_than_thresholded mtt = more_than_thresholded::to_dont_care, double sd_limit = 1.0, sd_denominator denom = sd_denominator::population) const;
 
         // ----------------------------------------------------------------------
         // exporting
@@ -413,9 +417,9 @@ namespace ae::chart::v3
         void set_titer(dense_t& titers, antigen_index aAntigenNo, serum_index aSerumNo, const Titer& aTiter) { titers[aAntigenNo.get() * number_of_sera_.get() + aSerumNo.get()] = aTiter; }
         void set_titer(sparse_t& titers, antigen_index aAntigenNo, serum_index aSerumNo, const Titer& aTiter);
 
-        std::pair<Titer, titer_merge> merge_titers(const std::vector<Titer>& titers, more_than_thresholded mtt, double sd_limit) const;
-        titer_merge_report set_titers_from_layers(more_than_thresholded mtt, double sd_limit);
-        std::pair<Titer, titer_merge> titer_from_layers(antigen_index aAntigenNo, serum_index aSerumNo, more_than_thresholded mtt, double sd_limit) const;
+        std::pair<Titer, titer_merge> merge_titers(const std::vector<Titer>& titers, more_than_thresholded mtt, double sd_limit, sd_denominator denom) const;
+        titer_merge_report set_titers_from_layers(more_than_thresholded mtt, double sd_limit, sd_denominator denom);
+        std::pair<Titer, titer_merge> titer_from_layers(antigen_index aAntigenNo, serum_index aSerumNo, more_than_thresholded mtt, double sd_limit, sd_denominator denom) const;
 
         static void remove_antigens(dense_t& data, const antigen_indexes& to_remove, serum_index number_of_sera);
         static void remove_antigens(sparse_t& data, const antigen_indexes& to_remove, serum_index number_of_sera);

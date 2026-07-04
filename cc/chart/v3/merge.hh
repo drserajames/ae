@@ -22,9 +22,14 @@ namespace ae::chart::v3
         projection_merge_t projection_merge{projection_merge_t::type1};
         combine_cheating_assays combine_cheating_assays_{combine_cheating_assays::no};
         remove_distinct remove_distinct_{remove_distinct::no};
-        // Sample SD limit (log2 scale): titers whose sample SD across layers exceeds this become "*".
-        // NaN (default) means no limit. Uses n-1 denominator (matches Racmacs / R sd()).
-        double sd_limit{std::numeric_limits<double>::quiet_NaN()};
+        // Across-layer titer-merge SD gate (lispmds rule 5): a cell whose across-layer log2 titers have
+        // SD > sd_limit becomes "*". These two fields hold the *hands-off* defaults, which reproduce the
+        // legacy AD toolkit: threshold 1.0 with a population (÷n) denominator. The context-dependent
+        // "threshold supplied ⇒ sample denominator" fallback is resolved at the Python binding, which
+        // hands this struct already-concrete values (see cc/py/chart-v3-antigens.cc, doc/merge-types.org).
+        // sd_limit == NaN disables the gate entirely.
+        double sd_limit{1.0};
+        sd_denominator sd_denominator_{sd_denominator::population};
     };
 
     // ----------------------------------------------------------------------

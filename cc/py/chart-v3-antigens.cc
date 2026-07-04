@@ -1,3 +1,6 @@
+#include <optional>
+#include <string>
+
 #include "py/module.hh"
 #include "py/dynamic.hh"
 #include "chart/v3/selected-antigens-sera.hh"
@@ -27,14 +30,36 @@ namespace ae::py
 
     // ----------------------------------------------------------------------
 
-    static inline std::pair<std::shared_ptr<Chart>, ae::chart::v3::merge_data_t> merge(std::shared_ptr<Chart> chart1, std::shared_ptr<Chart> chart2, std::string_view match,
-                                                                                       std::string_view merge_type, bool cca, double sd_limit)
+    static inline ae::chart::v3::sd_denominator parse_sd_denominator(std::string_view denom)
     {
         using namespace ae::chart::v3;
+        if (denom == "population")
+            return sd_denominator::population;
+        else if (denom == "sample")
+            return sd_denominator::sample;
+        AD_WARNING("unrecognized sd_denominator \"{}\" (expected \"population\" or \"sample\"), using \"population\"", denom);
+        return sd_denominator::population;
+    }
+
+    static inline std::pair<std::shared_ptr<Chart>, ae::chart::v3::merge_data_t> merge(std::shared_ptr<Chart> chart1, std::shared_ptr<Chart> chart2, std::string_view match,
+                                                                                       std::string_view merge_type, bool cca, std::optional<double> sd_limit,
+                                                                                       std::optional<std::string> sd_denominator_arg)
+    {
+        using namespace ae::chart::v3;
+        // Context-dependent defaults (see doc/merge-types.org): hands-off (neither supplied) reproduces
+        // AD — threshold 1.0 with a population denominator. Supplying a threshold but no denominator falls
+        // back to the sample (n-1, Racmacs) denominator. An explicit sd_denominator always wins. An
+        // explicitly-supplied NaN sd_limit disables the gate (denominator then moot).
+        const bool limit_supplied = sd_limit.has_value();
+        const auto denom = sd_denominator_arg
+                               ? parse_sd_denominator(*sd_denominator_arg)                        // explicit wins
+                               : (limit_supplied ? sd_denominator::sample                         // tuning → sample
+                                                 : sd_denominator::population);                   // hands-off → AD
         merge_settings_t settings{
             .match_level = antigens_sera_match_level(match),
             .combine_cheating_assays_ = cca ? combine_cheating_assays::yes : combine_cheating_assays::no,
-            .sd_limit = sd_limit,
+            .sd_limit = sd_limit.value_or(1.0),                                                   // hands-off → 1.0
+            .sd_denominator_ = denom,
         };
 
         if (merge_type == "simple" || merge_type == "type1")
@@ -316,7 +341,11 @@ void ae::py::chart_v3_antigens(pybind11::module_& chart_v3_submodule)
         .def("report", &common_antigens_sera_t::report, "indent"_a = 0)                                                     //
         ;
     chart_v3_submodule.def("merge", &ae::py::merge, "chart1"_a, "chart2"_a, "match"_a = "auto", "merge_type"_a = "simple", "combine_cheating_assays"_a = false,
-                           "sd_limit"_a = std::numeric_limits<double>::quiet_NaN());
+                           "sd_limit"_a = std::nullopt, "sd_denominator"_a = std::nullopt,
+                           pybind11::doc(R"(Across-layer titer-merge SD gate (lispmds rule 5: SD > sd_limit -> "*").
+Context-dependent defaults: neither arg -> threshold 1.0, population (n) denominator = legacy AD parity.
+sd_limit given, sd_denominator omitted -> sample (n-1, Racmacs) denominator. Explicit sd_denominator
+("population"/"sample") always wins. sd_limit=float("nan") disables the gate.)"));
 
     // ----------------------------------------------------------------------
 
