@@ -44,28 +44,43 @@ from .settings_v3 import _loads_relaxed
 # viridis purple -> cyan -> yellow.
 VIRIDIS_ANCHORS = (0x440154, 0x40FFFF, 0xFDE725)
 
-# AD antigenic-map-reset recipe (conf/tal.json): all points light grey (grey88) with a
-# WHITE outline (so no visible border); in-tree antigens a touch darker (gray63); in-section
-# antigens filled by date with a black outline; vaccines small with a small label. Sizes are
-# AD's (test 3 / ref 5 / serum 5 / in-section 5 / vaccine 15) scaled to kateri's larger canvas.
-GREY88 = "#e0e0e0"   # AD grey88: out-of-section / "older" antigens
-GRAY63 = "#a1a1a1"   # AD gray63: in-tree antigens (those with a tree leaf)
+# AD antigenic-map-reset recipe (AD conf/tal.json:46-55 + acmacs-map-draw conf/mapi.json:34-38
+# `/all-color`). TWO grey classes, confirmed by rasterising reference-AD/addendum-4.pdf @300dpi:
+#   * grey88 (#e0e0e0): the default for points NOT on the phylo tree — test antigens are SOLID
+#     (fill grey88, OUTLINE grey88 == fill); reference + sera are HOLLOW (transparent fill,
+#     grey88 outline). AD `/all-color color:grey88` sets outline == fill for the filled (test)
+#     points, so greyed test dots have no contrasting edge (Sarah's round-5 "outline matches
+#     fill" feedback — previously we drew them grey88 fill + grey80 outline, a visible mismatch).
+#   * gray63 (#a1a1a1): a DARKER grey for antigens that ARE on the tree (sequenced, a leaf is
+#     present) but fall OUTSIDE the current section — AD `{select:{in-tree,report:false},
+#     fill:gray63, outline:white, outline_width:0.5}`. The white outline separates overlapping
+#     dots (invisible against the white grid). This is the "second grey" — it marks the other
+#     sequenced strains' positions so they read as real tree viruses, just off-clade.
+# In-section antigens are filled by date (viridis) with a thick BLACK outline; vaccines read as
+# ordinary in-section points. (grey80 #cccccc seen in the AD raster is the map GRID, a kateri
+# trait, not antigen styling.)
+GREY88 = "#e0e0e0"   # light grey: non-tree test fill+outline / ref+sera hollow outline (~224)
+GRAY63 = "#a1a1a1"   # darker grey: in-tree, off-section antigen fill (medium grey, ~161)
 WHITE = "#ffffff"
-# Small AD-like sizes (kateri px), tuned by eye against the AD reference. AD's data values
-# are test 3 / ref 5 / serum 5 / in-section 5 / vaccine 15; kept small here so the grid maps
-# read like AD's rather than the report's full-size maps (reset 20 / vaccine 40).
-# Point sizes scaled by 0.742 (2026-06-26, Agent-SIG): measured against AD
-# reference-AD/addendum-4.pdf at 400dpi (grids matched at 64px/unit). AD's in-section
-# isolated-point diameter is 0.242 grid-units; the original sizes (13/18/14/19) rendered
-# ~0.33 (≈1.35x too large). Two empirical iterations (0.814 then x0.912, verified by
-# isolated-point diameter, robust to cluster overlap) → factor 0.742 brings AE to AD's
-# sig-page point size. Was 13/18/14/19.
-BASE_ANTIGEN = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 9.7}
-REF_ANTIGEN_SIZE = 13.3
-BASE_SERUM = {"fill": GREY88, "outline": WHITE, "outline_width": 0.5, "size": 10.4}
+# Sizes/outlines from AD's LIVE sig-page config (2026-0223-ssm/sp/sp.tal, confirmed
+# 2026-06-27). AD units: test 2.5 / reference 3.0 / serum 3.0 / in-section 3.5; scaled to
+# kateri px by ~4.03 (in-section 3.5 -> 14.1, matched to AD by isolated-point diameter).
+# AD /all-color color:grey88 => test = solid grey fill + grey88 outline (== fill); reference +
+# sera = HOLLOW (transparent fill, grey88 outline); in-section = date-colour fill + BLACK outline.
+BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": 1.0, "size": 10.1}
+REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": 12.1}
+BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": 12.1}
+# in-tree but off-section: AD's darker gray63 fill with a thin WHITE outline (width 0.5).
 INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE, "outline_width": 0.5}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": 0.5, "size": 14.1}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": 1.5, "size": 14.1}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
+# Sig-page serum circles draw the EMPIRICAL radius (AD spc.tal empirical.show:true). With the
+# kateri root fix (plot_spec.dart: `T ? t : e`, matching ae's `T`=theoretical convention),
+# theoretical=False selects the empirical radius natively — no inversion workaround needed.
+# The env override remains only to render a theoretical variant for verification crops.
+import os as _os
+SERUM_CIRCLE_THEORETICAL_FLAG = (_os.environ.get("AE_SC_THEORETICAL", "0") != "0")
+
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
 MAP_TITLE_SIZE = 26  # kateri px; sits in the top-left band ABOVE the first horizontal gridline (AD)
@@ -125,6 +140,84 @@ def parse_time_series(tal_path) -> Optional[tuple[str, str]]:
     if not ts or "start" not in ts or "end" not in ts:
         return None
     return (str(ts["start"])[:7], str(ts["end"])[:7])
+
+
+# ======================================================================
+# AD serum-circle `hide-if` rules (spc.tal) — reproduce AD's HIDDEN circles
+# ======================================================================
+#
+# AD's spc serum-circle block (2026-0223-ssm/sp/spc.tal) draws the EMPIRICAL circle
+# for each in-section serum, but HIDES a circle whose radius (or serum name/lab)
+# matches any `hide-if` criterion — AD `mapi-settings-serum-circles.cc`
+# `apply_serum_circles` gates `make_circle(empirical...)` on
+# `!hide_serum_circle(hide_if, serum, empirical.radius())` (l.52-55), and
+# `hide_serum_circle` (l.105-128) hides when `(lab absent || info->lab()==lab) &&
+# (radius < "<" || radius > ">" || name_matches("name"))`. e.g. a per-lab rule can
+# hide every serum from that lab whose empirical circle radius exceeds a threshold.
+# Without this, ae drew a circle for EVERY section serum → extra circles AD suppresses.
+#
+# The rules live in the report's shared `sp/spc.tal` (AD's sp/0do feeds every lab
+# `-s spc.tal`; the per-lab *.spc.tal are empty). ae has no path to that file in the
+# section-map call, but both AD's sp/0do and ae's gen-sigpages-ae.py run from the
+# report dir, so it resolves relative to cwd (override with AE_SPC_TAL).
+
+
+def _load_serum_circle_hide_rules(spc_tal_path=None) -> list[dict]:
+    """Parse the `hide-if` criteria from the report's spc serum-circle block.
+
+    Returns a list of ``{"<":n, ">":n, "name":s, "lab":s}`` dicts (missing keys
+    absent), or ``[]`` if no spc.tal / block is found."""
+    candidates = []
+    env = _os.environ.get("AE_SPC_TAL")
+    if env:
+        candidates.append(Path(env))
+    if spc_tal_path:
+        candidates.append(Path(spc_tal_path))
+    candidates += [Path.cwd() / "sp" / "spc.tal", Path("sp/spc.tal")]
+    for p in candidates:
+        try:
+            if not p.exists():
+                continue
+            tal = _loads_relaxed(p.read_text())
+            for block in tal.get("serum-circles", []):
+                if isinstance(block, dict) and block.get("N") == "serum-circle":
+                    return [r for r in block.get("hide-if", []) if isinstance(r, dict)]
+        except Exception:
+            continue
+    return []
+
+
+def _serum_name_matches(pattern: str, full_name: str) -> bool:
+    """AD `Chart::name_matches`: a ``~``-prefixed pattern is a case-insensitive
+    regex search over the serum's full name; otherwise a plain containment test
+    (approximation of AD's short-name expansion, unused by the report's rules,
+    which are all ``~``-prefixed)."""
+    if not pattern:
+        return False
+    if pattern[0] == "~":
+        try:
+            return re.search(pattern[1:], full_name, re.IGNORECASE) is not None
+        except re.error:
+            return pattern[1:].upper() in full_name.upper()
+    return pattern.upper() in full_name.upper()
+
+
+def _serum_circle_hidden(rules: list[dict], lab: str, full_name: str, radius: float) -> bool:
+    """Port of AD `hide_serum_circle`: hide when a rule's lab is absent or equals
+    `lab` AND (radius < ``"<"`` OR radius > ``">"`` OR the serum name matches
+    ``"name"``)."""
+    for r in rules:
+        rlab = r.get("lab")
+        if rlab is not None and rlab != lab:
+            continue
+        less_than = r.get("<")
+        more_than = r.get(">")
+        name = r.get("name")
+        if (less_than is not None and radius < less_than) \
+                or (more_than is not None and radius > more_than) \
+                or (name is not None and _serum_name_matches(name, full_name)):
+            return True
+    return False
 
 
 # ======================================================================
@@ -484,9 +577,26 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
 
     # serum circles are off by default (AD's antigenic-map-reset does serum-circles-remove);
     # opt-in computes each serum's empirical circle so kateri can draw it.
+    hide_rules: list[dict] = []
+    hide_lab = ""
+    empirical_radius: dict[int, float] = {}
     if serum_circles:
         from ae import semantic
         semantic.serum_circle.attributes(chart)
+        # AD hides some circles per spc.tal `hide-if` (radius/name/lab). Build the lookup
+        # of each serum's EMPIRICAL radius (the drawn circle; AD's empirical.show:true /
+        # theoretical.show:false) at the fold in use, plus this chart's lab, so the
+        # per-section loop below can drop the sera AD suppresses (else ae draws extras).
+        hide_rules = _load_serum_circle_hide_rules()
+        try:
+            hide_lab = chart.info().lab()
+        except Exception:
+            hide_lab = ""
+        if hide_rules:
+            for cd in chart.projection().serum_circles(fold=serum_circle_fold):
+                e = cd.empirical()
+                if e is not None:
+                    empirical_radius[cd.serum_no] = e
 
     # 1. resolve each section's antigens/sera and tag them with a per-section attribute
     per_section = []
@@ -524,11 +634,26 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         if viewport:  # else let kateri auto-fit/centre the map (fills the cell like AD)
             style.viewport(*viewport)
         style.legend.shown = False
-        # base: all points light grey (grey88), white outline (no visible border), small
+        # AD /all-color color:grey88 recipe: every test antigen solid grey88 fill + grey88 outline
+        # (outline == fill); reference antigens HOLLOW (transparent fill, grey88 outline); sera
+        # hollow grey88 squares. Then AD's SECOND grey: antigens that are on the tree but outside
+        # this section get the darker gray63 fill + thin white outline (so the other sequenced
+        # strains' positions read distinctly from the non-tree background). In-section antigens
+        # are coloured by date below and override the gray63 (higher-priority later modifiers).
         style.add_modifier(only="antigens", **BASE_ANTIGEN)
-        style.add_modifier(selector={"R": True}, only="antigens", size=REF_ANTIGEN_SIZE)  # reference antigens a touch bigger
+        style.add_modifier(selector={"R": True}, only="antigens", **REF_ANTIGEN)  # reference = hollow grey88
         style.add_modifier(only="sera", **BASE_SERUM)
-        style.add_modifier(selector={"it": True}, only="antigens", **INTREE_ANTIGEN)  # in-tree antigens gray63
+        # in-tree, off-section = gray63, drawn UNDER the grey88 background (AD plotting order).
+        # AD (acmacs-tal conf/tal.json antigenic-map-reset) `lower`s every test antigen in
+        # ascending-index order, so DrawingOrder ends DESCENDING (lowest chart index on top). The
+        # in-tree / sequenced strains cluster at the HIGHER chart indices, so AD draws them at the
+        # BOTTOM of the test group and the lighter grey88 (older, lower-index, non-tree background)
+        # ends up on top — the map reads light/pale. kateri's default drawing order is the reverse
+        # (ascending: highest index on top), which without this would put the darker gray63 in-tree
+        # dots ON TOP and make the map read dark. `lower=True` pushes the gray63 set beneath the
+        # grey88 background, reproducing AD's "grey88 on top of gray63" texture. In-section antigens
+        # are also in-tree but the date-colour modifiers below re-raise them, so they stay on top.
+        style.add_modifier(selector={"it": True}, only="antigens", lower=True, **INTREE_ANTIGEN)
         if ag_idx:
             # in-section emphasis (black outline + raise); grey fill for dates outside the window
             style.add_modifier(selector={ag_key: True}, only="antigens", fill=NO_DATE_FILL, raise_=True, **INSECTION_ANTIGEN)
@@ -542,13 +667,46 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         # ordinary in-section date-coloured points — so no vaccine marks are applied here.)
         # serum circles (opt-in): empirical circle for each of the section's sera, plus a small
         # dark serum point so the circle centre is visible (AD draws these only when requested).
-        if serum_circles and sr_idx:
+        # AD hides a serum's circle when its EMPIRICAL radius (or name) trips a spc.tal
+        # `hide-if` rule for this lab. A serum with a valid-but-hidden empirical gets NO
+        # circle in AD (theoretical.show:false, and fallback only fires when BOTH empirical
+        # and theoretical are invalid) — so drop it from this section's circle set. Sera
+        # with no empirical are kept: they still get AD's fallback circle.
+        circle_sera = [
+            s for s in sr_idx
+            if not (s in empirical_radius
+                    and _serum_circle_hidden(hide_rules, hide_lab,
+                                             chart.serum(s).designation(), empirical_radius[s]))
+        ] if (serum_circles and hide_rules) else list(sr_idx)
+        if serum_circles and circle_sera:
             from ae import semantic
-            sc_name = f"sigsec-sc-{si:02d}"
-            semantic.serum_circle.style(chart, style_name=sc_name, sera=list(sr_idx), fold=serum_circle_fold,
-                                        priority=base_priority + 100 + si)
-            style.add_modifier(parent=sc_name)
-            style.add_modifier(selector={sr_key: True}, only="sera", fill="black", size=11.1, raise_=True)
+            # AD spc.tal: empirical circle (no dash) with passage-coloured outline
+            # (egg #FF4040 / cell #4040FF / reassortant #FFB040), width 0.6; fallback circle
+            # (fixed radius) when no empirical circle exists, so sera with no homologous antigen
+            # still get a circle (AD draws these — fixes the "missing circle, e.g. cell E").
+            # NB: add the per-serum circle modifiers DIRECTLY to this section's style (passing
+            # style_name=name) — the previous separate-style-plus-`parent=` indirection did not
+            # propagate the per-serum serum_circle modifiers to kateri, so most circles (esp.
+            # egg/red) were missing. This mirrors the serum-coverage path (which renders correctly).
+            # mark_serum_outline=True reproduces AD spc's `mark_serum:{"outline":"passage",
+            # "order":"raise"}`: each circled serum's square outline is recoloured to its passage
+            # colour (matching its circle) and raised, per-serum — replacing the old set-wide grey
+            # square raise, which kept the grey88 BASE_SERUM outline AD does not use.
+            # RADIUS: draw the EMPIRICAL circle, matching AD's live spc.tal
+            # (`empirical.show:true`, `theoretical.show:false` — AD plots the empirical,
+            # optimised-fit radius; the theoretical is fallback-only). The serum's semantic
+            # CI{fold} attribute carries BOTH radii (`e`=empirical, `t`=theoretical, in map
+            # units). kateri's serumCircleData (plot_spec.dart) now selects the radius as
+            # `(mod["T"] ?? false) ? circleData["t"] : circleData["e"]`, matching ae's
+            # `T`=theoretical convention (chart-import.cc: `T` = theoretical(true)/empirical
+            # (false)). So theoretical=False here draws the EMPIRICAL circle natively.
+            semantic.serum_circle.style(
+                chart, style_name=name, sera=list(circle_sera), fold=serum_circle_fold, fallback=True,
+                theoretical=SERUM_CIRCLE_THEORETICAL_FLAG,
+                mark_serum_outline=True, priority=style.priority,
+                circle_style={"outline": {"egg": "#FF4040", "cell": "#4040FF", "reassortant": "#FFB040"},
+                              "fill": {"egg": "transparent", "cell": "transparent", "reassortant": "transparent"},
+                              "outline_width": 2.4, "dash": 0})
         # in-map title: small Helvetica, hard into the top-left corner above the first gridline
         # (AD) — kateri's default title offset is (30, 30), too far in; pull it close to the corner.
         style.plot_title.text.text = section_title(section)
