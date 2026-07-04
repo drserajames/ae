@@ -155,6 +155,28 @@ namespace ae::py
         return sera;
     }
 
+    // Convert an optional (n_antigens x n_sera) nested Python list into a titer_weights
+    // container, validating its shape against the chart. Returns an empty titer_weights
+    // (all weights 1.0, a complete no-op) when no matrix was passed.
+    static inline ae::chart::v3::titer_weights make_titer_weights(const Chart& chart, const std::optional<std::vector<std::vector<double>>>& source)
+    {
+        if (!source.has_value())
+            return {};
+        const auto na = chart.antigens().size();
+        const auto ns = chart.sera().size();
+        if (source->size() != na.get())
+            throw std::invalid_argument{fmt::format("titer_weights: wrong number of rows: {} (expected number of antigens: {})", source->size(), na.get())};
+        ae::chart::v3::titer_weights weights{na, ns};
+        for (size_t ag = 0; ag < na.get(); ++ag) {
+            const auto& row = (*source)[ag];
+            if (row.size() != ns.get())
+                throw std::invalid_argument{fmt::format("titer_weights: wrong number of columns in row {}: {} (expected number of sera: {})", ag, row.size(), ns.get())};
+            for (size_t sr = 0; sr < ns.get(); ++sr)
+                weights.set(antigen_index{ag}, serum_index{sr}, row[sr]);
+        }
+        return weights;
+    }
+
 } // namespace ae::py
 
 // ======================================================================
@@ -269,7 +291,7 @@ void ae::py::chart_v3(pybind11::module_& mdl)
             "relax", //
             [](Chart& chart, size_t number_of_dimensions, size_t number_of_optimizations, std::string_view mcb, bool dimension_annealing, bool rough,
                size_t /*number_of_best_distinct_projections_to_keep*/, std::shared_ptr<SelectedAntigens> antigens_to_disconnect, std::shared_ptr<SelectedSera> sera_to_disconnect,
-               std::optional<size_t> seed, bool disconnect_having_few_titers) {
+               std::optional<size_t> seed, bool disconnect_having_few_titers, std::optional<std::vector<std::vector<double>>> titer_weights) {
                 if (number_of_optimizations == 0)
                     number_of_optimizations = 100;
                 optimization_options opt;
@@ -283,29 +305,31 @@ void ae::py::chart_v3(pybind11::module_& mdl)
                     disconnect.insert_if_not_present(antigens_to_disconnect->points());
                 if (sera_to_disconnect && !sera_to_disconnect->empty())
                     disconnect.insert_if_not_present(sera_to_disconnect->points());
-                chart.relax(number_of_optimizations_t{number_of_optimizations}, minimum_column_basis{mcb}, number_of_dimensions_t{number_of_dimensions}, opt, disconnect);
+                const auto weights = make_titer_weights(chart, titer_weights);
+                chart.relax(number_of_optimizations_t{number_of_optimizations}, minimum_column_basis{mcb}, number_of_dimensions_t{number_of_dimensions}, opt, disconnect, ae::unmovable_points{}, weights);
                 chart.projections().sort(chart);
             },                                                                                                                                                    //
             "number_of_dimensions"_a = 2, "number_of_optimizations"_a = 0, "minimum_column_basis"_a = "none", "dimension_annealing"_a = false, "rough"_a = false, //
             "unused_number_of_best_distinct_projections_to_keep"_a = 5, "disconnect_antigens"_a = nullptr, "disconnect_sera"_a = nullptr,                         //
-            "seed"_a = pybind11::none(), "disconnect_having_few_titers"_a = true,                                                                                  //
-            pybind11::doc{"makes one or more antigenic maps from random starting layouts, adds new projections, projections are sorted by stress"})               //
+            "seed"_a = pybind11::none(), "disconnect_having_few_titers"_a = true, "titer_weights"_a = pybind11::none(),                                             //
+            pybind11::doc{"makes one or more antigenic maps from random starting layouts, adds new projections, projections are sorted by stress. titer_weights: optional (n_antigens x n_sera) nested list; w_ij multiplies titer i,j in stress+gradient (0 removes, 1 default, 2 double)"}) //
 
         .def(
             "relax_incremental", //
             [](Chart& chart, size_t projection_no, size_t number_of_optimizations, bool rough, size_t /*number_of_best_distinct_projections_to_keep*/, bool remove_source_projection,
-               bool unmovable_non_nan_points) {
+               bool unmovable_non_nan_points, std::optional<std::vector<std::vector<double>>> titer_weights) {
                 if (number_of_optimizations == 0)
                     number_of_optimizations = 100;
                 optimization_options opt;
                 opt.precision = rough ? optimization_precision::rough : optimization_precision::fine;
                 opt.rsp = remove_source_projection ? ae::chart::v3::remove_source_projection::yes : ae::chart::v3::remove_source_projection::no;
                 opt.unnp = unmovable_non_nan_points ? ae::chart::v3::unmovable_non_nan_points::yes : ae::chart::v3::unmovable_non_nan_points::no;
-                chart.relax_incremental(projection_index{projection_no}, number_of_optimizations_t{number_of_optimizations}, opt);
+                const auto weights = make_titer_weights(chart, titer_weights);
+                chart.relax_incremental(projection_index{projection_no}, number_of_optimizations_t{number_of_optimizations}, opt, ae::disconnected_points{}, ae::unmovable_points{}, weights);
                 chart.projections().sort(chart);
             }, //
             "projection_no"_a = 0, "number_of_optimizations"_a = 0, "rough"_a = false, "number_of_best_distinct_projections_to_keep"_a = 5, "remove_source_projection"_a = true,
-            "unmovable_non_nan_points"_a = false) //
+            "unmovable_non_nan_points"_a = false, "titer_weights"_a = pybind11::none()) //
 
         // ----------------------------------------------------------------------
 

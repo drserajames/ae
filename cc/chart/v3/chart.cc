@@ -98,10 +98,10 @@ void ae::chart::v3::Chart::forced_column_bases(class column_bases& cb)
 
 // ----------------------------------------------------------------------
 
-void ae::chart::v3::Chart::relax(number_of_optimizations_t number_of_optimizations, minimum_column_basis mcb, number_of_dimensions_t number_of_dimensions, const optimization_options& options, const disconnected_points& disconnected, const unmovable_points& unmovable)
+void ae::chart::v3::Chart::relax(number_of_optimizations_t number_of_optimizations, minimum_column_basis mcb, number_of_dimensions_t number_of_dimensions, const optimization_options& options, const disconnected_points& disconnected, const unmovable_points& unmovable, const titer_weights& weights)
 {
     const auto start_num_dim = options.dimension_annealing == use_dimension_annealing::yes && number_of_dimensions < number_of_dimensions_t{5} ? number_of_dimensions_t{5} : number_of_dimensions;
-    auto stress = stress_factory(*this, start_num_dim, mcb, disconnected, unmovable, options);
+    auto stress = stress_factory(*this, start_num_dim, mcb, disconnected, unmovable, options, weights);
     if (const auto num_connected = antigens().size().get() + sera().size().get() - stress.number_of_disconnected(); num_connected < 3)
         throw std::runtime_error{AD_FORMAT("cannot relax: too few connected points: {}", num_connected)};
     // report_disconnected_unmovable(stress.parameters().disconnected, stress.parameters().unmovable);
@@ -150,7 +150,7 @@ void ae::chart::v3::Chart::relax(number_of_optimizations_t number_of_optimizatio
 
 // ----------------------------------------------------------------------
 
-void ae::chart::v3::Chart::relax_incremental(projection_index source_projection_no, number_of_optimizations_t number_of_optimizations, const optimization_options& options, const disconnected_points& disconnected, const unmovable_points& unmovable)
+void ae::chart::v3::Chart::relax_incremental(projection_index source_projection_no, number_of_optimizations_t number_of_optimizations, const optimization_options& options, const disconnected_points& disconnected, const unmovable_points& unmovable, const titer_weights& weights)
 {
     // cannot keep Projection& to the source bacause projection storage can be reallocated while adding new projections below
     const auto src = [this, source_projection_no](){ return projections()[source_projection_no]; };
@@ -166,7 +166,7 @@ void ae::chart::v3::Chart::relax_incremental(projection_index source_projection_
     if (options.unnp == unmovable_non_nan_points::yes)
         my_unmovable.insert_if_not_present(src().non_nan_points());
 
-    auto stress = stress_factory(*this, num_dim, mcb, my_disconnected, my_unmovable, options);
+    auto stress = stress_factory(*this, num_dim, mcb, my_disconnected, my_unmovable, options, weights);
 
     if (const auto num_connected = antigens().size().get() + sera().size().get() - stress.number_of_disconnected(); num_connected < 3)
         throw std::runtime_error{AD_FORMAT("cannot relax: too few connected points: {}", num_connected)};
