@@ -19,10 +19,8 @@ import lzma
 import collections
 import json
 import re
-# import pprint
 from pathlib import Path
 
-# import ae.utils.datetime
 from ae.utils.time_series import TimeSeriesRange
 from .dirs import lab_title, lab_of_dir
 
@@ -70,7 +68,6 @@ def report_commands() -> list[str]:
         *_blank_page(),
         *_remove_section_numbering(),
         *_table_of_contents(),
-        # latex.T_AntigenicMapTable,
         *_whocc_statistics_table(),
         *_cbox(),
         *_color_coded_by_region(),
@@ -133,7 +130,6 @@ def cover(hemisphere: str, year: str, teleconference: str | None, meeting_date: 
         r"\par}",
         fr"\vspace{{{cover_space['after_meeting_date']}}}{{\large \noindent",
         "Center for Pathogen Evolution\n",
-        # "WHO Collaborating Center for Modeling, Evolution, and Control of Emerging Infectious Diseases\n",
         r"\vspace{10pt} \noindent",
         r"University of Cambridge, United Kingdom",
         "\n",                   # do NOT remove two empty lines!
