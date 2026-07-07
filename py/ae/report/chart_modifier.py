@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/chart_modifier.py — Phase 1b engine tier.
+# Ported from vcm (ssm-report tooling) py/vcm/v2/chart_modifier.py — Phase 1b engine tier.
 # base ChartModifier(ConferenceData) — semantic styling. See py/ae/report/MIGRATION.md.
 """
 ae.report.chart_modifier — semantic-styling base class for report charts.
@@ -214,7 +214,7 @@ class ChartModifier (conference_data_base.ConferenceData):
                                    label_modifier={"size": self.vaccine_label_size(), "slant": "normal", "weight": "normal", "color": self.vaccine_label_color()},
                                    priority=self.style_priority("-vaccines-ts"))
 
-        # semantic.select_mark.style(chart=chart, style_name="-vic", antigen_selector=lambda ag: "VICTORIA/2570/2019" in ag.name)
+        # semantic.select_mark.style(chart=chart, style_name="-vic", antigen_selector=lambda ag: "<STRAIN-NAME>" in ag.name)
 
     def add_serology_style(self):
         """Find the serology antigens, mark them (`serology` semantic attribute), and build
@@ -335,14 +335,14 @@ class ChartModifier (conference_data_base.ConferenceData):
         """Per-subtype map of vaccine strains to disable (not mark as vaccine) — override;
         default none."""
         # subtype specific
-        # {"any": {"name": ["CALIFORNIA/7/2009", "MICHIGAN/45/2015", "BRISBANE/2/2018"]}}
+        # {"any": {"name": ["<STRAIN-1>", "<STRAIN-2>", "<STRAIN-3>"]}}
         return {}
 
     def vaccine_choose(self) -> dict[str, list[dict[str, str | int]]]:
         """Per-chart map choosing which passage variant of a vaccine strain to mark (by
         name or year → index) — override; default none."""
         # chart specific
-        # choose: {"egg": [{"name": "VICTORIA/2570/2019", "index": 1}]} use "name" or "year" as a selector to choose index (default is 0) to get from list for passage
+        # choose: {"egg": [{"name": "<STRAIN-NAME>", "index": 1}]} use "name" or "year" as a selector to choose index (default is 0) to get from list for passage
         return {}
 
     def vaccine_ts_data_key_mapping(self) -> Optional[dict[str, str]]:

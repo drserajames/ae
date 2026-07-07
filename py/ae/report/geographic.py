@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/geographic.py, then
+# Ported from vcm (ssm-report tooling) py/vcm/v2/geographic.py, then
 # rewired for ae's geo-draw renderer (cc/geo). See py/ae/report/MIGRATION.md.
 #
 # Geographic time-series maps. The report-side job (TODO #4) is the Python glue:

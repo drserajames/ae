@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/main_loop.py — Phase 1 engine/library tier.
+# Ported from vcm (ssm-report tooling) py/vcm/v2/main_loop.py — Phase 1 engine/library tier.
 # async command loop + kateri task. See py/ae/report/MIGRATION.md.
 """
 ae.report.main_loop — the async command loop and command-marking decorators.

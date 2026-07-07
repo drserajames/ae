@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/latex.py — Phase 1 engine/library tier.
+# Ported from vcm (ssm-report tooling) py/vcm/v2/latex.py — Phase 1 engine/library tier.
 # the LaTeX assembler engine. See py/ae/report/MIGRATION.md.
 r"""
 ae.report.latex — LaTeX assembler for the seasonal (VCM) report PDF.

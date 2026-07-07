@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/modules.py — Phase 1 engine/library tier.
+# Ported from vcm (ssm-report tooling) py/vcm/v2/modules.py — Phase 1 engine/library tier.
 # hot-reload module machinery. See py/ae/report/MIGRATION.md.
 """
 ae.report.modules — source hot-reload machinery for the report driver.

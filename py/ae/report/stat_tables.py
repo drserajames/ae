@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/stat.py — Phase 1 engine/library tier.
+# Ported from vcm (ssm-report tooling) py/vcm/v2/stat.py — Phase 1 engine/library tier.
 # stat.json.xz -> tabs/csv/html (still shells hidb5-stat; Phase 2 will wire to ae.report.stat). See py/ae/report/MIGRATION.md.
 """
 ae.report.stat_tables — render stat.json (antigen/sera counts) into tab / CSV / HTML tables.

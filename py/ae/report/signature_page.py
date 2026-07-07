@@ -145,7 +145,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     (`report_dir`, with optional per-lab `--prefix`es and tree infix). Returns a process
     exit code."""
     parser = argparse.ArgumentParser(description="Generate signature pages for a seasonal-report working dir")
-    parser.add_argument("report_dir", help="report working dir (e.g. ac/results/ssm/2026-0223-ssm)")
+    parser.add_argument("report_dir", help="report working dir (e.g. ac/results/ssm/<report-dir>)")
     parser.add_argument("--prefix", action="append", dest="prefixes", metavar="PREFIX",
                         help="per-lab chart dir to render (repeatable; default: all discovered)")
     parser.add_argument("--tree-infix", default=None,

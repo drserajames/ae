@@ -23,6 +23,8 @@ B/Some Place/7/17
 
 [allow-regex]
 # (add categorical false-positive patterns here)
+# Intentional placeholder location "LOC" used in tal / section-map tests (not a real strain):
+LOC/[0-9]+/(?:19|20)?[0-9]{2}
 
 [skip-path]
 # Vendored third-party is skipped by default (subprojects/**); add more if needed.

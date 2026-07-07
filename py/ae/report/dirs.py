@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/dirs.py — Phase 1 engine/library tier.
+# Ported from vcm (ssm-report tooling) py/vcm/v2/dirs.py — Phase 1 engine/library tier.
 # working-dir conventions + lab_title/lab_of_dir. See py/ae/report/MIGRATION.md.
 """
 ae.report.dirs — working-directory conventions for the seasonal (ssm/VCM) report.
