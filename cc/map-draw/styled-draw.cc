@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <variant>
@@ -15,6 +16,8 @@
 #include "chart/v3/styles.hh"
 #include "chart/v3/legacy-plot-spec.hh"
 #include "chart/v3/layout.hh"
+#include "chart/v3/titers.hh"
+#include "chart/v3/serum-circles.hh"
 
 // ======================================================================
 // P2 milestone A — headless native render of a chart's on-chart *semantic* styling
@@ -131,6 +134,32 @@ namespace ae::map_draw
             return pc.action == ColorAction::set ? pc.color : fallback;
         }
 
+        // Parse a colour held as a plain std::string (the serum-circle / serum-coverage fow
+        // fields carry std::string, not ae::draw::v2::Color). Mirrors parse_color().
+        ParsedColor parse_color_str(std::string_view s)
+        {
+            if (s.empty())
+                return {};
+            if (s[0] == ':') {
+                if (s == ":pale")
+                    return {ColorAction::pale, {}};
+                if (s == ":bright")
+                    return {ColorAction::bright, {}};
+                return {};
+            }
+            if (s == "T" || s == "transparent")
+                return {ColorAction::set, TRANSPARENT};
+            return {ColorAction::set, ::Color{s}};
+        }
+
+        // Concrete colour from a plain std::string (serum-circle outline/fill): a deferred
+        // modifier / empty string falls back to the given default.
+        ::Color concrete_color_str(std::string_view s, ::Color fallback)
+        {
+            const ParsedColor pc = parse_color_str(s);
+            return pc.action == ColorAction::set ? pc.color : fallback;
+        }
+
         // ---- dynamic::value helpers (selectors + semantic attribute matching) ----
         bool value_is_bool(const ae::dynamic::value& v) { return std::holds_alternative<bool>(v.data()); }
         bool value_as_bool(const ae::dynamic::value& v) { return std::get<bool>(v.data()); }
@@ -148,6 +177,72 @@ namespace ae::map_draw
                 },
                 v.data());
         }
+
+        double value_as_double(const ae::dynamic::value& v)
+        {
+            return std::visit(
+                []<typename T>(const T& c) -> double {
+                    if constexpr (std::is_same_v<T, double>)
+                        return c;
+                    else if constexpr (std::is_same_v<T, long>)
+                        return static_cast<double>(c);
+                    else
+                        return std::numeric_limits<double>::quiet_NaN();
+                },
+                v.data());
+        }
+
+        // kateri Chart.homologousTiterForSerum (chart.dart): rank antigens sharing the serum's
+        // name by annotation / reassortant / passage similarity, return the best (lowest-rank)
+        // non-dont-care titer. Used for the serum-coverage fold threshold.
+        Titer homologous_titer_for_serum(const Chart& chart, serum_index serum_no)
+        {
+            const auto& serum = chart.sera()[serum_no];
+            const auto& antigens = chart.antigens();
+            const auto& titers = chart.titers();
+            const ae::dynamic::value& serum_p = serum.semantic().get("p");
+            int best_rank = 1024;
+            Titer best_titer{"*"};
+            for (const auto ag_no : antigens.size()) {
+                const auto& antigen = antigens[ag_no];
+                if (serum.name() != antigen.name())
+                    continue;
+                int rank = 0;
+                if (serum.annotations() != antigen.annotations())
+                    rank += 16;
+                if (serum.reassortant() != antigen.reassortant())
+                    rank += 8;
+                if (serum.passage() != antigen.passage()) {
+                    rank += 4;
+                    if (!(serum_p == antigen.semantic().get("p")))
+                        rank += 2;
+                }
+                const Titer titer = titers.titer(ag_no, serum_no);
+                if (!titer.is_dont_care() && rank < best_rank) {
+                    best_rank = rank;
+                    best_titer = titer;
+                }
+            }
+            return best_titer;
+        }
+
+        // A serum circle collected during modifier resolution, drawn (delayed) on top of the
+        // points — kateri DrawOn.delayedSerumCircle / SerumCircle.draw. Geometry is kept in
+        // world/map units (radius_world) so it can be mapped to device once the viewport is fixed.
+        struct SerumCircleR
+        {
+            size_t point{0};             // point index (serum) whose coords centre the circle
+            double radius_world{0.0};    // radius in map units (== serum-circle semantic radius)
+            ::Color outline{BLUE};
+            ::Color fill{TRANSPARENT};
+            double outline_width{1.0};
+            long dash{0};
+            bool has_angles{false};
+            double angle0{0.0}, angle1{0.0};
+            ::Color radius_outline{BLACK};
+            double radius_outline_width{1.0};
+            long radius_dash{0};
+        };
 
         // A resolved per-point render state.
         struct PR
@@ -343,6 +438,27 @@ namespace ae::map_draw
         resolve(chart.styles(), std::string{style_name}, resolved, 0);
 
         std::vector<LegendRowR> legend_rows;
+        std::vector<SerumCircleR> serum_circle_list; // collected (milestone F), drawn on top of points
+
+        // helper: raise the given points to the top of the draw order (kateri raiseLowerPoints "r")
+        const auto raise_points = [&](const std::vector<size_t>& to_raise) {
+            if (to_raise.empty())
+                return;
+            std::vector<bool> is_raised(n_points, false);
+            for (const size_t i : to_raise)
+                if (i < n_points)
+                    is_raised[i] = true;
+            std::vector<size_t> kept, moved;
+            for (const size_t i : order) {
+                if (is_raised[i])
+                    moved.push_back(i);
+                else
+                    kept.push_back(i);
+            }
+            order.clear();
+            order.insert(order.end(), kept.begin(), kept.end());
+            order.insert(order.end(), moved.begin(), moved.end());
+        };
 
         // ---- apply modifiers in flat order ----
         for (const semantic::StyleModifier* mp : resolved.modifiers) {
@@ -425,6 +541,90 @@ namespace ae::map_draw
                     row.shape = ms.shape()->get();
                 row.count = matched.size();
                 legend_rows.push_back(std::move(row));
+            }
+
+            // ---- serum circle (milestone F): collect for delayed drawing ----
+            // kateri PlotSpec.serumCircleData + DrawOn.delayedSerumCircle. The radius comes from
+            // the serum's CI{fold} semantic attribute (e=empirical, t=theoretical); a missing
+            // radius falls back to `fold` map units drawn heavily dashed (kateri dash=100).
+            if (m.serum_circle.has_value()) {
+                const semantic::serum_circle_style_t& sc = *m.serum_circle;
+                const std::string ci_key = fmt::format("CI{}", static_cast<int>(sc.fold));
+                for (const size_t i : matched) {
+                    if (i < n_antigens)
+                        continue; // sera only
+                    const auto c = layout[point_index{i}];
+                    if (!c.exists())
+                        continue;
+                    const serum_index sr{i - n_antigens};
+                    std::optional<double> radius_world;
+                    const ae::dynamic::value& ci = chart.sera()[sr].semantic().get(ci_key);
+                    if (ci.is_object()) {
+                        const ae::dynamic::value& r = ci[sc.theoretical ? std::string_view{"t"} : std::string_view{"e"}];
+                        if (!r.is_null()) {
+                            if (const double rv = value_as_double(r); !std::isnan(rv))
+                                radius_world = rv;
+                        }
+                    }
+                    long dash = sc.dash;
+                    if (!radius_world.has_value()) {
+                        if (!sc.fallback)
+                            continue;
+                        radius_world = sc.fold; // fallback: draw a circle of `fold` map units, heavily dashed
+                        dash = 100;
+                    }
+                    SerumCircleR out;
+                    out.point = i;
+                    out.radius_world = *radius_world;
+                    out.outline = concrete_color_str(sc.outline, BLUE);
+                    out.fill = concrete_color_str(sc.fill, TRANSPARENT);
+                    out.outline_width = sc.outline_width;
+                    out.dash = dash;
+                    if (sc.angles.has_value()) {
+                        out.has_angles = true;
+                        out.angle0 = sc.angles->first;
+                        out.angle1 = sc.angles->second;
+                        out.radius_outline = sc.radius_outline.has_value() ? concrete_color_str(*sc.radius_outline, out.outline) : out.outline;
+                        out.radius_outline_width = sc.radius_outline_width.value_or(out.outline_width);
+                        out.radius_dash = sc.radius_dash.value_or(out.dash);
+                    }
+                    serum_circle_list.push_back(out);
+                }
+            }
+
+            // ---- serum coverage (milestone F): restyle antigens within/outside the fold ----
+            // kateri PlotSpec.applySerumCoverage: split the serum's antigens by whether their
+            // titre is within `fold` of the homologous titre, recolour each group's fill/outline,
+            // and raise them (within first, then outside → outside on top).
+            if (m.serum_coverage.has_value()) {
+                const semantic::serum_coverage_style_t& cov_spec = *m.serum_coverage;
+                for (const size_t i : matched) {
+                    if (i < n_antigens)
+                        continue; // sera only
+                    const serum_index sr{i - n_antigens};
+                    serum_coverage_serum_t cov;
+                    try {
+                        cov = serum_coverage(chart.titers(), homologous_titer_for_serum(chart, sr), sr, serum_circle_fold{cov_spec.fold});
+                    }
+                    catch (const std::exception&) {
+                        continue; // kateri warns and skips (no homologous titre / titre too low)
+                    }
+                    const auto restyle = [&](const antigen_indexes& idxs, const semantic::point_style_fow_t& fow, std::vector<size_t>& raised) {
+                        for (const auto ag : idxs) {
+                            const size_t pi = ag.get();
+                            PR& p = pr[pi];
+                            apply_color(parse_color_str(fow.fill), p.fill, p.fill_pale);
+                            apply_color(parse_color_str(fow.outline), p.outline, p.outline_pale);
+                            p.outline_width = fow.outline_width;
+                            raised.push_back(pi);
+                        }
+                    };
+                    std::vector<size_t> within_pts, outside_pts;
+                    restyle(cov.within, cov_spec.within, within_pts);
+                    restyle(cov.outside, cov_spec.outside, outside_pts);
+                    raise_points(within_pts);
+                    raise_points(outside_pts);
+                }
             }
         }
 
@@ -511,6 +711,61 @@ namespace ae::map_draw
         };
         for (const size_t i : order)
             draw_point(i);
+
+        // ---- serum circles (milestone F): drawn on top of the points (kateri drawDelayed) ----
+        // The stored radius is in map units; convert to device with the (uniform) viewport scale.
+        {
+            const double scale = image_w / vp_w; // == image_h / vp_h (uniform)
+            for (const SerumCircleR& s : serum_circle_list) {
+                const auto c = layout[point_index{s.point}];
+                if (!c.exists())
+                    continue;
+                const double cx = dev_x(c[DIMX]), cy = dev_y(c[DIMY]);
+                const double r = s.radius_world * scale;
+                constexpr double two_pi = 2.0 * std::numbers::pi;
+                // radius-line endpoint at a given angle (clockwise from 12 o'clock; matches arc()).
+                const auto endpoint = [&](double angle) { return std::pair{cx + std::sin(angle) * r, cy - std::cos(angle) * r}; };
+
+                if (!s.has_angles) { // whole circle
+                    if (s.dash == 0) {
+                        surface.circle(cx, cy, r, s.outline, s.outline_width, s.fill);
+                    }
+                    else { // kateri circleDashed -> sectorDashed(wholeCircle): fill then dashed arcs
+                        if (!s.fill.is_transparent())
+                            surface.circle(cx, cy, r, TRANSPARENT, 0.0, s.fill);
+                        const double gap = std::numbers::pi / static_cast<double>(s.dash) / 2.0;
+                        const double single = two_pi / static_cast<double>(s.dash);
+                        for (long i = 0; i < s.dash; ++i) {
+                            const double a0 = gap + single * static_cast<double>(i);
+                            surface.arc(cx, cy, r, a0, a0 + single - gap * 2.0, s.outline, s.outline_width);
+                        }
+                    }
+                }
+                else { // angular sector with radius lines (kateri sector / sectorDashed)
+                    if (!s.fill.is_transparent())
+                        surface.sector(cx, cy, r, s.angle0, s.angle1, TRANSPARENT, 0.0, s.fill);
+                    if (s.dash == 0) {
+                        surface.arc(cx, cy, r, s.angle0, s.angle1, s.outline, s.outline_width);
+                    }
+                    else {
+                        const double gap = std::numbers::pi / static_cast<double>(s.dash) / 2.0;
+                        const double single = two_pi / static_cast<double>(s.dash);
+                        const double span = std::abs(s.angle1 - s.angle0);
+                        const long dashes = std::lround(span / single);
+                        for (long i = 0; i < dashes; ++i) {
+                            const double a0 = s.angle0 + gap + single * static_cast<double>(i);
+                            surface.arc(cx, cy, r, a0, a0 + single - gap * 2.0, s.outline, s.outline_width);
+                        }
+                    }
+                    if (s.radius_outline_width > 0.0 && !s.radius_outline.is_transparent()) {
+                        const auto [e0x, e0y] = endpoint(s.angle0);
+                        const auto [e1x, e1y] = endpoint(s.angle1);
+                        surface.line(cx, cy, e0x, e0y, s.radius_outline, s.radius_outline_width);
+                        surface.line(cx, cy, e1x, e1y, s.radius_outline, s.radius_outline_width);
+                    }
+                }
+            }
+        }
 
         // ---- point labels (on top of points) ----
         for (const size_t i : order) {

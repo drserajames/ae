@@ -42,6 +42,11 @@ namespace ae::draw
         // centre -> arc -> centre, so the wedge is closed. Transparent fill = outline only;
         // non-positive outline width / transparent outline skips the stroke.
         void sector(double cx, double cy, double radius, double start_angle, double end_angle, Color outline, double outline_width, Color fill);
+        // Open circular arc stroke (no fill, no radius lines to centre): the arc of the circle
+        // of `radius` centred at (cx, cy) from `start_angle` to `end_angle` (same clockwise-from-
+        // 12-o'clock convention as sector()). Used to build kateri's dashed serum circles, whose
+        // outline is a set of short arcs (unlike sector(), which closes the path to the centre).
+        void arc(double cx, double cy, double radius, double start_angle, double end_angle, Color outline, double outline_width);
         void square(double cx, double cy, double side, Color outline, double outline_width, Color fill);
         void triangle(double cx, double cy, double radius, Color outline, double outline_width, Color fill); // equilateral, point up
         // Egg (kateri PointShape.egg): a closed two-bezier egg of the given `size` (bounding
