@@ -10,6 +10,13 @@
 
 namespace ae::draw
 {
+    // kateri renders map text 2% larger than the nominal size (PdfGraphics.fontScaleToMatchCanvas,
+    // draw_on_pdf.dart) so its PDF text matches its on-screen canvas. The report's golden PDFs carry
+    // that factor, so the semantic-style text primitives (text_font / helvetica text_size) apply it
+    // too — both the drawn glyphs and the metrics the callers size their boxes from — to land on the
+    // golden's glyph pixels rather than ~2% short.
+    static constexpr double kFontScaleToMatchCanvas = 1.02;
+
     static inline void set_source(_cairo* cr, Color color)
     {
         cairo_set_source_rgba(cr, color.red(), color.green(), color.blue(), color.alpha());
@@ -266,16 +273,21 @@ namespace ae::draw
 
     void CairoPdf::text_font(double x, double y, std::string_view utf8, double font_size, Color color, bool bold, bool italic)
     {
-        // Baseline-left anchor (matches kateri drawString at (origin.dx, origin.dy)): (x, y) is
-        // the left edge / baseline of the first glyph.
+        // Baseline-origin anchor (matches kateri drawString at (origin.dx, origin.dy)): (x, y) is
+        // the pen origin — baseline at y, first glyph's pen position at x (ink starts at
+        // x + left-side-bearing, exactly as the golden's drawString does).
         const std::string str{utf8};
         // kateri renders Latin1 text in Helvetica (Type1); use the same face so the native
-        // render's title/legend/labels match the golden's glyph shapes/metrics.
+        // render's title/legend/labels match the golden's glyph shapes/metrics. On this
+        // toolchain cairo's toy "Helvetica" resolves (via fontconfig) to the same face poppler
+        // substitutes for the golden PDF's non-embedded base-14 Helvetica, so an embedded
+        // subset rasterises pixel-identically — the remaining tail is glyph *placement*.
         cairo_select_font_face(context_, "Helvetica", italic ? CAIRO_FONT_SLANT_ITALIC : CAIRO_FONT_SLANT_NORMAL, bold ? CAIRO_FONT_WEIGHT_BOLD : CAIRO_FONT_WEIGHT_NORMAL);
-        cairo_set_font_size(context_, font_size);
-        cairo_text_extents_t ext;
-        cairo_text_extents(context_, str.c_str(), &ext);
-        cairo_move_to(context_, x - ext.x_bearing, y); // left edge at x, baseline at y
+        cairo_set_font_size(context_, font_size * kFontScaleToMatchCanvas);
+        // kateri's PdfGraphics.drawString anchors the glyph *pen origin* (baseline-left) at the
+        // supplied point — it does NOT shift by the first glyph's left side-bearing. Match that
+        // (a prior x_bearing subtraction pushed every string ~1px left of the golden).
+        cairo_move_to(context_, x, y);
         set_source(context_, color);
         cairo_show_text(context_, str.c_str());
     }
@@ -283,7 +295,20 @@ namespace ae::draw
     std::pair<double, double> CairoPdf::text_size(std::string_view utf8, double font_size, bool helvetica)
     {
         const std::string str{utf8};
-        cairo_select_font_face(context_, helvetica ? "Helvetica" : "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        if (helvetica) {
+            // Match kateri's PdfGraphics.textSize so callers (title box, legend rows) lay text out
+            // exactly where the golden has it: width = the font's *advance* width (kateri uses the
+            // base-14 AFM metrics.width, i.e. the pen advance, not the ink extent), height = the
+            // em size itself (kateri hard-codes textSize height to 1.0*fontSize, not the 1.156 line
+            // height nor the ink height). Both scaled by fontScaleToMatchCanvas, as kateri does.
+            cairo_select_font_face(context_, "Helvetica", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+            const double scaled = font_size * kFontScaleToMatchCanvas;
+            cairo_set_font_size(context_, scaled);
+            cairo_text_extents_t ext;
+            cairo_text_extents(context_, str.c_str(), &ext);
+            return {ext.x_advance, scaled};
+        }
+        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(context_, font_size);
         cairo_text_extents_t ext;
         cairo_text_extents(context_, str.c_str(), &ext);
