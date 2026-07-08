@@ -10,6 +10,7 @@
 #include "map-draw/draw.hh"
 #include "draw/cairo-surface.hh"
 #include "ad/color.hh"
+#include "ad/color-hsv.hh"
 #include "chart/v3/chart.hh"
 #include "chart/v3/styles.hh"
 #include "chart/v3/legacy-plot-spec.hh"
@@ -49,47 +50,101 @@ namespace ae::map_draw
     {
         constexpr double kSizeScale = 5.0;      // kateri PlotSpecLegacy._sizeScale (base plot-spec sizes)
 
-        // Convert a chart-side ae::draw::v2::Color (a string-blocks wrapper) to a cairo ::Color.
-        // An empty color means "unset" (use fallback). A leading ':' is a colour *modifier*
-        // (e.g. ":bright" applied to the current colour): milestone A leaves the current colour
-        // unchanged and reports it via `is_modifier` (full modifier support is a later milestone).
-        ::Color to_cairo_color(const ae::draw::v2::Color& c, ::Color fallback, bool& is_modifier)
+        // ---- colour model (kateri lib/src/color.dart ColorAndModifier) ----
+        // A style colour is a base colour string plus an optional deferred modifier. The
+        // report uses two modifiers: ":pale" (desaturate + lighten) and ":bright" (clear the
+        // pale modifier, keeping the base colour). Milestone E tracks the (base, pale) pair
+        // per point exactly like kateri, so a ":pale" background (e.g. -pale on the serology
+        // map) really pales the clade colours and a subsequent ":bright" (vaccine/serology
+        // highlight) brings them back to full colour.
+        enum class ColorAction { keep, set, pale, bright };
+        struct ParsedColor
         {
-            is_modifier = false;
+            ColorAction action{ColorAction::keep};
+            ::Color color{TRANSPARENT}; // valid only when action == set
+        };
+
+        ParsedColor parse_color(const ae::draw::v2::Color& c)
+        {
             if (c.empty())
-                return fallback;
+                return {};
             const std::string& s = c.blocks()[0];
             if (s.empty())
-                return fallback;
+                return {};
             if (s[0] == ':') {
-                is_modifier = true;
-                return fallback;
+                if (s == ":pale")
+                    return {ColorAction::pale, {}};
+                if (s == ":bright")
+                    return {ColorAction::bright, {}};
+                return {}; // unknown modifier: keep current colour (kateri warns + ignores)
             }
             if (s == "T" || s == "transparent")
-                return TRANSPARENT;
-            return ::Color{std::string_view{s}};
+                return {ColorAction::set, TRANSPARENT};
+            return {ColorAction::set, ::Color{std::string_view{s}}};
+        }
+
+        // kateri ColorAndModifier.color for the ":pale" modifier (pale factor 0.4).
+        ::Color pale_color(::Color base)
+        {
+            constexpr double pale_factor = 0.4;
+            acmacs::color::HSV hsv{base};
+            if (hsv.s > 0.0) {
+                hsv.s = hsv.s * pale_factor;
+                hsv.v = hsv.v + (1.0 - hsv.v) * (1.0 - pale_factor);
+            }
+            else { // grey / black / white (saturation 0): lighten value only
+                double val = hsv.v / pale_factor;
+                if (val > 1.0)
+                    val = 1.0;
+                else if (hsv.v == 0.0)
+                    val = 0.5; // black -> mid grey
+                hsv.v = val;
+            }
+            const uint32_t alpha = base.raw_value() & 0xFF000000u; // preserve transparency byte
+            return ::Color{alpha | (hsv.rgb() & 0x00FFFFFFu)};
+        }
+
+        // Apply a parsed colour to a (base, pale) pair (kateri ColorAndModifier.modify).
+        void apply_color(const ParsedColor& pc, ::Color& color, bool& pale)
+        {
+            switch (pc.action) {
+                case ColorAction::keep:
+                    break;
+                case ColorAction::set:
+                    color = pc.color;
+                    pale = false;
+                    break;
+                case ColorAction::bright:
+                    pale = false; // clear pale modifier, base colour unchanged
+                    break;
+                case ColorAction::pale:
+                    pale = true;
+                    break;
+            }
+        }
+
+        // Concrete colour for a legend row / title (no deferred modifier): ":pale"/":bright"
+        // fall back to the given default.
+        ::Color concrete_color(const ae::draw::v2::Color& c, ::Color fallback)
+        {
+            const ParsedColor pc = parse_color(c);
+            return pc.action == ColorAction::set ? pc.color : fallback;
         }
 
         // ---- dynamic::value helpers (selectors + semantic attribute matching) ----
         bool value_is_bool(const ae::dynamic::value& v) { return std::holds_alternative<bool>(v.data()); }
         bool value_as_bool(const ae::dynamic::value& v) { return std::get<bool>(v.data()); }
 
-        bool value_truthy(const ae::dynamic::value& v)
+        long value_as_long(const ae::dynamic::value& v)
         {
             return std::visit(
-                []<typename T>(const T& c) -> bool {
-                    if constexpr (std::is_same_v<T, bool>)
+                []<typename T>(const T& c) -> long {
+                    if constexpr (std::is_same_v<T, long>)
                         return c;
-                    else if constexpr (std::is_same_v<T, ae::dynamic::null>)
-                        return false;
-                    else if constexpr (std::is_same_v<T, ae::dynamic::string>)
-                        return !static_cast<std::string_view>(c).empty();
-                    else if constexpr (std::is_same_v<T, long>)
-                        return c != 0;
                     else if constexpr (std::is_same_v<T, double>)
-                        return c != 0.0;
+                        return static_cast<long>(c);
                     else
-                        return true; // object / array present => truthy
+                        return -1;
                 },
                 v.data());
         }
@@ -98,7 +153,9 @@ namespace ae::map_draw
         struct PR
         {
             ::Color fill{TRANSPARENT};
+            bool fill_pale{false};
             ::Color outline{BLACK};
+            bool outline_pale{false};
             double outline_width{1.0};
             double size{10.0};                 // device px (diameter / box side)
             point_shape::Shape shape{point_shape::Circle};
@@ -163,40 +220,65 @@ namespace ae::map_draw
             }
         }
 
-        // Match a selector object against one point's semantic attributes (§1.2). `index_out`
-        // receives the "!i" index if present (caller resolves it against the candidate range).
-        bool selector_matches(const ae::dynamic::value& selector, const SemanticAttributes& sem, bool& has_index, long& index_out)
+        // kateri Antigen.withinDateRange (chart.dart): a "!D": [first, last] range test.
+        bool within_date_range(std::string_view date, std::string_view first, std::string_view last)
+        {
+            if (date.empty())
+                return first.empty(); // dateless antigen is "at the beginning of all dates"
+            return (first.empty() || first <= date) && (last.empty() || last > date);
+        }
+
+        // kateri semanticMatch (chart.dart): one selector key/value vs the point's attributes.
+        //   * a bool selector value is a *presence* test (attr present == value);
+        //   * otherwise a missing attribute never matches;
+        //   * a list-valued attribute (clades "C") matches if it contains the value;
+        //   * otherwise scalar equality.
+        bool semantic_match(std::string_view key, const ae::dynamic::value& selval, const SemanticAttributes& sem)
+        {
+            const ae::dynamic::value& attr = sem.get(key);
+            if (value_is_bool(selval))
+                return value_as_bool(selval) == !attr.is_null();
+            if (attr.is_null())
+                return false;
+            if (const auto* arr = std::get_if<ae::dynamic::array>(&attr.data())) { // clades list: contains
+                for (const auto& el : arr->data()) {
+                    if (el == selval)
+                        return true;
+                }
+                return false;
+            }
+            return attr == selval;
+        }
+
+        // Match a whole selector object against one point (kateri PlotSpec.selectPoints::match):
+        // handles "!i" (per-side index), "!D" (antigen date range), and semantic keys. An empty
+        // (or non-object) selector matches every candidate.
+        bool point_matches(const ae::dynamic::value& selector, const SemanticAttributes& sem, long agsr_no, std::string_view date, bool is_antigen)
         {
             const auto* obj = std::get_if<ae::dynamic::object>(&selector.data());
             if (obj == nullptr)
-                return true; // empty / non-object selector => all candidates
+                return true;
             for (const auto& [key, val] : obj->data()) {
                 if (key == "!i") {
-                    has_index = true;
-                    index_out = std::visit(
-                        []<typename T>(const T& c) -> long {
-                            if constexpr (std::is_same_v<T, long>)
-                                return c;
-                            else if constexpr (std::is_same_v<T, double>)
-                                return static_cast<long>(c);
-                            else
-                                return -1;
-                        },
-                        val.data());
-                }
-                else if (key == "C") {
-                    if (!sem.has_clade(val.as_string_or_empty()))
+                    if (agsr_no != value_as_long(val))
                         return false;
                 }
-                else {
-                    const auto& sv = sem.get(key);
-                    if (value_is_bool(val)) {
-                        if (value_truthy(sv) != value_as_bool(val))
-                            return false;
+                else if (key == "!D") {
+                    if (!is_antigen)
+                        return false;
+                    std::string_view first{}, last{};
+                    if (const auto* arr = std::get_if<ae::dynamic::array>(&val.data())) {
+                        const auto& d = arr->data();
+                        if (d.size() >= 1)
+                            first = d[0].as_string_or_empty();
+                        if (d.size() >= 2)
+                            last = d[1].as_string_or_empty();
                     }
-                    else if (sv.as_string_or_empty() != val.as_string_or_empty())
+                    if (!within_date_range(date, first, last))
                         return false;
                 }
+                else if (!semantic_match(key, val, sem))
+                    return false;
             }
             return true;
         }
@@ -236,9 +318,8 @@ namespace ae::map_draw
                 PR& p = pr[i];
                 if (i < styles.size() && styles[i] < pstyles.size()) {
                     const PointStyle& bs = pstyles[styles[i]];
-                    bool mod = false;
-                    p.fill = to_cairo_color(bs.fill(), TRANSPARENT, mod);   // kateri base default fill "transparent"
-                    p.outline = to_cairo_color(bs.outline(), BLACK, mod);   // kateri base default outline "black"
+                    apply_color(parse_color(bs.fill()), p.fill, p.fill_pale);        // kateri base default fill "transparent"
+                    apply_color(parse_color(bs.outline()), p.outline, p.outline_pale); // kateri base default outline "black"
                     p.outline_width = bs.outline_width().value_or(1.0);
                     p.size = bs.size().value_or(1.0) * kSizeScale;   // base plot-spec sizes carry x5
                     if (bs.shape().has_value())
@@ -278,50 +359,20 @@ namespace ae::map_draw
             }
 
             std::vector<size_t> matched;
-            {
-                bool has_index = false;
-                long sel_index = -1;
-                // "!i" is per-selector; determine it once by probing the selector structure.
-                {
-                    bool hi = false;
-                    long idx = -1;
-                    // use a dummy sem (empty selector obj path won't touch it); probe on any point
-                    if (n_points > 0)
-                        selector_matches(m.selector, sem_of(cand_begin < n_points ? cand_begin : 0), hi, idx);
-                    has_index = hi;
-                    sel_index = idx;
-                }
-                if (has_index) {
-                    const size_t abs_idx = (m.select_antigens_sera == semantic::SelectAntigensSera::sera_only) ? (n_antigens + static_cast<size_t>(sel_index)) : static_cast<size_t>(sel_index);
-                    if (sel_index >= 0 && abs_idx >= cand_begin && abs_idx < cand_end)
-                        matched.push_back(abs_idx);
-                }
-                else {
-                    for (size_t i = cand_begin; i < cand_end; ++i) {
-                        bool hi = false;
-                        long idx = -1;
-                        if (selector_matches(m.selector, sem_of(i), hi, idx))
-                            matched.push_back(i);
-                    }
-                }
+            for (size_t i = cand_begin; i < cand_end; ++i) {
+                const bool is_ag = i < n_antigens;
+                const long agsr = is_ag ? static_cast<long>(i) : static_cast<long>(i - n_antigens);
+                const std::string_view date = is_ag ? static_cast<std::string_view>(chart.antigens()[antigen_index{i}].date()) : std::string_view{};
+                if (point_matches(m.selector, sem_of(i), agsr, date, is_ag))
+                    matched.push_back(i);
             }
 
-            // apply point-style fields
+            // apply point-style fields (colours track the kateri (base, pale) pair)
             const PointStyle& ms = m.point_style;
             for (const size_t i : matched) {
                 PR& p = pr[i];
-                if (!ms.fill().empty()) {
-                    bool mod = false;
-                    const ::Color fc = to_cairo_color(ms.fill(), p.fill, mod);
-                    if (!mod)
-                        p.fill = fc; // ":bright" and other modifiers keep the current fill (milestone A)
-                }
-                if (!ms.outline().empty()) {
-                    bool mod = false;
-                    const ::Color oc = to_cairo_color(ms.outline(), p.outline, mod);
-                    if (!mod)
-                        p.outline = oc;
-                }
+                apply_color(parse_color(ms.fill()), p.fill, p.fill_pale);
+                apply_color(parse_color(ms.outline()), p.outline, p.outline_pale);
                 if (ms.outline_width().has_value())
                     p.outline_width = *ms.outline_width();
                 if (ms.size().has_value())
@@ -368,9 +419,8 @@ namespace ae::map_draw
                 LegendRowR row;
                 row.priority = m.legend.priority;
                 row.text = m.legend.text;
-                bool mod = false;
-                row.fill = to_cairo_color(ms.fill(), TRANSPARENT, mod);
-                row.outline = to_cairo_color(ms.outline(), BLACK, mod);
+                row.fill = concrete_color(ms.fill(), TRANSPARENT);
+                row.outline = concrete_color(ms.outline(), BLACK);
                 if (ms.shape().has_value())
                     row.shape = ms.shape()->get();
                 row.count = matched.size();
@@ -440,20 +490,22 @@ namespace ae::map_draw
             const double cx = dev_x(c[DIMX]), cy = dev_y(c[DIMY]);
             const double s = p.size;
             const double ow = p.outline_width;
+            const ::Color fill = p.fill_pale ? pale_color(p.fill) : p.fill;       // deferred ":pale" (kateri)
+            const ::Color outline = p.outline_pale ? pale_color(p.outline) : p.outline;
             switch (p.shape) {
                 case point_shape::Box:
-                    surface.square(cx, cy, s, p.outline, ow, p.fill);
+                    surface.square(cx, cy, s, outline, ow, fill);
                     break;
                 case point_shape::Triangle:
-                    surface.triangle(cx, cy, s / 2.0, p.outline, ow, p.fill);
+                    surface.triangle(cx, cy, s / 2.0, outline, ow, fill);
                     break;
                 case point_shape::Egg:
                 case point_shape::UglyEgg:
-                    surface.egg(cx, cy, s, p.outline, ow, p.fill);
+                    surface.egg(cx, cy, s, outline, ow, fill);
                     break;
                 case point_shape::Circle:
                 default:
-                    surface.circle(cx, cy, s / 2.0, p.outline, ow, p.fill);
+                    surface.circle(cx, cy, s / 2.0, outline, ow, fill);
                     break;
             }
         };
@@ -535,7 +587,10 @@ namespace ae::map_draw
         }
 
         // ---- title (kateri _Defaults.title "tl", offset from box O; helvetica bold/normal) ----
-        if (resolved.title_set && resolved.title.shown.value_or(true) && resolved.title.text.text.has_value() && !resolved.title.text.text->empty()) {
+        // The "info-" front styles carry a whitespace-only title (" ") — a deliberate blank
+        // title (§1.2); skip drawing it entirely so nothing is rendered.
+        const auto title_is_blank = [](std::string_view s) { return s.find_first_not_of(" \t") == std::string_view::npos; };
+        if (resolved.title_set && resolved.title.shown.value_or(true) && resolved.title.text.text.has_value() && !title_is_blank(*resolved.title.text.text)) {
             const auto& t = resolved.title;
             double off_x = 30.0, off_y = 30.0; // kateri title default offset
             if (t.box.has_value() && t.box->offset.has_value()) {
