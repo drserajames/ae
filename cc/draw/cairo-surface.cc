@@ -99,6 +99,18 @@ namespace ae::draw
             cairo_new_path(context_); // discard the preserved path if we didn't stroke
     }
 
+    void CairoPdf::arc(double cx, double cy, double radius, double start_angle, double end_angle, Color outline, double outline_width)
+    {
+        if (outline_width <= 0.0 || outline.is_transparent())
+            return;
+        constexpr double twelve_oclock = -std::numbers::pi / 2.0;
+        cairo_new_path(context_);
+        cairo_arc(context_, cx, cy, radius, twelve_oclock + start_angle, twelve_oclock + end_angle);
+        set_source(context_, outline);
+        cairo_set_line_width(context_, outline_width);
+        cairo_stroke(context_);
+    }
+
     void CairoPdf::square(double cx, double cy, double side, Color outline, double outline_width, Color fill)
     {
         const double half = side / 2.0;
