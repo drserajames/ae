@@ -25,6 +25,7 @@ import ae.report.download
 import ae.report.dirs
 from .main_loop import command, no_kateri, no_loop, headless
 from .chart_modifier import ChartModifier
+from .map_renderer import get_map_renderer
 
 # ======================================================================
 
@@ -114,7 +115,7 @@ class CommanderBasic:
         chart_modifier = self.style()
         # do not await in parallel because current katteri protocol does not allow matching pdfs request and result
         for style_name in chart_modifier.export_styles():
-            await self.export_pdf(style_name=style_name, output_filename=Path(".").resolve().joinpath(f"out.1.{style_name}.pdf"))
+            await self.export_pdf(style_name=style_name, output_filename=Path(".").resolve().joinpath(f"out.1.{style_name}.pdf"), chart=chart_modifier.chart)
         await self.export_mapi_for_signature_pages(chart_modifier=chart_modifier)
         kateri.communicator.export_to_legacy(style=chart_modifier.style_for_legacy_plot_spec())
         chart = await kateri.communicator.get_chart()
@@ -127,7 +128,7 @@ class CommanderBasic:
         """`export_info` command: style the chart and export the info-map PDFs (headless)."""
         chart_modifier = self.style()
         for style_name in chart_modifier.export_info_styles():
-            await self.export_pdf(style_name=style_name, output_filename=Path(".").resolve().joinpath(f"out.1.{style_name}.pdf"))
+            await self.export_pdf(style_name=style_name, output_filename=Path(".").resolve().joinpath(f"out.1.{style_name}.pdf"), chart=chart_modifier.chart)
 
     @command
     @no_loop
@@ -167,7 +168,7 @@ class CommanderBasic:
             for et in ["e", "t"]:
                 for zoom_variant in chart_modifier.zoom_variants():
                     style_name = f"sc-{serum_no:03d}-f{fold}-{et}{zoom_variant}"
-                    await self.export_pdf(style_name=style_name, output_filename=self.serum_coverage_output_dir().joinpath(f"{style_name}.pdf"))
+                    await self.export_pdf(style_name=style_name, output_filename=self.serum_coverage_output_dir().joinpath(f"{style_name}.pdf"), chart=chart_modifier.chart)
         self.serum_coverage_webpage(chart_modifier=chart_modifier)
 
     @command
@@ -201,14 +202,13 @@ class CommanderBasic:
         downloader.use_previous(ae.report.dirs.VcmDirs().find_previous_chart(), rotate=rotate).populate_from_seqdb().export_downloaded()
         return downloader
 
-    async def export_pdf(self, style_name: str, output_filename: Path):
-        """Request the PDF for `style_name` from kateri and write it to `output_filename`."""
-        data = await kateri.communicator.get_pdf(style=style_name)
-        print(f">>> writing pdf to {output_filename}", file=sys.stderr)
-        with output_filename.open("wb") as output:
-            output.write(data)
-        # if open:
-        #     subprocess.call(["open", expected["filename"]])
+    async def export_pdf(self, style_name: str, output_filename: Path, chart: Optional[ae_backend.chart_v3.Chart] = None):
+        """Render the map for `style_name` to `output_filename`, via the map-render backend
+        selected by `AE_REPORT_MAP_RENDERER` (default kateri; `native` = in-process C++
+        `export_styled_map`). `chart` is the styled chart; it is required by the native
+        backend and ignored by the kateri backend (which already holds the chart from the
+        `style` command)."""
+        await get_map_renderer().export_pdf(chart=chart, style_name=style_name, output_filename=output_filename)
 
     def serum_coverage_output_dir(self, check_existance: bool = False) -> Path | None:
         """The `serum-coverage/` output directory. With `check_existance`, return it only if
