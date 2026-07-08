@@ -40,10 +40,20 @@ from . import dirs
 class ChartModifier (conference_data_base.ConferenceData):
     "Base class for adding semantic styles to the chart"
 
-    def __init__(self, chart: ae_backend.chart_v3.Chart | Path | None = None):
+    def __init__(self, chart: ae_backend.chart_v3.Chart | Path | None = None, serology_provider=None):
         """Load or accept the chart to style: an `ae_backend.chart_v3.Chart`, a `Path` to an
-        `.ace` file, or None to open the report dir's `downloaded.ace`."""
+        `.ace` file, or None to open the report dir's `downloaded.ace`.
+
+        *serology_provider* is the source of the per-report serology definitions consumed by
+        the serology styling step. It is any object exposing
+        `semantic_attribute_data_for_subtype(subtype)` and
+        `semantic_plot_spec_data_for_subtype(subtype)` (the interface of a report's `serology`
+        module). If None, the engine falls back to a top-level `serology` module if one is on
+        the path (the report-runtime case), and otherwise runs with **no serology styling**
+        (the serology step is skipped, see `add_serology_style`). Inject a provider to supply
+        serology data explicitly instead of relying on `sys.path`."""
         super().__init__()
+        self._serology_provider = serology_provider
         if isinstance(chart, ae_backend.chart_v3.Chart):
             self.chart = chart
         elif isinstance(chart, Path):
@@ -216,10 +226,27 @@ class ChartModifier (conference_data_base.ConferenceData):
 
         # semantic.select_mark.style(chart=chart, style_name="-vic", antigen_selector=lambda ag: "VICTORIA/2570/2019" in ag.name)
 
+    def serology_provider(self):
+        """The effective serology data source: the injected `serology_provider` if one was
+        given, else a top-level `serology` module if importable (report-runtime), else None.
+        None means no serology data is available and the serology styling step is skipped."""
+        if self._serology_provider is not None:
+            return self._serology_provider
+        return serology
+
     def add_serology_style(self):
         """Find the serology antigens, mark them (`serology` semantic attribute), and build
         the `-serology` background style and the `serology` front style (map of the chart
-        with serology antigens highlighted)."""
+        with serology antigens highlighted).
+
+        No-op (with a warning) when no serology provider is available — see
+        `serology_provider`. This only happens when the engine is run without a report's
+        `serology` module on the path and without an injected provider; a real report run
+        always has one, so figure output is unchanged."""
+        if self.serology_provider() is None:
+            print(">>> WARNING: no serology provider (no `serology` module on path and none "
+                  "injected) — skipping serology styling", file=sys.stderr)
+            return
         semantic.serology.remove_serology(self.chart)
         serology_antigens = semantic.serology.find(chart=self.chart, semantic_attribute_data=self.semantic_attribute_serology(), report=self.serology_report())
         for serology_antigen_en in serology_antigens:
@@ -466,14 +493,23 @@ class ChartModifier (conference_data_base.ConferenceData):
         return semantic_vaccines.semantic_plot_spec_data_for_subtype(self.subtype())
 
     def semantic_attribute_serology(self) -> list[dict[str, str]]:
-        """Serology semantic-attribute definitions for this subtype, from the per-report
-        `serology` module."""
-        return serology.semantic_attribute_data_for_subtype(self.subtype())["serology"]
+        """Serology semantic-attribute definitions for this subtype, from the serology
+        provider (see `serology_provider`). Raises RuntimeError if no provider is available;
+        the main serology path guards on `serology_provider()` before reaching here."""
+        provider = self.serology_provider()
+        if provider is None:
+            raise RuntimeError("no serology provider available (inject serology_provider or "
+                               "put a `serology` module on the path)")
+        return provider.semantic_attribute_data_for_subtype(self.subtype())["serology"]
 
     def semantic_styles_serology(self) -> dict[str, list[dict[str, str]]]:
-        """Serology plot-spec definitions for this subtype, from the per-report `serology`
-        module."""
-        return serology.semantic_plot_spec_data_for_subtype(self.subtype())
+        """Serology plot-spec definitions for this subtype, from the serology provider (see
+        `serology_provider`). Raises RuntimeError if no provider is available."""
+        provider = self.serology_provider()
+        if provider is None:
+            raise RuntimeError("no serology provider available (inject serology_provider or "
+                               "put a `serology` module on the path)")
+        return provider.semantic_plot_spec_data_for_subtype(self.subtype())
 
     def export_styles(self) -> list[str]:
         """Front-style names to export as the main maps — override per subtype. Raises
