@@ -54,6 +54,15 @@ namespace ae::map_draw
     // Render one projection of a chart to output (extension .png -> raster, else PDF).
     void export_map(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, const std::filesystem::path& output, const DrawSettings& settings = {});
 
+    // ------------------------------------------------------------------
+    // P2 milestone A: headless render of a chart's on-chart *semantic* styling (c["R"] named
+    // styles + c["p"] base plot-spec), mirroring kateri's set_style + get_pdf. This is the
+    // report map path (by-clade etc.), additive to and independent of export_map above (the
+    // fixed AD-chains pipeline). `style_name` selects a front style in chart.styles();
+    // `width` is the output width in device px / PDF points. Output extension picks backend
+    // (.png raster, else PDF). See cc/map-draw/STYLED-DRAW.md and P2-RENDER-DESIGN.md §1.2/§2.2.
+    void export_styled_map(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output);
+
     // Procrustes render: draw `secondary` framed like `primary`, with arrows for common
     // points (threshold 0.3) and an "RMS: {rms:.4f}" title. See make_pc in chains chart.py.
     void export_procrustes(const ae::chart::v3::Chart& primary, ae::projection_index primary_projection, const ae::chart::v3::Chart& secondary,

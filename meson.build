@@ -127,6 +127,7 @@ sources_py = [
   'cc/py/hidb.cc', # --- hidb (subsystem #2) ---
   'cc/py/map-draw.cc', # --- map-draw (subsystem #1, revived) ---
   'cc/map-draw/draw.cc', # --- map-draw (subsystem #1, revived) ---
+  'cc/map-draw/styled-draw.cc', # --- map-draw P2 milestone A (styled/semantic render) ---
   'cc/draw/cairo-surface.cc', # --- map-draw (subsystem #1, revived) ---
 ]
 
@@ -318,7 +319,7 @@ geo_draw = executable(
 # --- map-draw (subsystem #1, revived) — headless antigenic-map renderer, fidelity
 #     port of AD acmacs-map-draw ChartDraw for the chains-202105 web app. Reuses the
 #     shared cc/draw/cairo-surface (Cairo linked here). See cc/map-draw/TODO.md. ---
-sources_map_draw = ['cc/map-draw/draw.cc', 'cc/draw/cairo-surface.cc']
+sources_map_draw = ['cc/map-draw/draw.cc', 'cc/map-draw/styled-draw.cc', 'cc/draw/cairo-surface.cc']
 
 map_draw = executable(
   'map-draw',

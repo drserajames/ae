@@ -123,6 +123,30 @@ namespace ae::draw
         cairo_stroke(context_);
     }
 
+    void CairoPdf::egg(double cx, double cy, double size, Color outline, double outline_width, Color fill)
+    {
+        // Reproduces kateri's _drawShape egg (draw_on_pdf.dart): two cubic beziers between the
+        // top (0, -r) and bottom (0, +r) apexes, y growing downward (matches our device space,
+        // no Y-flip). r = size/2.
+        const double r = size / 2.0;
+        cairo_new_path(context_);
+        cairo_move_to(context_, cx + 0.0, cy + r);
+        cairo_curve_to(context_, cx + r * 1.4, cy + r * 0.95, cx + r * 0.8, cy - r * 0.98, cx + 0.0, cy - r);
+        cairo_curve_to(context_, cx - r * 0.8, cy - r * 0.98, cx - r * 1.4, cy + r * 0.95, cx + 0.0, cy + r);
+        cairo_close_path(context_);
+        if (!fill.is_transparent()) {
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        if (outline_width > 0.0 && !outline.is_transparent()) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+        else
+            cairo_new_path(context_);
+    }
+
     void CairoPdf::filled_triangle(double x0, double y0, double x1, double y1, double x2, double y2, Color fill)
     {
         cairo_new_path(context_);
@@ -240,10 +264,26 @@ namespace ae::draw
         }
     }
 
-    std::pair<double, double> CairoPdf::text_size(std::string_view utf8, double font_size)
+    void CairoPdf::text_font(double x, double y, std::string_view utf8, double font_size, Color color, bool bold, bool italic)
+    {
+        // Baseline-left anchor (matches kateri drawString at (origin.dx, origin.dy)): (x, y) is
+        // the left edge / baseline of the first glyph.
+        const std::string str{utf8};
+        // kateri renders Latin1 text in Helvetica (Type1); use the same face so the native
+        // render's title/legend/labels match the golden's glyph shapes/metrics.
+        cairo_select_font_face(context_, "Helvetica", italic ? CAIRO_FONT_SLANT_ITALIC : CAIRO_FONT_SLANT_NORMAL, bold ? CAIRO_FONT_WEIGHT_BOLD : CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        cairo_text_extents_t ext;
+        cairo_text_extents(context_, str.c_str(), &ext);
+        cairo_move_to(context_, x - ext.x_bearing, y); // left edge at x, baseline at y
+        set_source(context_, color);
+        cairo_show_text(context_, str.c_str());
+    }
+
+    std::pair<double, double> CairoPdf::text_size(std::string_view utf8, double font_size, bool helvetica)
     {
         const std::string str{utf8};
-        cairo_select_font_face(context_, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_select_font_face(context_, helvetica ? "Helvetica" : "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(context_, font_size);
         cairo_text_extents_t ext;
         cairo_text_extents(context_, str.c_str(), &ext);
