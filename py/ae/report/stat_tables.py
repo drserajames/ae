@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/stat.py — Phase 1 engine/library tier.
+# Ported from vcm (ssm-report tooling) py/vcm/v2/stat.py — Phase 1 engine/library tier.
 # stat.json.xz -> tabs/csv/html; the stat.json.xz itself is computed via the ae Python port
 # of hidb5-stat (ae.report.stat, see _compute_stat below), not the AD C++ binary. See py/ae/report/MIGRATION.md.
 """

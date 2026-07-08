@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/download.py — Phase 1 engine/library tier.
+# Ported from vcm (ssm-report tooling) py/vcm/v2/download.py — Phase 1 engine/library tier.
 # chart download/relax/orient/merge (ae_backend.chart_v3). See py/ae/report/MIGRATION.md.
 """
 ae.report.download — fetch and prepare the source chart for a report directory.

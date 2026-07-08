@@ -279,7 +279,7 @@ recoverable Feb snapshot locally; server SSH for a dated snapshot was timing out
 close the custom-dir gap; the owner will look for a backup.
 
 **bvic-vidrl's manual column-basis step (the reason it diverges further).** Its frozen chart has
-**one serum's column basis reduced by 1** — `B/AUSTRIA/1359417/2021 A9878`, computed `6.0` → forced
+**one serum's column basis reduced by 1** — `B/<COUNTRY>/nnnn/YYYY <SERUM-ID>`, computed `6.0` → forced
 `5.0` (the previous/1-back chart has none reduced, so it was done in *this* report). This is a manual
 intervention **not** in the automated `download` path, so the pipeline can't replay it. Replaying it
 needs the **forced-column-bases Python setter** — `ad-port`'s C++ supports it (`column_bases::add` +

@@ -1,4 +1,4 @@
-# Ported from vcm (ssm-report tooling) 2026-0119-tc2/py/vcm/v2/commander.py — Phase 1b engine tier.
+# Ported from vcm (ssm-report tooling) py/vcm/v2/commander.py — Phase 1b engine tier.
 # the @command surface (download/populate/prestyle/style/export). See py/ae/report/MIGRATION.md.
 """
 ae.report.commander — the `@command` surface driven by the report main loop.

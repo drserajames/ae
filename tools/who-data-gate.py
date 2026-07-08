@@ -6,6 +6,7 @@ Stdlib-only. See tools/WHO-DATA-GATE.md for the full policy and rationale.
 
 WHAT IT CATCHES (conservative — false positives acceptable, false negatives are not):
   * Virus strain names           A/Somewhere/123/2021, B/Place Name/7/17
+  * Bare strain names (no A/B)    SOMEWHERE/123/2021 (Capitalised location/number/year)
   * Amino-acid substitutions     K160T, N145S
   * Clade tokens                 3C.2a1b.2a.2, 5a.1
   * Any entry of an external, PRIVATE current-season strain list (never stored
@@ -39,6 +40,9 @@ from fnmatch import fnmatch
 # --------------------------------------------------------------------------- #
 # Strain names: A/Location/123/2021, B/Some Place/7/17  (2- or 4-digit year)
 RE_STRAIN = re.compile(r"\b[AB]/[A-Za-z][A-Za-z .'_-]*/[0-9]+/(?:19|20)?[0-9]{2}\b")
+# Bare strain names WITHOUT an A/B prefix: Location/number/year, e.g. VICTORIA/2570/2019.
+# Requires a Capitalised location word (>=3 alpha) so lowercase paths ("results/2/2024") don't match.
+RE_STRAIN_BARE = re.compile(r"\b[A-Z][A-Za-z]{2,}/[0-9]+/(?:19|20)?[0-9]{2}\b")
 # Amino-acid substitutions: <AA><pos 2-3 digits><AA>, e.g. K160T
 RE_AASUB = re.compile(r"\b[A-Z][0-9]{2,3}[A-Z]\b")
 # Clade tokens
@@ -47,6 +51,7 @@ RE_CLADE_GEN = re.compile(r"\b[0-9][a-z]\.[0-9][0-9A-Za-z.]*\b")
 
 RULES = [
     ("strain", RE_STRAIN),
+    ("strain", RE_STRAIN_BARE),
     ("aa-sub", RE_AASUB),
     ("clade", RE_CLADE_3C),
     ("clade", RE_CLADE_GEN),
