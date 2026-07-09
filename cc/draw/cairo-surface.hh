@@ -74,7 +74,11 @@ namespace ae::draw
                           double halo_width = 0.0, Color halo_color = WHITE);
         // Like text(center=false) but with selectable weight/slant (for the semantic-style
         // title/legend, which carry helvetica bold/italic). (x, y) is the glyph-box top-left.
-        void text_font(double x, double y, std::string_view utf8, double font_size, Color color, bool bold, bool italic);
+        // halo_width > 0 strokes a halo (default white) behind the glyphs, so point labels stay
+        // legible over the point cloud (kateri's default point-label halo). halo_width is the full
+        // stroke width in font-size units (scaled internally to match the glyph), not a radius.
+        void text_font(double x, double y, std::string_view utf8, double font_size, Color color, bool bold, bool italic,
+                       double halo_width = 0.0, Color halo_color = WHITE);
         // Measure a string at the given font size: returns {width, height} in device units.
         // `helvetica` selects the Helvetica face (matching text_font) so callers that draw with
         // text_font size their boxes/rows from the same metrics; default keeps the sans-serif face.

@@ -813,7 +813,12 @@ namespace ae::map_draw
             };
             const double lx = cx + lab_off(p.label_dx, tw, false);
             const double ly = cy + lab_off(p.label_dy, th, true);
-            surface.text_font(lx, ly, p.label_text, p.label_size, BLACK, false, false);
+            // kateri gives every point label a default thin white halo (pointLabelHaloWidthFactor)
+            // so it reads over the dark point cloud; without it the black glyphs vanish into the
+            // points they sit on. Positioning is data-driven (the style's per-label offset) exactly
+            // as kateri does — kateri performs no collision auto-placement, so neither do we.
+            constexpr double kPointLabelHaloWidthFactor = 0.04;
+            surface.text_font(lx, ly, p.label_text, p.label_size, BLACK, false, false, p.label_size * kPointLabelHaloWidthFactor);
         }
 
         // ---- legend (kateri _Defaults.legend: bottom-left "Bl", offset (10,-10), white box,
