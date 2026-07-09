@@ -51,8 +51,6 @@ namespace ae::map_draw
 
     namespace
     {
-        constexpr double kSizeScale = 5.0;      // kateri PlotSpecLegacy._sizeScale (base plot-spec sizes)
-
         // ---- colour model (kateri lib/src/color.dart ColorAndModifier) ----
         // A style colour is a base colour string plus an optional deferred modifier. The
         // report uses two modifiers: ":pale" (desaturate + lighten) and ":bright" (clear the
@@ -403,34 +401,61 @@ namespace ae::map_draw
             return chart.sera()[serum_index{i - n_antigens}].semantic();
         };
 
-        // ---- base per-point render state from c["p"] legacy plot spec ----
-        const auto& base = chart.legacy_plot_spec();
+        // ---- default per-point render state (kateri PlotSpecSemantic.activate) ----
+        // The report's by-clade maps use kateri's *semantic* plot spec, which is seeded from a
+        // fresh grey DEFAULT (initDefaultPointSpecs + makeDefaultPointSpecs, plot_spec.dart) and
+        // then has the c["R"] modifiers applied — it deliberately IGNORES the c["p"] legacy plot
+        // spec. Seeding from c["p"] instead (as this did) leaks leftover base clade colours onto
+        // the non-highlighted points: on a chart where only a small subset matches a clade
+        // selector (e.g. H3 clades-v1) the *whole* cloud shows base colour instead of greying.
+        // kateri's default (semantic activate, testAntigenFill=gray80, outline=gray80):
+        //   * test antigen  : fill gray80, outline gray80, size testSize(20), shape circle/egg
+        //   * reference ag  : fill transparent, outline gray80, size refSize(32), shape circle/egg
+        //   * serum         : fill transparent, outline gray80, size refSize(32), shape box/uglyegg
+        //   (egg/reassortant → egg (antigen) / uglyegg (serum); reassortant rotation not modelled)
+        const antigen_indexes reference = chart.reference();
+        const ::Color gray80{0xCCCCCC};
+        constexpr double kTestSize = 20.0, kRefSize = 32.0; // kateri PointPlotSpec.testSize/refSize
+        // kateri _AntigenSerum.isEgg: prefer the semantic "p" attribute ("e"=egg), else passage.
+        const auto is_egg = [](const auto& agsr) -> bool {
+            const ae::dynamic::value& p = agsr.semantic().get("p");
+            if (!p.is_null())
+                return p.as_string_or_empty() == std::string_view{"e"};
+            return agsr.passage().is_egg();
+        };
         std::vector<PR> pr(n_points);
-        {
-            const auto& styles = base.style_for_point();
-            const auto& pstyles = base.styles();
-            for (size_t i = 0; i < n_points; ++i) {
-                PR& p = pr[i];
-                if (i < styles.size() && styles[i] < pstyles.size()) {
-                    const PointStyle& bs = pstyles[styles[i]];
-                    apply_color(parse_color(bs.fill()), p.fill, p.fill_pale);        // kateri base default fill "transparent"
-                    apply_color(parse_color(bs.outline()), p.outline, p.outline_pale); // kateri base default outline "black"
-                    p.outline_width = bs.outline_width().value_or(1.0);
-                    p.size = bs.size().value_or(1.0) * kSizeScale;   // base plot-spec sizes carry x5
-                    if (bs.shape().has_value())
-                        p.shape = bs.shape()->get();
-                    p.shown = bs.shown().value_or(true);
-                }
-            }
+        for (size_t i = 0; i < n_antigens; ++i) {
+            PR& p = pr[i];
+            const auto& ag = chart.antigens()[antigen_index{i}];
+            const bool is_ref = reference.contains(antigen_index{i});
+            const bool egg_or_reass = is_egg(ag) || !ag.reassortant().empty();
+            p.outline = gray80;
+            p.outline_width = 1.0;
+            p.fill = is_ref ? TRANSPARENT : gray80;
+            p.size = is_ref ? kRefSize : kTestSize;
+            p.shape = egg_or_reass ? point_shape::Egg : point_shape::Circle;
+        }
+        for (size_t i = n_antigens; i < n_points; ++i) {
+            PR& p = pr[i];
+            const auto& sr = chart.sera()[serum_index{i - n_antigens}];
+            const bool egg_or_reass = is_egg(sr) || !sr.reassortant().empty();
+            p.outline = gray80;
+            p.outline_width = 1.0;
+            p.fill = TRANSPARENT;
+            p.size = kRefSize;
+            p.shape = egg_or_reass ? point_shape::UglyEgg : point_shape::Box;
         }
 
-        // ---- draw order from c["p"]["d"] (fallback: natural order) ----
+        // ---- default draw order (kateri makeDefaultDrawingOrder): sera, then reference
+        //      antigens, then test antigens — again the semantic default, not c["p"]["d"]. ----
         std::vector<size_t> order;
-        for (const auto pt : base.drawing_order())
-            order.push_back(pt.get());
-        if (order.empty()) {
-            for (size_t i = 0; i < n_points; ++i)
-                order.push_back(i);
+        for (size_t i = n_antigens; i < n_points; ++i)
+            order.push_back(i); // sera (bottom)
+        for (const auto ag : reference)
+            order.push_back(ag.get()); // reference antigens
+        for (size_t i = 0; i < n_antigens; ++i) {
+            if (!reference.contains(antigen_index{i}))
+                order.push_back(i); // test antigens (top)
         }
 
         // ---- resolve the front style (§1.2) ----
@@ -788,7 +813,12 @@ namespace ae::map_draw
             };
             const double lx = cx + lab_off(p.label_dx, tw, false);
             const double ly = cy + lab_off(p.label_dy, th, true);
-            surface.text_font(lx, ly, p.label_text, p.label_size, BLACK, false, false);
+            // kateri gives every point label a default thin white halo (pointLabelHaloWidthFactor)
+            // so it reads over the dark point cloud; without it the black glyphs vanish into the
+            // points they sit on. Positioning is data-driven (the style's per-label offset) exactly
+            // as kateri does — kateri performs no collision auto-placement, so neither do we.
+            constexpr double kPointLabelHaloWidthFactor = 0.04;
+            surface.text_font(lx, ly, p.label_text, p.label_size, BLACK, false, false, p.label_size * kPointLabelHaloWidthFactor);
         }
 
         // ---- legend (kateri _Defaults.legend: bottom-left "Bl", offset (10,-10), white box,

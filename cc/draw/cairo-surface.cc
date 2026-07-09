@@ -283,7 +283,8 @@ namespace ae::draw
         }
     }
 
-    void CairoPdf::text_font(double x, double y, std::string_view utf8, double font_size, Color color, bool bold, bool italic)
+    void CairoPdf::text_font(double x, double y, std::string_view utf8, double font_size, Color color, bool bold, bool italic,
+                             double halo_width, Color halo_color)
     {
         // Baseline-origin anchor (matches kateri drawString at (origin.dx, origin.dy)): (x, y) is
         // the pen origin — baseline at y, first glyph's pen position at x (ink starts at
@@ -300,8 +301,22 @@ namespace ae::draw
         // supplied point — it does NOT shift by the first glyph's left side-bearing. Match that
         // (a prior x_bearing subtraction pushed every string ~1px left of the golden).
         cairo_move_to(context_, x, y);
-        set_source(context_, color);
-        cairo_show_text(context_, str.c_str());
+        if (halo_width > 0.0) {
+            // kateri addPointLabel halo: stroke the glyph outlines in the halo colour first (round
+            // joins for a smooth band, scaled with the glyph), then fill the glyphs on top so the
+            // label reads over the point cloud (drawString stroke pass under the fill).
+            cairo_text_path(context_, str.c_str());
+            set_source(context_, halo_color);
+            cairo_set_line_width(context_, halo_width * kFontScaleToMatchCanvas);
+            cairo_set_line_join(context_, CAIRO_LINE_JOIN_ROUND);
+            cairo_stroke_preserve(context_);
+            set_source(context_, color);
+            cairo_fill(context_);
+        }
+        else {
+            set_source(context_, color);
+            cairo_show_text(context_, str.c_str());
+        }
     }
 
     std::pair<double, double> CairoPdf::text_size(std::string_view utf8, double font_size, bool helvetica)
