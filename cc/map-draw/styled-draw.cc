@@ -124,14 +124,6 @@ namespace ae::map_draw
             }
         }
 
-        // Concrete colour for a legend row / title (no deferred modifier): ":pale"/":bright"
-        // fall back to the given default.
-        ::Color concrete_color(const ae::draw::v2::Color& c, ::Color fallback)
-        {
-            const ParsedColor pc = parse_color(c);
-            return pc.action == ColorAction::set ? pc.color : fallback;
-        }
-
         // Parse a colour held as a plain std::string (the serum-circle / serum-coverage fow
         // fields carry std::string, not ae::draw::v2::Color). Mirrors parse_color().
         ParsedColor parse_color_str(std::string_view s)
@@ -264,7 +256,10 @@ namespace ae::map_draw
             int priority{0};
             std::string text{};
             ::Color fill{TRANSPARENT};
+            bool fill_pale{false};    // kateri swatch tracks the (base, pale) pair like a point
             ::Color outline{BLACK};
+            bool outline_pale{false};
+            double outline_width{1.0};
             point_shape::Shape shape{point_shape::Circle};
             size_t count{0};
         };
@@ -555,17 +550,50 @@ namespace ae::map_draw
                 }
             }
 
-            // legend row
+            // legend row (kateri applyEntry): the swatch copies the first matched point's
+            // resolved spec (fill/outline + their :pale state, outline width), shape forced
+            // circle; with no matched point it applies this modifier's F/O to a fresh default.
             if (!m.legend.text.empty() || m.legend.priority != 0) {
                 LegendRowR row;
                 row.priority = m.legend.priority;
                 row.text = m.legend.text;
-                row.fill = concrete_color(ms.fill(), TRANSPARENT);
-                row.outline = concrete_color(ms.outline(), BLACK);
+                if (!matched.empty()) {
+                    const PR& mp0 = pr[matched[0]];
+                    row.fill = mp0.fill;
+                    row.fill_pale = mp0.fill_pale;
+                    row.outline = mp0.outline;
+                    row.outline_pale = mp0.outline_pale;
+                    row.outline_width = mp0.outline_width;
+                }
+                else { // fresh default spec + this modifier's F/O (kateri modifyPointPlotSpec(entry, PointPlotSpec()))
+                    row.fill = TRANSPARENT;
+                    row.outline = gray80;
+                    apply_color(parse_color(ms.fill()), row.fill, row.fill_pale);
+                    apply_color(parse_color(ms.outline()), row.outline, row.outline_pale);
+                    if (ms.outline_width().has_value())
+                        row.outline_width = *ms.outline_width();
+                }
                 if (ms.shape().has_value())
                     row.shape = ms.shape()->get();
                 row.count = matched.size();
                 legend_rows.push_back(std::move(row));
+            }
+            // kateri's "make legend for pale clades pale too" hack (plot_spec.dart applyEntry):
+            // a global colour modifier (no legend row, no selector) whose fill or outline is a
+            // deferred :pale/:bright re-applies both F and O to every existing legend swatch, so
+            // the -pale on the serology map pales the -clades swatches to match the paled points.
+            else {
+                const bool no_selector = std::get_if<ae::dynamic::object>(&m.selector.data()) == nullptr;
+                const ParsedColor pf = parse_color(ms.fill());
+                const ParsedColor po = parse_color(ms.outline());
+                const bool deferred = pf.action == ColorAction::pale || pf.action == ColorAction::bright
+                                   || po.action == ColorAction::pale || po.action == ColorAction::bright;
+                if (no_selector && deferred) {
+                    for (auto& row : legend_rows) {
+                        apply_color(pf, row.fill, row.fill_pale);
+                        apply_color(po, row.outline, row.outline_pale);
+                    }
+                }
             }
 
             // ---- serum circle (milestone F): collect for delayed drawing ----
@@ -860,7 +888,9 @@ namespace ae::map_draw
             const double dx = box_x + pad_l;
             double baseline = box_y + pad_t + row_h; // kateri: box.origin.dy + textSize[0].height + padding.top
             for (const auto& r : legend_rows) {
-                surface.circle(dx + point_size / 2.0, baseline - row_h * 0.35, point_size / 2.0, r.outline, 1.0, r.fill);
+                const ::Color rfill = r.fill_pale ? pale_color(r.fill) : r.fill;
+                const ::Color routline = r.outline_pale ? pale_color(r.outline) : r.outline;
+                surface.circle(dx + point_size / 2.0, baseline - row_h * 0.35, point_size / 2.0, routline, r.outline_width, rfill);
                 surface.text_font(dx + point_space, baseline, r.text, text_size, BLACK, false, false);
                 if (add_counter) {
                     const auto [cw, ch] = surface.text_size(fmt::format("{}", r.count), text_size, true);
@@ -888,11 +918,30 @@ namespace ae::map_draw
             ::Color col = BLACK;
             if (t.text.color.has_value())
                 col = ::Color{static_cast<std::string_view>(*t.text.color)};
-            // origin "tl": box top-left at device (off_x, off_y); kateri draws the baseline at
-            // box.origin.dy + textHeight + padding.top (padding 0). Baseline-left anchor.
-            const auto [ttw, tth] = surface.text_size(*t.text.text, font, true);
-            (void)ttw;
-            surface.text_font(off_x, off_y + tth, *t.text.text, font, col, bold, italic);
+            // Multi-line title (kateri PlotText: the "t" string is split on newlines via
+            // LineSplitter, then paintTitle draws each line advancing the baseline by
+            // lineHeight*(interline+1)). origin "tl": box top-left at device (off_x, off_y);
+            // kateri draws the first baseline at box.origin.dy + textHeight + padding.top
+            // (padding 0). Baseline-left anchor.
+            const double interline = t.text.interline.value_or(0.2);
+            std::string_view rest{*t.text.text};
+            double baseline = 0.0;
+            bool first = true;
+            while (true) {
+                const size_t nl = rest.find('\n');
+                const std::string_view line = rest.substr(0, nl);
+                const auto [lw, lh] = surface.text_size(line, font, true);
+                (void)lw;
+                if (first) {
+                    baseline = off_y + lh;
+                    first = false;
+                }
+                surface.text_font(off_x, baseline, line, font, col, bold, italic);
+                baseline += lh * (interline + 1.0);
+                if (nl == std::string_view::npos)
+                    break;
+                rest.remove_prefix(nl + 1);
+            }
         }
     }
 
