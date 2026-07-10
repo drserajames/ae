@@ -51,6 +51,14 @@ class MapRenderer:
         `output_filename` as a PDF, at page `width` points."""
         raise NotImplementedError("override in a MapRenderer backend")
 
+    async def export_pdfs(self, chart: ae_backend.chart_v3.Chart, jobs: list[tuple[str, Path]], width: float = 800.0):
+        """Render several `(style_name, output_filename)` pairs from the SAME `chart`. The
+        default is a plain sequential loop over `export_pdf` (so any backend works and kateri
+        keeps its request/result ordering); backends that can amortise per-call setup across
+        the whole set (e.g. the native renderer loading the chart once) override this."""
+        for style_name, output_filename in jobs:
+            await self.export_pdf(chart=chart, style_name=style_name, output_filename=output_filename, width=width)
+
 # ----------------------------------------------------------------------
 
 class KateriRenderer(MapRenderer):
@@ -93,6 +101,34 @@ class NativeRenderer(MapRenderer):
             chart.write(tmp_path)
             print(f">>> [map_renderer.native] rendering style {style_name!r} -> {output_filename}", file=sys.stderr)
             ae_backend.map_draw.export_styled_map(tmp_path, Path(output_filename), style_name, width, 0)
+        finally:
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+    async def export_pdfs(self, chart: ae_backend.chart_v3.Chart, jobs: list[tuple[str, Path]], width: float = 800.0):
+        """Batch render: write the ~12 MB styled chart to a temp `.ace` ONCE, then render
+        every `(style_name, output_filename)` in a single native call that loads the chart
+        once (`ae_backend.map_draw.export_styled_maps`). Each map is byte-identical to the
+        per-call `export_pdf` path — the only difference is the chart is loaded once instead
+        of once per style."""
+        if chart is None:
+            raise RuntimeError(
+                f"{self.__class__.__name__} needs the in-memory styled chart, but none was "
+                f"passed to export_pdfs. The native backend renders from the chart directly "
+                f"rather than from a kateri session.")
+        if not jobs:
+            return
+        fd, tmp_name = tempfile.mkstemp(suffix=".ace", prefix="ae-report-native-")
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        try:
+            chart.write(tmp_path)
+            native_jobs = [(style_name, str(Path(output_filename))) for style_name, output_filename in jobs]
+            for style_name, output_filename in jobs:
+                print(f">>> [map_renderer.native] (batch) rendering style {style_name!r} -> {output_filename}", file=sys.stderr)
+            ae_backend.map_draw.export_styled_maps(tmp_path, native_jobs, width, 0)
         finally:
             try:
                 tmp_path.unlink()
