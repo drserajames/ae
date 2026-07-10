@@ -7,18 +7,19 @@ abstracts that step behind a small `MapRenderer` seam with two interchangeable b
 consume the SAME on-chart styling the report already bakes (`c["R"]` named styles + `c["p"]`
 base plot-spec):
 
-  - `KateriRenderer` (default) — drive the kateri app over its Unix socket (`set_style` +
-    `get_pdf`). This is exactly the previous behaviour.
+  - `KateriRenderer` — drive the kateri app over its Unix socket (`set_style` +
+    `get_pdf`). This is the previous behaviour, now opt-in via the env var.
   - `NativeRenderer` — call `ae_backend.map_draw.export_styled_map` in-process: no
     subprocess, no socket, Linux-capable, and (P2's payoff) no kateri launch per map.
 
 The backend is chosen by the env var `AE_REPORT_MAP_RENDERER`:
 
-    AE_REPORT_MAP_RENDERER=kateri   (default / unset)  -> KateriRenderer
-    AE_REPORT_MAP_RENDERER=native                      -> NativeRenderer
+    AE_REPORT_MAP_RENDERER=native   (default / unset)  -> NativeRenderer
+    AE_REPORT_MAP_RENDERER=kateri                      -> KateriRenderer
 
-Leaving it unset reproduces the current behaviour EXACTLY. kateri stays the default (and the
-interactive drag/relax tool) until native parity is signed off (P2 milestone K).
+Native is the default report figure renderer (headless, in-process, Linux-capable) after P2
+sign-off. This only affects the report's batch map-PDF step; kateri remains the interactive
+viewer (drag/Relax/GUI) and the fallback here via `AE_REPORT_MAP_RENDERER=kateri`.
 """
 import os
 import sys
@@ -34,7 +35,7 @@ from ae.utils import kateri
 # ======================================================================
 
 ENV_VAR = "AE_REPORT_MAP_RENDERER"
-DEFAULT_BACKEND = "kateri"
+DEFAULT_BACKEND = "native"
 
 # ----------------------------------------------------------------------
 
