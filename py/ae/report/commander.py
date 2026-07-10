@@ -25,6 +25,7 @@ import ae.report.download
 import ae.report.dirs
 from .main_loop import command, no_kateri, no_loop, headless
 from .chart_modifier import ChartModifier
+from . import map_renderer
 from .map_renderer import get_map_renderer
 
 # ======================================================================
@@ -117,9 +118,16 @@ class CommanderBasic:
         for style_name in chart_modifier.export_styles():
             await self.export_pdf(style_name=style_name, output_filename=Path(".").resolve().joinpath(f"out.1.{style_name}.pdf"), chart=chart_modifier.chart)
         await self.export_mapi_for_signature_pages(chart_modifier=chart_modifier)
-        kateri.communicator.export_to_legacy(style=chart_modifier.style_for_legacy_plot_spec())
-        chart = await kateri.communicator.get_chart()
-        chart.write(ae.report.dirs.VcmDirs.styled_filename())
+        # Finalise styled.ace. With AE_REPORT_MAP_RENDERER=native the whole export runs
+        # kateri-free: serialise the in-memory styled chart directly (see
+        # map_renderer.write_styled_ace for why this is equivalent to the kateri bake).
+        # Unset/default keeps the exact previous kateri path.
+        if map_renderer.native_selected():
+            map_renderer.write_styled_ace(chart_modifier.chart, ae.report.dirs.VcmDirs.styled_filename())
+        else:
+            kateri.communicator.export_to_legacy(style=chart_modifier.style_for_legacy_plot_spec())
+            chart = await kateri.communicator.get_chart()
+            chart.write(ae.report.dirs.VcmDirs.styled_filename())
 
     @command
     @no_loop
