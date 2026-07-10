@@ -229,6 +229,7 @@ sources_chart_v3 = [
   'cc/chart/v3/serum-circles.cc',
   'cc/chart/v3/chart-seqdb.cc',
   'cc/chart/v3/styles.cc',
+  'cc/chart/v3/semantic-to-legacy.cc',
 ]
 
 sources_chart_v2 = [
