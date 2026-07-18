@@ -139,6 +139,15 @@ namespace ae::map_draw
             }
             if (s == "T" || s == "transparent")
                 return {ColorAction::set, TRANSPARENT};
+            // 8-digit hex here is kateri's #AARRGGBB (AA = opacity, 0xFF opaque), but ::Color
+            // stores #TTRRGGBB (TT = transparency, 0x00 opaque) — flip the alpha byte so a
+            // translucent serum-circle fill like #18FF0000 (kateri ~9% opaque) is read as ~9%
+            // opaque, not ~91%. 6-digit / named colours are fully opaque in both conventions.
+            if (s.size() == 9 && s[0] == '#') {
+                const uint32_t v = static_cast<uint32_t>(std::strtoul(std::string{s}.c_str() + 1, nullptr, 16));
+                const uint32_t opacity = (v >> 24) & 0xFFu;
+                return {ColorAction::set, ::Color{((0xFFu - opacity) << 24) | (v & 0x00FFFFFFu)}};
+            }
             return {ColorAction::set, ::Color{s}};
         }
 

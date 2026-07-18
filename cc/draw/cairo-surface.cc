@@ -60,7 +60,7 @@ namespace ae::draw
     {
         cairo_new_path(context_);
         cairo_arc(context_, cx, cy, radius, 0.0, 2.0 * std::numbers::pi);
-        if (!fill.is_transparent()) {
+        if (fill.alpha() > 0.0) { // draw translucent fills too; skip only fully-transparent
             set_source(context_, fill);
             cairo_fill_preserve(context_);
         }
@@ -86,7 +86,7 @@ namespace ae::draw
         cairo_move_to(context_, cx, cy);
         cairo_arc(context_, cx, cy, radius, a0, a1);
         cairo_close_path(context_);
-        if (!fill.is_transparent()) {
+        if (fill.alpha() > 0.0) { // draw translucent fills too; skip only fully-transparent
             set_source(context_, fill);
             cairo_fill_preserve(context_);
         }
@@ -116,7 +116,7 @@ namespace ae::draw
         const double half = side / 2.0;
         cairo_new_path(context_);
         cairo_rectangle(context_, cx - half, cy - half, side, side);
-        if (!fill.is_transparent()) {
+        if (fill.alpha() > 0.0) { // draw translucent fills too; skip only fully-transparent
             set_source(context_, fill);
             cairo_fill_preserve(context_);
         }
@@ -133,7 +133,7 @@ namespace ae::draw
         cairo_line_to(context_, cx + sin60 * radius, cy + radius / 2.0); // bottom-right
         cairo_line_to(context_, cx - sin60 * radius, cy + radius / 2.0); // bottom-left
         cairo_close_path(context_);
-        if (!fill.is_transparent()) {
+        if (fill.alpha() > 0.0) { // draw translucent fills too; skip only fully-transparent
             set_source(context_, fill);
             cairo_fill_preserve(context_);
         }
@@ -153,7 +153,7 @@ namespace ae::draw
         cairo_curve_to(context_, cx + r * 1.4, cy + r * 0.95, cx + r * 0.8, cy - r * 0.98, cx + 0.0, cy - r);
         cairo_curve_to(context_, cx - r * 0.8, cy - r * 0.98, cx - r * 1.4, cy + r * 0.95, cx + 0.0, cy + r);
         cairo_close_path(context_);
-        if (!fill.is_transparent()) {
+        if (fill.alpha() > 0.0) { // draw translucent fills too; skip only fully-transparent
             set_source(context_, fill);
             cairo_fill_preserve(context_);
         }
@@ -196,7 +196,7 @@ namespace ae::draw
             else
                 cairo_line_to(context_, p[0], p[1]);
         }
-        if (!fill.is_transparent()) {
+        if (fill.alpha() > 0.0) { // draw translucent fills too; skip only fully-transparent
             set_source(context_, fill);
             cairo_fill_preserve(context_);
         }
@@ -212,7 +212,7 @@ namespace ae::draw
         cairo_new_path(context_);
         cairo_rectangle(context_, x, y, width, height);
         const bool stroke = outline_width > 0.0 && !outline.is_transparent();
-        if (!fill.is_transparent()) {
+        if (fill.alpha() > 0.0) { // draw translucent fills too; skip only fully-transparent
             set_source(context_, fill);
             if (stroke)
                 cairo_fill_preserve(context_);
