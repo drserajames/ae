@@ -308,7 +308,7 @@ namespace ae::draw
             cairo_text_path(context_, str.c_str());
             set_source(context_, halo_color);
             cairo_set_line_width(context_, halo_width * kFontScaleToMatchCanvas);
-            cairo_set_line_join(context_, CAIRO_LINE_JOIN_ROUND);
+            cairo_set_line_join(context_, CAIRO_LINE_JOIN_MITER); // match kateri PDF default halo join
             cairo_stroke_preserve(context_);
             set_source(context_, color);
             cairo_fill(context_);
