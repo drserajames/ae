@@ -636,6 +636,141 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+# ======================================================================
+# Single-canvas signature page (sigp): native map render + one Cairo canvas
+# ======================================================================
+#
+# The kateri/pdfjam form above renders the section maps with kateri and stitches the
+# tree + map PDFs with pdflatex/pdfjam. The native form below draws the SAME sig-page
+# on ONE Cairo PDF page: it renders each section map as a PNG via ae's own headless
+# renderer (`ae_backend.map_draw.export_styled_maps` — no kateri) and the tree as a PNG
+# via tal-draw, then paints all tiles onto a single cairo_pdf_surface via the C++
+# compositor `ae_backend.tal.compose_sig_page` (no pdfjam / pdflatex). See
+# cc/tal/SIG-PAGE-COMPOSITOR.md.
+
+_MM2PT = 72.0 / 25.4  # PDF points per millimetre (the compositor works in PDF points)
+
+
+def _png_size(path) -> tuple[int, int]:
+    """(width, height) in px of a PNG, read from its IHDR (stdlib only)."""
+    import struct
+    with open(path, "rb") as fh:
+        head = fh.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n" or len(head) < 24:
+        raise SignaturePageError(f"not a PNG (or truncated): {path}")
+    w, h = struct.unpack(">II", head[16:24])
+    return int(w), int(h)
+
+
+def _sig_page_layout(n_maps: int, tree_aspect: float, *, margin_mm: float = 2.0,
+                     paper_h_mm: float = 210.0) -> tuple[float, float, tuple, list]:
+    """Auto-width signature-page geometry (a device-space port of `compose_grid`'s
+    ``auto_width`` branch). Returns ``(page_w_mm, page_h_mm, tree_rect_mm, cell_rects_mm)``
+    with every rect ``(x, y, w, h)`` in mm from the page top-left. The maps fill an
+    ``rows x cols`` grid row-major (``cols`` per row), ``cols = ceil(n / 3)``, sized so the
+    grid (and the tree) are ``grid_h`` tall and the page width grows with the column count."""
+    cols = max(1, math.ceil(n_maps / 3))            # AD lays the maps 3 rows high
+    rows = math.ceil(n_maps / cols) if n_maps else 1
+    avail_h = paper_h_mm - 2.0 * margin_mm - 10.0
+    row_gap, col_gap, panel_gap = 1.5, 2.0, 5.0
+    cell = max(20.0, avail_h / rows - 1.5)
+    grid_h = rows * cell + (rows - 1) * row_gap
+    tree_w = tree_aspect * grid_h
+    grid_w = cols * cell + (cols - 1) * col_gap
+    page_w = 2.0 * margin_mm + tree_w + panel_gap + grid_w
+    page_h = grid_h + 2.0 * margin_mm + 4.0          # +4 = single-page spill guard (matches compose_grid)
+    tree_rect = (margin_mm, margin_mm, tree_w, grid_h)
+    grid_left = margin_mm + tree_w + panel_gap
+    cells = []
+    for i in range(n_maps):
+        r, c = divmod(i, cols)
+        cells.append((grid_left + c * (cell + col_gap), margin_mm + r * (cell + row_gap), cell, cell))
+    return page_w, page_h, tree_rect, cells
+
+
+def make_section_signature_page_native(tree, chart, tal, output, *, size: Optional[int] = None,
+                                       map_width: float = 800.0, tree_render_px: int = 1600,
+                                       viewport: Optional[Sequence[float]] = None,
+                                       page_title: Optional[str] = None, defines: Optional[dict] = None,
+                                       serum_circles: bool = False, serum_circle_fold: float = 2.0,
+                                       keep_temp: bool = False) -> Path:
+    """Single-canvas form of :func:`make_section_signature_page`: identical section<->map
+    coupling, but the section maps are rendered natively (``ae_backend.map_draw``, no kateri)
+    and tree + maps are composited onto ONE Cairo PDF page (``ae_backend.tal.compose_sig_page``,
+    no pdfjam / pdflatex). Produces the same page layout (tree left, ``ceil(n/3)``-column map
+    grid right, per-map frame). Needs ae_backend on PYTHONPATH and the ``tal-draw`` binary."""
+    import sys as _sys
+
+    _sys.path.insert(0, str(REPO_ROOT / "build"))
+    try:
+        import ae_backend
+    except ImportError as err:
+        raise SignaturePageError(
+            f"native signature pages need ae_backend ({err}); run under the arm64 Python with PYTHONPATH=build") from err
+    if not hasattr(ae_backend.tal, "compose_sig_page"):
+        raise SignaturePageError("ae_backend.tal.compose_sig_page missing — rebuild ae (cc/tal/sig-page.cc)")
+    from ae.tal import section_maps as SM
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="tal-sigsec-native-"))
+    try:
+        sections = SM.parse_sections(tal)
+        if not sections:
+            raise SignaturePageError(f"no shown hz-sections found in {tal}")
+        window = SM.parse_time_series(tal)
+        scale = SM.DateColorScale(*window) if window else None
+        if scale is None:
+            print("  [sigp] no time-series window in .tal; antigens won't be date-coloured", file=_sys.stderr)
+
+        # Pass 1: draw-order leaf names (matches the rendered tree order) + section prefixes.
+        names_settings, tal_size = _tal_to_settings(tal, tmpdir, defines)
+        chart_obj = ae_backend.chart_v3.Chart(str(chart))
+        leaf_names = SM.leaf_names_from_taldraw(tree, names_settings, TAL_DRAW, tmpdir)
+        match = SM.match_leaf_names(leaf_names, chart_obj)
+        section_prefixes = SM.assign_prefixes(sections, match)  # A/B/C in tree order
+        reset_vp, available_styles = SM.report_styles_from_ace(chart)
+        vaccine_marks = SM.vaccine_marks_from_ace(chart)
+        vp = list(viewport) if viewport else (list(reset_vp) if reset_vp else None)
+        print(f"  [sigp] viewport: {('explicit ' if viewport else 'main -reset ') + str([round(x, 2) for x in vp]) if vp else 'native auto-fit'}", file=_sys.stderr)
+        styled = SM.build_section_styles(chart_obj, sections, match, scale, vp,
+                                         available_styles=available_styles, vaccine_marks=vaccine_marks,
+                                         serum_circles=serum_circles, serum_circle_fold=serum_circle_fold)
+        for s in styled:
+            print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
+
+        # Render each section map to a PNG via ae's native renderer (chart written once with the
+        # section styles baked in; export_styled_maps loads it once and renders every style). This
+        # is the kateri replacement — the section<->map coupling lives entirely in the styles.
+        styled_ace = tmpdir / "sig-styled.ace"
+        chart_obj.write(str(styled_ace))
+        maps_dir = tmpdir / "maps"
+        maps_dir.mkdir(parents=True, exist_ok=True)
+        map_pngs = [maps_dir / f"map-{i:02d}.png" for i in range(len(styled))]
+        jobs = [(styled[i]["name"], str(map_pngs[i])) for i in range(len(styled))]
+        ae_backend.map_draw.export_styled_maps(str(styled_ace), jobs, float(map_width), 0)
+
+        # Pass 2: final tree settings with AD sig-page overrides, rendered to a PNG.
+        matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
+        tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
+                                            drop_dash_bars=True, clades_before_time_series=True,
+                                            matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes)
+        tree_png = tmpdir / "tree.png"
+        render_tree_pdf(tree, tree_png, size=size or tree_render_px, settings=tree_settings)
+        tree_w_px, tree_h_px = _png_size(tree_png)
+        tree_aspect = (tree_w_px / tree_h_px) if tree_h_px else 0.7
+
+        # Compose: geometry in mm (matching compose_grid auto_width, margin 2mm), tiles in PDF points.
+        page_w_mm, page_h_mm, tree_rect, cells = _sig_page_layout(len(map_pngs), tree_aspect, margin_mm=2.0)
+        tx, ty, tw, th = tree_rect
+        tiles = [(str(tree_png), tx * _MM2PT, ty * _MM2PT, tw * _MM2PT, th * _MM2PT, False)]
+        for i, (cx, cy, cw, ch) in enumerate(cells):
+            tiles.append((str(map_pngs[i]), cx * _MM2PT, cy * _MM2PT, cw * _MM2PT, ch * _MM2PT, True))  # frame each map
+        ae_backend.tal.compose_sig_page(str(output), page_w_mm * _MM2PT, page_h_mm * _MM2PT, tiles)
+        return Path(output)
+    finally:
+        if not keep_temp:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def make_signature_page(tree, output, *, maps: Sequence[os.PathLike] = (), chart=None, size: int = 1000,
                         settings: Optional[str] = None, mark: Optional[Sequence[str]] = None, mark_style: Optional[dict] = None,
                         mark_vaccines: Optional[str] = None, vaccines_file=None,

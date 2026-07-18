@@ -20,6 +20,7 @@ namespace ae::py
     void tal(pybind11::module_& mdl); // --- tal (subsystem #3) ---
     void hidb(pybind11::module_& mdl); // --- hidb (subsystem #2) ---
     void map_draw(pybind11::module_& mdl); // --- map-draw (subsystem #1, revived) ---
+    void sig_page(pybind11::module_& mdl); // --- sigp: single-canvas signature-page compositor (subsystem #3) ---
 
 } // namespace acmacs_py
 

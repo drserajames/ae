@@ -129,6 +129,8 @@ sources_py = [
   'cc/map-draw/draw.cc', # --- map-draw (subsystem #1, revived) ---
   'cc/map-draw/styled-draw.cc', # --- map-draw P2 milestone A (styled/semantic render) ---
   'cc/draw/cairo-surface.cc', # --- map-draw (subsystem #1, revived) ---
+  'cc/py/sig-page.cc', # --- sigp: single-canvas signature-page compositor (subsystem #3) ---
+  'cc/tal/sig-page.cc', # --- sigp: single-canvas signature-page compositor (subsystem #3) ---
 ]
 
 # --- tal (subsystem #3) — headless tree layout; see cc/tal/PORTING.md ---

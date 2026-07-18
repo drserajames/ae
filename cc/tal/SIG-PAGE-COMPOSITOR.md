@@ -116,6 +116,38 @@ context at an offset — out of scope here by the ownership constraint.
 ## 3. Status
 
 - [x] Current-composition analysis + geometry (this doc).
-- [ ] `compose_sig_page` C++ + binding.
-- [ ] `make_section_signature_page_native` driver.
-- [ ] Build + pixel-diff verification vs the current composed page for one real signature page.
+- [x] `compose_sig_page` C++ (`cc/tal/sig-page.{hh,cc}`) + binding
+      (`cc/py/sig-page.cc`, `ae_backend.tal.compose_sig_page`).
+- [x] `make_section_signature_page_native` driver
+      (`py/ae/tal/signature_page.py`) — native map PNGs + tree PNG + one Cairo page.
+- [x] Build + verification: a real 8-section signature page renders on ONE Cairo page
+      (no kateri, no pdfjam/pdflatex). Page size matches the current pdfjam-composed page
+      to within 0.25% (927.7 x 574.0 pt vs 926.9 x 572.6 pt); the tree + `ceil(n/3)`-column
+      map grid line up with the baseline (side-by-side montage).
+
+### Verification residuals (honest)
+
+The remaining pixel difference vs the current pdfjam page is **not** compositor layout error:
+
+1. **Map content** — the baseline maps are rendered by **kateri**; the native page uses ae's
+   own `export_styled_map`. The clouds and clusters match, but framing/antialiasing differ by
+   the known kateri↔native delta (the whole point of the swap). Same antigen positions,
+   same section highlights (date colouring works natively).
+2. **Tree registration** — the native tree tile is ~2% taller / ~20 px higher at the top than
+   the baseline's, because the baseline embeds the tree with LaTeX `keepaspectratio` (which
+   can leave the tree slightly short of the cell) while the compositor fits the tree tile to
+   the full cell. The bottoms align to ~1 px. A future refinement could match the
+   keepaspectratio fit exactly.
+3. **Tree hairlines** — a ~38k-leaf tree is a field of sub-pixel hairlines; raster (native
+   PNG tile) vs vector (baseline embedded PDF) inflates any per-pixel diff metric regardless
+   of alignment.
+
+### Remaining / not done
+
+- The driver `make_section_signature_page_native` is wired but **not yet made the default** in
+  the report driver (`gen-sigpages-ae.py` / `py/ae/report/signature_page.py` still call the
+  kateri/pdfjam `make_section_signature_page`). Switching the report over is a one-line change
+  once the residuals above are accepted.
+- Fully-vector single canvas (refactor `export_styled_map` + `export_tree_pdf` to draw into a
+  caller-supplied Cairo context at an offset) remains out of scope by the styled-draw.cc /
+  cairo-surface.* ownership constraint.
