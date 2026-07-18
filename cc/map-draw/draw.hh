@@ -8,6 +8,11 @@
 
 #include "chart/v3/index.hh"
 
+// Forward declaration of the opaque Cairo context (typedef struct _cairo cairo_t;) so the
+// shared-surface render entry point below can take a caller-supplied context without pulling
+// the Cairo headers into map-draw's public interface.
+struct _cairo;
+
 // ----------------------------------------------------------------------
 
 namespace ae::chart::v3
@@ -62,6 +67,15 @@ namespace ae::map_draw
     // `width` is the output width in device px / PDF points. Output extension picks backend
     // (.png raster, else PDF). See cc/map-draw/STYLED-DRAW.md and P2-RENDER-DESIGN.md §1.2/§2.2.
     void export_styled_map(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output);
+
+    // Shared-surface form of export_styled_map (single-canvas signature-page compositor): render the
+    // same styled map into a sub-rectangle of a caller-supplied Cairo context `context` instead of an
+    // owned output file. The map is computed identically (same viewport/points/legend/title) and then
+    // letterboxed (aspect-preserving, centred) into the device rectangle (dst_x, dst_y, dst_w, dst_h).
+    // The context/surface are not owned. Byte-for-byte the same drawing calls as export_styled_map —
+    // only the surface differs — so standalone file output is unaffected. See cc/tal/sig-page.*.
+    void export_styled_map_into(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, std::string_view style_name, double width,
+                                _cairo* context, double dst_x, double dst_y, double dst_w, double dst_h);
 
     // Procrustes render: draw `secondary` framed like `primary`, with arrows for common
     // points (threshold 0.3) and an "RMS: {rms:.4f}" title. See make_pc in chains chart.py.
