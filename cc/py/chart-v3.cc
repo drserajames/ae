@@ -199,6 +199,9 @@ void ae::py::chart_v3(pybind11::module_& mdl)
         .def("write", &Chart::write, "filename"_a, pybind11::doc("exports chart into a file"))                         //
         .def(
             "export", [](const Chart& chart) -> pybind11::bytes { return chart.export_to_json(); }, pybind11::doc("exports chart into json uncompressed, bytes")) //
+        .def("semantic_style_to_legacy", &Chart::semantic_style_to_legacy, "style_name"_a,
+             pybind11::doc("bakes the named semantic style (c[\"R\"][style_name]) into the legacy per-point plot spec (c[\"p\"]); "
+                           "native reproduction of kateri's plotSpecLegacy().setFrom(currentPlotSpec)")) //
 
         .def("__str__", [](const Chart& chart) { return chart.name(); }) //
         .def(

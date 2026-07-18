@@ -60,19 +60,21 @@ class CommanderBasic:
         return chart_modifier
 
     @command
+    @no_kateri
     @no_loop
-    async def prestyle(self) -> ChartModifier:
-        """`prestyle` command: build prestyles on the downloaded chart; if kateri is
-        connected, export the legacy plot spec, read the chart back, write `prestyled.ace`
-        and link `adjusted.ace`."""
+    def prestyle(self) -> ChartModifier:
+        """`prestyle` command: build prestyles on the downloaded chart, write `prestyled.ace`
+        and link `adjusted.ace`. No kateri.
+
+        This used to launch kateri solely to bake the legacy plot spec (`c["p"]`) into the
+        chart (`export_to_legacy` + `get_chart`). That `c["p"]` is no longer consumed —
+        `multiple_circles` now resolves clade fills from the semantic styles (`c["R"]`)
+        directly — so the bake and its kateri round-trip are removed; the in-memory prestyled
+        chart is serialised natively instead."""
         chart_modifier = self.chart_modifier(ae.report.dirs.VcmDirs.downloaded_filename())
         chart_modifier.populate_for_prestyle()
-        if kateri.communicator.is_connected():
-            kateri.communicator.send_chart(chart_modifier.chart)
-            kateri.communicator.export_to_legacy(style=chart_modifier.style_for_legacy_plot_spec())
-            chart = await kateri.communicator.get_chart()
-            chart.write(ae.report.dirs.VcmDirs.prestyled_filename())
-            ae.report.dirs.VcmDirs.link_adjusted()
+        chart_modifier.chart.write(ae.report.dirs.VcmDirs.prestyled_filename())
+        ae.report.dirs.VcmDirs.link_adjusted()
         return chart_modifier
 
     @command

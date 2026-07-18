@@ -12,8 +12,9 @@ multiple-serum-circles addenda consume:
                                           the circled sera (overlaid via pdflatex).
 
 The map itself is rendered by **kateri** over its unix socket (one session per lab); the
-clade colouring reuses the chart's own ``clades-v10`` semantic style and legacy plot-spec
-fills, so the antigen colours match the report's main maps exactly. Serum circles use ae's
+clade colouring is resolved natively from the chart's own ``clades-v10`` **semantic** style
+(``c["R"]``) — no dependency on a kateri-baked legacy plot spec — so the antigen colours match
+the report's main maps exactly. Serum circles use ae's
 ``projection().serum_circles(fold)`` theoretical radius — identical to the Rmd's
 ``2 + max(logtiter[,sr]) - logtiter[homologous_ag, sr]`` for ``fold=2.0``.
 
@@ -52,6 +53,9 @@ CIRCLES_FRONT = "mc-circles"
 # style but WITHOUT `-vaccines-v10`: the Racmacs multiple-circles figures plot the bare
 # clade-coloured map (no enlarged/labelled vaccine markers).
 BASE_REFERENCES = ["-reset", "-clades-v10", "-new-2", "-new-1"]
+
+# The semantic style whose per-antigen fills colour the circles (== the report's by-clade map).
+CLADE_LEGACY_STYLE = "clades-v10"
 
 TITLE_STYLE = {"offset": [19.0, 12.0], "origin": "tl", "size": 25, "weight": "bold",
                "slant": "normal", "face": "helvetica", "color": "black", "interline": 0.2}
@@ -92,10 +96,17 @@ class LabConfig:
 # ----------------------------------------------------------------------
 
 def legacy_fills(ace_path: Path) -> dict[int, str]:
-    """antigen index -> rendered fill hex, read from the chart's legacy plot spec ("p").
-    This is the exact colour kateri draws with `clades-v10` (the legacy spec was exported
-    from that style), i.e. the Rmd's `agFill`."""
-    data = json.loads(subprocess.check_output(["decat", str(ace_path)]))["c"]
+    """antigen index -> rendered fill hex for the ``clades-v10`` style, i.e. the Rmd's ``agFill``.
+
+    Resolved natively from the chart's SEMANTIC styles (``c["R"]``) via
+    ``Chart.semantic_style_to_legacy`` — the in-process reproduction of kateri's ``setFrom``.
+    Previously this read a pre-baked legacy plot spec (``c["p"]``) that only kateri could produce
+    (so the report had to launch kateri in ``prestyle`` to bake it); resolving ``c["R"]`` here
+    removes that dependency. Verified byte-equal to the old ``c["p"]`` fills across the report's
+    charts (0 diffs)."""
+    chart = cv.Chart(str(ace_path))
+    chart.semantic_style_to_legacy(CLADE_LEGACY_STYLE)
+    data = json.loads(chart.export())["c"]
     p = data.get("p", {})
     idx = p.get("p", [])
     palette = p.get("P", [])
