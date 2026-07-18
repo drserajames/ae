@@ -65,6 +65,21 @@ namespace ae::map_draw
             ::Color color{TRANSPARENT}; // valid only when action == set
         };
 
+        // Every colour string the renderer consumes is in kateri's #AARRGGBB convention (AA =
+        // opacity, 0xFF opaque). ::Color stores #TTRRGGBB (TT = transparency, 0x00 opaque), so
+        // flip the alpha byte for 8-digit hex — otherwise a translucent colour like #18FF0000
+        // (kateri ~9% opaque) reads as ~91% opaque. 6-digit / named colours are fully opaque in
+        // both conventions and pass through unchanged.
+        ::Color color_from_kateri_str(std::string_view s)
+        {
+            if (s.size() == 9 && s[0] == '#') {
+                const uint32_t v = static_cast<uint32_t>(std::strtoul(std::string{s}.c_str() + 1, nullptr, 16));
+                const uint32_t opacity = (v >> 24) & 0xFFu;
+                return ::Color{((0xFFu - opacity) << 24) | (v & 0x00FFFFFFu)};
+            }
+            return ::Color{s};
+        }
+
         ParsedColor parse_color(const ae::draw::v2::Color& c)
         {
             if (c.empty())
@@ -81,7 +96,7 @@ namespace ae::map_draw
             }
             if (s == "T" || s == "transparent")
                 return {ColorAction::set, TRANSPARENT};
-            return {ColorAction::set, ::Color{std::string_view{s}}};
+            return {ColorAction::set, color_from_kateri_str(s)};
         }
 
         // kateri ColorAndModifier.color for the ":pale" modifier (pale factor 0.4).
@@ -139,7 +154,7 @@ namespace ae::map_draw
             }
             if (s == "T" || s == "transparent")
                 return {ColorAction::set, TRANSPARENT};
-            return {ColorAction::set, ::Color{s}};
+            return {ColorAction::set, color_from_kateri_str(s)};
         }
 
         // Concrete colour from a plain std::string (serum-circle outline/fill): a deferred
