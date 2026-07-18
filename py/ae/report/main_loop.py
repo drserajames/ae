@@ -43,7 +43,16 @@ def main_loop(start_kateri: bool = True) -> NoReturn:
         sys.exit(0)
     if args.command:
         os.chdir(Path(sys.argv[0]).parent)
-        if start_kateri and not getattr(getattr(commander, args.command), "main_loop_no_kateri", False):
+        # P2: with the native map renderer selected (AE_REPORT_MAP_RENDERER unset/native) the
+        # whole report runs kateri-free — the map-PDF, styled.ace and sig-page-mapi kateri
+        # round-trips are all replaced by in-process native code (see map_renderer.py). So do
+        # NOT launch the kateri app / socket server in native mode; only the opt-in kateri
+        # backend needs them. (Without this guard main_loop still spawned kateri for `export`
+        # et al. because those commands are not @no_kateri — defeating the P2 "no kateri
+        # process" goal and hard-failing where kateri/socket bind is unavailable.)
+        from .map_renderer import native_selected
+        no_kateri_cmd = getattr(getattr(commander, args.command), "main_loop_no_kateri", False)
+        if start_kateri and not no_kateri_cmd and not native_selected():
             headless = getattr(getattr(commander, args.command), "main_loop_headless", False)
             tasks: list[Task] = [kateri.KateriTask(headless=headless), kateri.SocketServerTask()]
         else:
