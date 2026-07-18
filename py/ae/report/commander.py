@@ -253,15 +253,40 @@ class CommanderBasic:
                 raise RuntimeError(f"cannot infer fold from \"{stem}\"")
             return folds[0]
 
+        num_sera = chart_modifier.chart.number_of_sera()
+
+        def serum_no_of(stem: str):
+            """Serum index encoded in a serum-coverage map stem (`sc-<serum_no>-…`), or None
+            if it is not a valid `sc-NNN-…` stem."""
+            fields = stem.split("-")
+            if len(fields) < 2 or not fields[1].isdigit():
+                return None
+            return int(fields[1])
+
+        def is_current_serum(stem: str) -> bool:
+            """Whether a stem names a serum that exists in the current chart. Stale PDFs left
+            in the output dir by a previous run of a larger chart (more sera) name serum
+            indexes that no longer exist here — they must be skipped, otherwise `chart.serum()`
+            is called out of range (a hard SIGTRAP under libc++ hardening) and the generated
+            page would reference maps for nonexistent sera."""
+            no = serum_no_of(stem)
+            return no is not None and 0 <= no < num_sera
+
         def serum_title(stem: str):
             """`<serum_no> <designation>` title for a serum-coverage map from its stem."""
-            serum_no = int(stem.split("-")[1])
+            serum_no = serum_no_of(stem)
             serum = chart_modifier.chart.serum(serum_no)
             return f"{serum_no} {serum.designation()}"
 
         if output_dir := self.serum_coverage_output_dir(check_existance=True):
             subtype_lab = ae.report.dirs.VcmDirs().main_dir().stem
-            images = sorted(output_dir.glob("*.pdf"))
+            all_images = sorted(output_dir.glob("*.pdf"))
+            images = [img for img in all_images if is_current_serum(img.stem)]
+            if stale := [img.name for img in all_images if not is_current_serum(img.stem)]:
+                print(f">> serum_coverage_webpage: skipping {len(stale)} stale/foreign map(s) not matching the "
+                      f"current chart's {num_sera} sera: {stale[0]} … {stale[-1]}", file=sys.stderr)
+            if not images:
+                return
             zoom_variants = [""] + (["-zoom"] if any("-zoom" in img.stem for img in images) else [])
             fold_variants = set(fold_val(img.stem) for img in images)
             for zoom in zoom_variants:
@@ -279,7 +304,7 @@ class CommanderBasic:
                                 "columns": [[{"T": "title", "text": "Empirical"}, {"T": "pdf", "file": fn_e.name}],
                                             [{"T": "title", "text": "Theoretical"}, {"T": "pdf", "file": fn_e.name.replace("-e", "-t")}]]
                             }
-                            for fn_e in sorted(output_dir.glob(f"*-f{fold}-e{zoom}.pdf"))
+                            for fn_e in sorted(output_dir.glob(f"*-f{fold}-e{zoom}.pdf")) if is_current_serum(fn_e.stem)
                         ]
                     }
                     filename_infix = f"f{fold}{zoom}"
