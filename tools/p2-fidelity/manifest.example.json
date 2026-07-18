@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "SYNTHETIC example manifest for the P2 fidelity harness. Copy it and point the",
+    "paths at a real report working dir OUTSIDE this repo. NEVER commit a manifest",
+    "that embeds real chart paths tied to WHO strain data or, worse, chart contents.",
+    "Charts + reference PDFs are always referenced by PATH; nothing real is committed.",
+    "",
+    "Top-level keys (all optional): width (native render width, default = raster_size),",
+    "raster_size (pdftoppm scale-to px, default 800), projection (default 0),",
+    "build_dir (dir with ae_backend*.so; else --build-dir / $AE_BUILD / <repo>/build-py314),",
+    "out_dir (output dir; default a scratch dir). 'maps' is the list of entries.",
+    "",
+    "Per-entry keys: chart (required, path to styled .ace), style (required, a c[\"R\"]",
+    "front-style name e.g. clades-v1 / serology / ts-YYYY-MM / info-clades-v1),",
+    "golden (kateri reference PDF path; 'auto' derives <dir>/out.1.<style>.pdf; omit to",
+    "skip), ad_ref (AD single-map reference PDF path; omit when AD is only page-embedded),",
+    "label (display name; default <chart-dir-name>/<style>)."
+  ],
+  "raster_size": 800,
+  "width": 800,
+  "projection": 0,
+  "out_dir": "/tmp/p2-fidelity-example",
+  "maps": [
+    {
+      "label": "example-lab by-clade",
+      "chart": "/path/to/report/example-lab/styled.ace",
+      "style": "clades-v1",
+      "golden": "auto"
+    },
+    {
+      "label": "example-lab serology",
+      "chart": "/path/to/report/example-lab/styled.ace",
+      "style": "serology",
+      "golden": "/path/to/report/example-lab/out.1.serology.pdf"
+    },
+    {
+      "label": "example-lab time-series",
+      "chart": "/path/to/report/example-lab/styled.ace",
+      "style": "ts-2025-08",
+      "golden": "auto"
+    },
+    {
+      "label": "example-lab info-map",
+      "chart": "/path/to/report/example-lab/styled.ace",
+      "style": "info-clades-v1",
+      "golden": "/path/to/report/example-lab/plain-info.pdf",
+      "ad_ref": "/path/to/report/reference-AD/single-map-page.pdf"
+    }
+  ]
+}

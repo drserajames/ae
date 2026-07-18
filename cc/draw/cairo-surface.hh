@@ -42,8 +42,17 @@ namespace ae::draw
         // centre -> arc -> centre, so the wedge is closed. Transparent fill = outline only;
         // non-positive outline width / transparent outline skips the stroke.
         void sector(double cx, double cy, double radius, double start_angle, double end_angle, Color outline, double outline_width, Color fill);
+        // Open circular arc stroke (no fill, no radius lines to centre): the arc of the circle
+        // of `radius` centred at (cx, cy) from `start_angle` to `end_angle` (same clockwise-from-
+        // 12-o'clock convention as sector()). Used to build kateri's dashed serum circles, whose
+        // outline is a set of short arcs (unlike sector(), which closes the path to the centre).
+        void arc(double cx, double cy, double radius, double start_angle, double end_angle, Color outline, double outline_width);
         void square(double cx, double cy, double side, Color outline, double outline_width, Color fill);
         void triangle(double cx, double cy, double radius, Color outline, double outline_width, Color fill); // equilateral, point up
+        // Egg (kateri PointShape.egg): a closed two-bezier egg of the given `size` (bounding
+        // diameter) centred at (cx, cy), reproducing kateri _drawShape's control points so a
+        // native render matches the kateri golden exactly. Transparent fill = outline only.
+        void egg(double cx, double cy, double size, Color outline, double outline_width, Color fill);
         void filled_triangle(double x0, double y0, double x1, double y1, double x2, double y2, Color fill); // arbitrary filled triangle
         // Axis-aligned rectangle with its top-left corner at (x, y). Transparent fill = outline only.
         void rectangle(double x, double y, double width, double height, Color outline, double outline_width, Color fill);
@@ -63,8 +72,17 @@ namespace ae::draw
         // strokes a halo (default white) behind the glyphs (see text()).
         void text_rotated(double x, double y, std::string_view utf8, double font_size, Color color, double angle_degrees,
                           double halo_width = 0.0, Color halo_color = WHITE);
+        // Like text(center=false) but with selectable weight/slant (for the semantic-style
+        // title/legend, which carry helvetica bold/italic). (x, y) is the glyph-box top-left.
+        // halo_width > 0 strokes a halo (default white) behind the glyphs, so point labels stay
+        // legible over the point cloud (kateri's default point-label halo). halo_width is the full
+        // stroke width in font-size units (scaled internally to match the glyph), not a radius.
+        void text_font(double x, double y, std::string_view utf8, double font_size, Color color, bool bold, bool italic,
+                       double halo_width = 0.0, Color halo_color = WHITE);
         // Measure a string at the given font size: returns {width, height} in device units.
-        std::pair<double, double> text_size(std::string_view utf8, double font_size);
+        // `helvetica` selects the Helvetica face (matching text_font) so callers that draw with
+        // text_font size their boxes/rows from the same metrics; default keeps the sans-serif face.
+        std::pair<double, double> text_size(std::string_view utf8, double font_size, bool helvetica = false);
 
       private:
         _cairo_surface* surface_{nullptr};

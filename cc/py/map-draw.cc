@@ -1,6 +1,8 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "map-draw/draw.hh"
 #include "chart/v3/chart.hh"
@@ -54,6 +56,35 @@ void ae::py::map_draw(pybind11::module_& mdl)
         },
         "primary_ace"_a, "secondary_ace"_a, "output"_a, "size"_a = 800.0, "mapi"_a = std::nullopt, "coloring"_a = std::nullopt,
         pybind11::doc("Procrustes render (AD make_pc): draw primary with arrows to secondary (threshold 0.3), title 'RMS: x.xxxx'."));
+
+    // --- P2 milestone A: styled (semantic c["R"] + c["p"]) render, kateri-compatible drop-in ---
+    sub.def(
+        "export_styled_map",
+        [](const std::filesystem::path& ace, const std::filesystem::path& output, const std::string& style, double width, size_t projection_no) {
+            const Chart chart{ace};
+            ae::map_draw::export_styled_map(chart, projection_index{projection_no}, style, width, output);
+        },
+        "ace"_a, "output"_a, "style"_a, "width"_a = 800.0, "projection_no"_a = 0,
+        pybind11::doc("Render a chart's on-chart semantic style (c[\"R\"] named style + c[\"p\"] base plot-spec) to output "
+                      "(.png raster, else PDF), mirroring kateri set_style + get_pdf. P2 milestone A."));
+
+    // --- P2 batch: load the chart ONCE, render many (style -> output) pairs ---
+    // A report renders ~16 named styles from the SAME ~12 MB chart. `export_styled_map`
+    // reloads the chart from disk on every call, so the reload dominates the per-map cost.
+    // This hoists the single chart load out of the per-style render loop (the per-style
+    // render path itself is the unchanged `export_styled_map(chart, ...)` above), producing
+    // byte-identical PDFs while paying the load exactly once.
+    sub.def(
+        "export_styled_maps",
+        [](const std::filesystem::path& ace, const std::vector<std::pair<std::string, std::filesystem::path>>& jobs, double width, size_t projection_no) {
+            const Chart chart{ace}; // loaded ONCE, reused for every style
+            for (const auto& [style, output] : jobs)
+                ae::map_draw::export_styled_map(chart, projection_index{projection_no}, style, width, output);
+        },
+        "ace"_a, "jobs"_a, "width"_a = 800.0, "projection_no"_a = 0,
+        pybind11::doc("Batch of export_styled_map: load the chart from `ace` once and render each (style_name, output_path) "
+                      "pair in `jobs`. Byte-identical to calling export_styled_map per pair, but hoists the chart load out of "
+                      "the loop (P2 batch optimisation for the report's ~16-style-per-lab render)."));
 }
 
 // ----------------------------------------------------------------------

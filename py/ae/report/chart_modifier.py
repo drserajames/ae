@@ -558,14 +558,22 @@ class ChartModifier (conference_data_base.ConferenceData):
 
     async def export_mapi_for_signature_pages(self, filename: Path, style: str):
         """Write a `.mapi` JSON file (map viewport plus vaccine markers) for the
-        signature-page renderer, querying kateri for the current viewport under `style`."""
-        kateri.communicator.set_style(style)
-        viewport_data = await kateri.communicator.get_viewport()
-        viewport = [
-            - viewport_data["native"][2] / 2.0 + viewport_data["used"][0] + viewport_data["native_center"][0],
-            - viewport_data["native"][3] / 2.0 + viewport_data["used"][1] + viewport_data["native_center"][1],
-            viewport_data["used"][2]
-        ]
+        signature-page renderer. The viewport comes from kateri (`set_style` + `get_viewport`)
+        by default; with `AE_REPORT_MAP_RENDERER=native` it is computed in-process from the
+        chart layout (kateri-free), see `map_renderer.sig_page_viewport`."""
+        from . import map_renderer
+        if map_renderer.native_selected():
+            # `style`'s own viewport is the report-set `self.viewport()` (the kateri "used"
+            # viewport); the native helper recentres it exactly as kateri's get_viewport does.
+            viewport = map_renderer.sig_page_viewport(self.chart, self.viewport(zoom_variant=""))
+        else:
+            kateri.communicator.set_style(style)
+            viewport_data = await kateri.communicator.get_viewport()
+            viewport = [
+                - viewport_data["native"][2] / 2.0 + viewport_data["used"][0] + viewport_data["native_center"][0],
+                - viewport_data["native"][3] / 2.0 + viewport_data["used"][1] + viewport_data["native_center"][1],
+                viewport_data["used"][2]
+            ]
         fill_key = "fill" + self._clades_version_suffix(style, infix="_")
         data = {
             "loc:viewport": [{"N": "viewport", "abs": viewport}],

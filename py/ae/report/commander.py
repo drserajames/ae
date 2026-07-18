@@ -25,6 +25,8 @@ import ae.report.download
 import ae.report.dirs
 from .main_loop import command, no_kateri, no_loop, headless
 from .chart_modifier import ChartModifier
+from . import map_renderer
+from .map_renderer import get_map_renderer
 
 # ======================================================================
 
@@ -112,13 +114,22 @@ class CommanderBasic:
         """`export` command: style the chart, export each main-map PDF (`out.1.<style>.pdf`),
         write the signature-page mapi, and save the legacy-exported `styled.ace` (headless)."""
         chart_modifier = self.style()
-        # do not await in parallel because current katteri protocol does not allow matching pdfs request and result
-        for style_name in chart_modifier.export_styles():
-            await self.export_pdf(style_name=style_name, output_filename=Path(".").resolve().joinpath(f"out.1.{style_name}.pdf"))
+        # Render the lab's full style set from the one styled chart. The native backend loads
+        # the chart once for the whole set (P2 batch); kateri renders them sequentially (its
+        # protocol does not allow matching pdf requests to results out of order).
+        jobs = [(style_name, Path(".").resolve().joinpath(f"out.1.{style_name}.pdf")) for style_name in chart_modifier.export_styles()]
+        await self.export_pdfs(jobs=jobs, chart=chart_modifier.chart)
         await self.export_mapi_for_signature_pages(chart_modifier=chart_modifier)
-        kateri.communicator.export_to_legacy(style=chart_modifier.style_for_legacy_plot_spec())
-        chart = await kateri.communicator.get_chart()
-        chart.write(ae.report.dirs.VcmDirs.styled_filename())
+        # Finalise styled.ace. With AE_REPORT_MAP_RENDERER=native the whole export runs
+        # kateri-free: serialise the in-memory styled chart directly (see
+        # map_renderer.write_styled_ace for why this is equivalent to the kateri bake).
+        # Unset/default keeps the exact previous kateri path.
+        if map_renderer.native_selected():
+            map_renderer.write_styled_ace(chart_modifier.chart, ae.report.dirs.VcmDirs.styled_filename())
+        else:
+            kateri.communicator.export_to_legacy(style=chart_modifier.style_for_legacy_plot_spec())
+            chart = await kateri.communicator.get_chart()
+            chart.write(ae.report.dirs.VcmDirs.styled_filename())
 
     @command
     @no_loop
@@ -126,8 +137,8 @@ class CommanderBasic:
     async def export_info(self):
         """`export_info` command: style the chart and export the info-map PDFs (headless)."""
         chart_modifier = self.style()
-        for style_name in chart_modifier.export_info_styles():
-            await self.export_pdf(style_name=style_name, output_filename=Path(".").resolve().joinpath(f"out.1.{style_name}.pdf"))
+        jobs = [(style_name, Path(".").resolve().joinpath(f"out.1.{style_name}.pdf")) for style_name in chart_modifier.export_info_styles()]
+        await self.export_pdfs(jobs=jobs, chart=chart_modifier.chart)
 
     @command
     @no_loop
@@ -162,12 +173,15 @@ class CommanderBasic:
         "serum_selector: lambda sr: sr.no < 5"
         chart_modifier = self.serum_coverage(serum_selector=serum_selector, fold=fold)
         print(f">>>> chart_modifier {chart_modifier}", file=sys.stderr)
-        # do not await in parallel because current kateri protocol does not allow matching pdfs request and result
+        # Batch-render the serum-coverage style set from the one chart (native loads it once);
+        # kateri renders them sequentially (its protocol needs pdf requests/results in order).
+        jobs = []
         for serum_no, serum in (chart_modifier.chart.select_sera(serum_selector) if serum_selector is not None else chart_modifier.chart.select_all_sera()):
             for et in ["e", "t"]:
                 for zoom_variant in chart_modifier.zoom_variants():
                     style_name = f"sc-{serum_no:03d}-f{fold}-{et}{zoom_variant}"
-                    await self.export_pdf(style_name=style_name, output_filename=self.serum_coverage_output_dir().joinpath(f"{style_name}.pdf"))
+                    jobs.append((style_name, self.serum_coverage_output_dir().joinpath(f"{style_name}.pdf")))
+        await self.export_pdfs(jobs=jobs, chart=chart_modifier.chart)
         self.serum_coverage_webpage(chart_modifier=chart_modifier)
 
     @command
@@ -201,14 +215,20 @@ class CommanderBasic:
         downloader.use_previous(ae.report.dirs.VcmDirs().find_previous_chart(), rotate=rotate).populate_from_seqdb().export_downloaded()
         return downloader
 
-    async def export_pdf(self, style_name: str, output_filename: Path):
-        """Request the PDF for `style_name` from kateri and write it to `output_filename`."""
-        data = await kateri.communicator.get_pdf(style=style_name)
-        print(f">>> writing pdf to {output_filename}", file=sys.stderr)
-        with output_filename.open("wb") as output:
-            output.write(data)
-        # if open:
-        #     subprocess.call(["open", expected["filename"]])
+    async def export_pdf(self, style_name: str, output_filename: Path, chart: Optional[ae_backend.chart_v3.Chart] = None):
+        """Render the map for `style_name` to `output_filename`, via the map-render backend
+        selected by `AE_REPORT_MAP_RENDERER` (default kateri; `native` = in-process C++
+        `export_styled_map`). `chart` is the styled chart; it is required by the native
+        backend and ignored by the kateri backend (which already holds the chart from the
+        `style` command)."""
+        await get_map_renderer().export_pdf(chart=chart, style_name=style_name, output_filename=output_filename)
+
+    async def export_pdfs(self, jobs: list[tuple[str, Path]], chart: Optional[ae_backend.chart_v3.Chart] = None):
+        """Render several `(style_name, output_filename)` pairs from the one styled `chart`,
+        via the selected map-render backend. The native backend loads the chart once for the
+        whole set (P2 batch); kateri falls back to a sequential per-style loop. Equivalent to
+        calling `export_pdf` for each pair, but amortises the per-set setup."""
+        await get_map_renderer().export_pdfs(chart=chart, jobs=jobs)
 
     def serum_coverage_output_dir(self, check_existance: bool = False) -> Path | None:
         """The `serum-coverage/` output directory. With `check_existance`, return it only if
