@@ -82,11 +82,40 @@ computes the §1 geometry, then drives one `SigPageCanvas`. `make_section_signat
 now defaults to this native vector path (`native=True`); `native=False` falls back to the
 legacy kateri section-maps + `pdflatex`/`pdfjam` grid.
 
-## 5. Status / residuals
+## 5. Text-size / page-size fidelity (why the tree renders at 1000, not the panel height)
+
+Two driver-side geometry rules make the composited text land at the SAME size as the LaTeX
+(`compose_grid`) baseline the report was built from, verified against the live path and against
+`report/addendum-4.pdf` (bvic-niid) at the aa-transition-label glyph level:
+
+1. **Render the tree at the baseline's internal `image_size` (`size or tal_size or 1000`), then
+   letterbox it into the panel** — *not* at the panel height in points. `draw-tree.cc` clamps
+   fonts/line-widths to ABSOLUTE device bounds (`font_size` [3,14], `line_width` [0.2,3],
+   `title_fs` [8,26], legend/arrowhead …), so the tree does NOT scale linearly with `image_size`:
+   rendering at the small panel height and placing it 1:1 makes those clamped glyphs/lines
+   proportionally LARGER (a bolder tree, drifted label spacing) than the baseline, which renders
+   at 1000 and optically scales DOWN. `export_tree_into` scales vector content losslessly, and
+   because the tree page aspect == `width_to_height_ratio` == the panel aspect, the fit scale is
+   `panel_h/image_size` in both axes → the tree still fills the panel exactly.
+2. **Round the composed page to whole mm** (`_sig_page_layout`), exactly as `compose_grid` emits
+   the LaTeX paper (`paperwidth={:.0f}mm`). This makes the page ASPECT — hence the scale
+   `pdfpages` applies when it fits the sig page onto the report's A4 pages — identical to the
+   baseline, so text lands at the same absolute size in the assembled report.
+
+Measured (bvic-niid, 8 sections): page **926.929 × 572.598 pt = the live LaTeX path exactly**;
+aa-label glyph height **5.23 pt vs 5.22 pt** for the baseline (0.2 %); tree vertical span within
+0.2 % of the live `compose_grid` fit.
+
+## 6. Status / residuals
 
 - Composition: a real ~8-section signature page renders on ONE Cairo page as vectors (no kateri,
-  no pdfjam/pdflatex). Page size matches the prototype's and is within ~2% of the pdfjam baseline.
-- Remaining vs the pdfjam baseline (all expected, not compositor error): **map content** differs
-  by the known native↔kateri delta (that swap is the point); **tree registration/hairlines**
-  differ slightly (fit + vector-vs-embedded). The native maps render crisply (no raster tile
+  no pdfjam/pdflatex). Page size + text size now match the live `compose_grid` baseline (see §5).
+- Residuals (all expected, not compositor error): **map content** differs by the known
+  native↔kateri delta (that swap is the point). The composited content sits ~10 pt higher within
+  the page than the LaTeX baseline — a uniform `minipage[t]`/`\topskip` top offset that shifts the
+  tree AND the maps together (tree↔map registration is preserved), and that `pdfpages` re-centres
+  away when the page is embedded in the A4 report, so it does not affect the assembled report.
+  The `report/addendum-4.pdf` sig pages were built from an older tree render whose tree is ~1.85 %
+  shorter than the current pipeline (live `compose_grid` and this compositor agree to 0.2 %); that
+  is stale-baseline drift, not a compositor error. The native maps render crisply (no raster tile
   softness).

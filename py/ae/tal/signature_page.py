@@ -721,8 +721,14 @@ def _sig_page_layout(n_maps: int, tree_aspect: float, *, margin_mm: float = 2.0,
     grid_h = rows * cell + (rows - 1) * row_gap
     tree_w = tree_aspect * grid_h
     grid_w = cols * cell + (cols - 1) * col_gap
-    page_w = 2.0 * margin_mm + tree_w + panel_gap + grid_w
-    page_h = grid_h + 2.0 * margin_mm + 4.0          # +4 = single-page spill guard (matches compose_grid)
+    # Round the PAGE to whole mm, exactly as compose_grid emits the LaTeX paper size
+    # (`paperwidth={paper_w:.0f}mm,paperheight={paper_h:.0f}mm`). The tree/cell rects keep
+    # their exact fractional-mm positions (LaTeX likewise places content by fractions inside
+    # the rounded paper). Matching the paper size to the mm makes the page ASPECT — and hence
+    # the scale pdfpages applies when it fits the sig page onto the report's A4 pages — identical
+    # to the LaTeX baseline, so composited text lands at the same absolute size in the report.
+    page_w = round(2.0 * margin_mm + tree_w + panel_gap + grid_w)
+    page_h = round(grid_h + 2.0 * margin_mm + 4.0)   # +4 = single-page spill guard (matches compose_grid)
     tree_rect = (margin_mm, margin_mm, tree_w, grid_h)
     grid_left = margin_mm + tree_w + panel_gap
     cells = []
@@ -809,10 +815,19 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         jobs = [(styled[i]["name"], cells[i][0] * _MM2PT, cells[i][1] * _MM2PT,
                  cells[i][2] * _MM2PT, cells[i][3] * _MM2PT, True) for i in range(len(styled))]
         canvas.render_maps(str(styled_ace), 0, float(map_width), jobs)
-        # Tree: draw at natural point sizes by rendering with image_size == the panel height in
-        # points (so the tree renderer's device space == the panel; export_tree_into's fit scale
-        # is 1 and the tree's clamped fonts/line widths land crisply, no re-scaling blur).
-        canvas.render_tree(str(tree), tree_settings, float(size or round(th)), tx, ty, tw, th)
+        # Tree: render at the SAME internal image_size the pdfjam/LaTeX baseline uses
+        # (`size or tal_size or 1000`, exactly compose_grid's tree render size) and let
+        # export_tree_into letterbox-scale it into the panel — reproducing LaTeX's
+        # `keepaspectratio` cell fit. The tree renderer clamps fonts/line widths to ABSOLUTE
+        # device bounds (draw-tree.cc: font_size clamp [3,14], line_width clamp [0.2,3],
+        # title_fs clamp [8,26], …), so it does NOT scale linearly with image_size: rendering
+        # at the small panel height (~th) and placing it 1:1 makes those clamped glyphs/lines
+        # proportionally LARGER than the baseline (which renders at 1000 and optically scales
+        # DOWN), drifting text size AND label spacing vs report/addendum-4.pdf. Vector content
+        # scales losslessly, so letterboxing the 1000-render introduces no blur. Because the
+        # tree page aspect == width_to_height_ratio == the panel aspect (tw = tree_aspect*grid_h),
+        # the fit scale is th/image_size in both axes → the tree still fills the panel exactly.
+        canvas.render_tree(str(tree), tree_settings, float(size or tal_size or 1000), tx, ty, tw, th)
         canvas.finish()
         return Path(output)
     finally:
