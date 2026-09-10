@@ -240,10 +240,19 @@ arch -arm64 /opt/homebrew/bin/ninja -C build-py314
 ln -sfn build-py314 build
 ```
 
-> The final `Generating ae_backend_stubs` step may print `ae_backend: Failed to import,
-> skipping` — the build-time stub generator can't import the freshly-linked module. It is
-> non-fatal (ninja exits 0) and does not affect the module; `PYTHONPATH=build-py314` import
-> works.
+> The final `Generating ae_backend_stubs` step is **best-effort and never fatal**. The .pyi
+> stubs are a mypy/IDE convenience, not part of the library, so it runs through
+> [`tools/gen-stubs.sh`](tools/gen-stubs.sh), which prefers the *build* interpreter's own
+> `mypy.stubgen`, falls back to `stubgen` on `PATH`, and warns + exits 0 when neither works
+> (no mypy installed, or — as on this machine — a `PATH` stubgen belonging to an
+> architecture-broken Python 3.10 that cannot import a `cpython-314` arm64 extension anyway).
+> Expect a `[warn] gen-stubs: …` line; ninja still exits 0 and the module is unaffected.
+> To actually get stubs: `/opt/homebrew/bin/python3.14 -m pip install mypy`.
+>
+> Before this was wired up, `find_program('stubgen')` resolved to that broken 3.10 stubgen and
+> the target failed — and because it is the *last* target, ninja exited 1 after all 253 real
+> targets had succeeded, so `build.sh` (running under `set -e`) died before creating the
+> `build/` symlink or running the arch/import verification.
 
 ### Why the arm64 meson and ninja matter
 

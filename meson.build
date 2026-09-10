@@ -411,14 +411,20 @@ ae_backend = python3.extension_module(
   install : true)
 
 if host_machine.system() == 'darwin'
-    # stubs for mypy
-    stubgen = find_program('stubgen')
+    # --- build-env: .pyi stubs for mypy — best-effort, never fatal ---
+    # find_program('stubgen') resolved to whichever interpreter last installed
+    # mypy (here a Python 3.10 one that is architecture-broken), so the target
+    # failed and, being the very last one, took the whole build down with it —
+    # ninja exited 1 after all 253 real targets had succeeded. Stubs are a
+    # developer nicety, so tools/gen-stubs.sh runs stubgen from the *build*
+    # interpreter when it has mypy, falls back to PATH, and warns + exits 0 when
+    # neither works.
     ae_backend_stubs = custom_target(
       'ae_backend_stubs',
       build_by_default: true,
       input : [ae_backend],
       output: ['stubs'],
-      command: [stubgen, '--package', 'ae_backend', '--output', '@OUTPUT@']
+      command: [find_program('tools/gen-stubs.sh'), python3.full_path(), meson.current_build_dir(), '@OUTPUT@']
                )
 endif
 
