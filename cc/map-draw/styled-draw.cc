@@ -9,6 +9,7 @@
 
 #include "ext/fmt.hh"
 #include "map-draw/draw.hh"
+#include "map-draw/label-placement.hh"
 #include "draw/cairo-surface.hh"
 #include "ad/color.hh"
 #include "ad/color-hsv.hh"
@@ -262,6 +263,11 @@ namespace ae::map_draw
             bool shown{true};
             bool has_label{false};
             double label_dx{0.0}, label_dy{1.0};
+            // The operator authored an `l.p` for this label (its offset differs from kateri's
+            // [0, 1] default). chart-export only emits `l.p` when it differs from that default,
+            // so "offset != default" is exactly "the chart carries an explicit offset" — and
+            // such a label is pinned, never auto-placed (milestone I).
+            bool label_offset_authored{false};
             double label_size{20.0};
             std::string label_text{};
         };
@@ -537,6 +543,7 @@ namespace ae::map_draw
                     p.label_text = *ms.label().text;
                     p.label_dx = ms.label().offset.x;
                     p.label_dy = ms.label().offset.y;
+                    p.label_offset_authored = ms.label().offset != ae::draw::v2::point_label{}.offset;
                     p.label_size = ms.label().size;
                 }
             }
@@ -835,70 +842,140 @@ namespace ae::map_draw
             }
         }
 
-        // ---- point labels (on top of points) ----
-        for (const size_t i : order) {
-            if (!pr[i].has_label)
-                continue;
-            const auto c = layout[point_index{i}];
-            if (!c.exists())
-                continue;
-            const PR& p = pr[i];
-            const double cx = dev_x(c[DIMX]), cy = dev_y(c[DIMY]);
-            const auto [tw, th] = surface.text_size(p.label_text, p.label_size, true);
-            const double point_r = (p.size + p.outline_width) / 2.0; // device px (kateri pointSize)
-            // kateri addPointLabel::labelOffset (draw_on.dart), in device px; baseline-left anchor.
-            const auto lab_off = [point_r](double off, double extent, bool vertical) -> double {
-                if (off >= 1.0)
-                    return point_r * off + (vertical ? extent : 0.0);
-                if (off > -1.0)
-                    return point_r * off + (vertical ? extent * (off + 1.0) / 2.0 : extent * (off - 1.0) / 2.0);
-                return point_r * off - (vertical ? 0.0 : extent);
-            };
-            const double lx = cx + lab_off(p.label_dx, tw, false);
-            const double ly = cy + lab_off(p.label_dy, th, true);
-            // kateri gives every point label a default thin white halo (pointLabelHaloWidthFactor)
-            // so it reads over the dark point cloud; without it the black glyphs vanish into the
-            // points they sit on. Positioning is data-driven (the style's per-label offset) exactly
-            // as kateri does — kateri performs no collision auto-placement, so neither do we.
-            constexpr double kPointLabelHaloWidthFactor = 0.04;
-            surface.text_font(lx, ly, p.label_text, p.label_size, BLACK, false, false, p.label_size * kPointLabelHaloWidthFactor);
-        }
-
-        // ---- legend (kateri _Defaults.legend: bottom-left "Bl", offset (10,-10), white box,
-        //      black 1px border, padding v5/h10; point size + row text/interline from -clades) ----
+        // ---- legend geometry (kateri _Defaults.legend: bottom-left "Bl", offset (10,-10), white
+        //      box, black 1px border, padding v5/h10; point size + row text/interline from -clades)
+        //      ----
+        // The legend and the title are DRAWN further down (they must stay on top of the labels),
+        // but their boxes are laid out here so the label auto-placer below can treat them as
+        // obstacles — an auto-placed label sliding under the legend would be unreadable.
         const bool legend_shown = resolved.legend.shown.value_or(true) && !legend_rows.empty();
+        bool legend_add_counter{false};
+        double legend_point_size{20.0}, legend_text_size{20.0}, legend_interline{0.3};
+        double legend_pad_l{10.0}, legend_pad_t{5.0};
+        double legend_point_space{0.0}, legend_count_left_pad{0.0};
+        double legend_max_text_w{0.0}, legend_row_h{0.0}, legend_max_count_w{0.0};
+        double legend_box_x{0.0}, legend_box_y{0.0}, legend_box_w{0.0}, legend_box_h{0.0};
         if (legend_shown) {
             std::sort(legend_rows.begin(), legend_rows.end(), [](const LegendRowR& a, const LegendRowR& b) { return a.priority < b.priority; });
-            const bool add_counter = resolved.legend.add_counter.value_or(false);
-            const double point_size = resolved.legend.point_size.value_or(20.0);
-            double text_size = 20.0, interline = 0.3;
+            legend_add_counter = resolved.legend.add_counter.value_or(false);
+            legend_point_size = resolved.legend.point_size.value_or(20.0);
             if (resolved.legend.row_style.has_value()) {
                 if (resolved.legend.row_style->font_size.has_value())
-                    text_size = *resolved.legend.row_style->font_size;
+                    legend_text_size = *resolved.legend.row_style->font_size;
                 if (resolved.legend.row_style->interline.has_value())
-                    interline = *resolved.legend.row_style->interline;
+                    legend_interline = *resolved.legend.row_style->interline;
             }
-            const double pad_l = 10.0, pad_r = 10.0, pad_t = 5.0, pad_b = 5.0;
-            const double point_space = point_size * (interline + 1.2);
-            const double count_left_pad = add_counter ? text_size * 1.0 : 0.0;
+            const double pad_r = 10.0, pad_b = 5.0;
+            legend_point_space = legend_point_size * (legend_interline + 1.2);
+            legend_count_left_pad = legend_add_counter ? legend_text_size * 1.0 : 0.0;
 
-            double max_text_w = 0.0, row_h = 0.0, max_count_w = 0.0;
             for (const auto& r : legend_rows) {
-                const auto [w, h] = surface.text_size(r.text, text_size, true);
-                max_text_w = std::max(max_text_w, w);
-                row_h = std::max(row_h, h);
-                if (add_counter) {
-                    const auto [cw, ch] = surface.text_size(fmt::format("{}", r.count), text_size, true);
+                const auto [w, h] = surface.text_size(r.text, legend_text_size, true);
+                legend_max_text_w = std::max(legend_max_text_w, w);
+                legend_row_h = std::max(legend_row_h, h);
+                if (legend_add_counter) {
+                    const auto [cw, ch] = surface.text_size(fmt::format("{}", r.count), legend_text_size, true);
                     (void)ch;
-                    max_count_w = std::max(max_count_w, cw);
+                    legend_max_count_w = std::max(legend_max_count_w, cw);
                 }
             }
             const double n = static_cast<double>(legend_rows.size());
-            const double box_w = max_text_w + point_space + count_left_pad + max_count_w + pad_l + pad_r;
-            const double box_h = row_h + row_h * (n - 1.0) * (interline + 1.0) + row_h * 0.4 + pad_t + pad_b;
-            const double box_x = 0.0 + 10.0;                       // vp.left device (=0) + offset.dx (10 px)
-            const double box_y = image_h - 10.0 - box_h;           // vp.bottom device (=image_h) + offset.dy(-10) - height
-            surface.rectangle(box_x, box_y, box_w, box_h, BLACK, 1.0, WHITE);
+            legend_box_w = legend_max_text_w + legend_point_space + legend_count_left_pad + legend_max_count_w + legend_pad_l + pad_r;
+            legend_box_h = legend_row_h + legend_row_h * (n - 1.0) * (legend_interline + 1.0) + legend_row_h * 0.4 + legend_pad_t + pad_b;
+            legend_box_x = 0.0 + 10.0;                     // vp.left device (=0) + offset.dx (10 px)
+            legend_box_y = image_h - 10.0 - legend_box_h;  // vp.bottom device (=image_h) + offset.dy(-10) - height
+        }
+
+        // ---- title geometry (drawn below; see the legend note above) ----
+        // "info-" front styles carry a whitespace-only title (" ") — a deliberate blank title
+        // (§1.2); it is neither drawn nor reserved.
+        const auto title_is_blank = [](std::string_view s) { return s.find_first_not_of(" \t") == std::string_view::npos; };
+        const bool title_shown =
+            resolved.title_set && resolved.title.shown.value_or(true) && resolved.title.text.text.has_value() && !title_is_blank(*resolved.title.text.text);
+        double title_off_x{30.0}, title_off_y{30.0}, title_font{28.0}, title_interline{0.2};
+        bool title_bold{false}, title_italic{false};
+        ::Color title_color{BLACK};
+        double title_w{0.0}, title_h{0.0};
+        if (title_shown) {
+            const auto& t = resolved.title;
+            if (t.box.has_value() && t.box->offset.has_value()) {
+                title_off_x = (*t.box->offset)[0];
+                title_off_y = (*t.box->offset)[1];
+            }
+            title_font = t.text.font_size.value_or(28.0);
+            title_bold = t.text.font_weight.value_or("normal") == "bold";
+            title_italic = t.text.font_slant.value_or("normal") == "italic";
+            if (t.text.color.has_value())
+                title_color = ::Color{static_cast<std::string_view>(*t.text.color)};
+            title_interline = t.text.interline.value_or(0.2);
+            std::string_view rest{*t.text.text};
+            while (true) {
+                const size_t nl = rest.find('\n');
+                const auto [lw, lh] = surface.text_size(rest.substr(0, nl), title_font, true);
+                title_w = std::max(title_w, lw);
+                title_h += title_h > 0.0 ? lh * (title_interline + 1.0) : lh;
+                if (nl == std::string_view::npos)
+                    break;
+                rest.remove_prefix(nl + 1);
+            }
+        }
+
+        // ---- point labels (on top of points) ----
+        // Milestone I: labels the operator has NOT hand-placed (no `l.p` on the chart) are
+        // auto-placed into free space, with an AD-style tether when they end up far from their
+        // point; authored offsets are honoured verbatim. See cc/map-draw/label-placement.hh.
+        {
+            std::vector<size_t> label_points; // parallel to `requests`
+            std::vector<LabelRequest> requests;
+            std::vector<LabelObstacle> obstacles;
+            obstacles.reserve(order.size() + 2);
+            for (const size_t i : order) {
+                const auto c = layout[point_index{i}];
+                if (!c.exists() || !pr[i].shown)
+                    continue;
+                const PR& p = pr[i];
+                const double cx = dev_x(c[DIMX]), cy = dev_y(c[DIMY]);
+                const double r = (p.size + p.outline_width) / 2.0;
+                obstacles.push_back(LabelObstacle{cx - r, cy - r, cx + r, cy + r}); // every drawn point is ink
+                if (!p.has_label)
+                    continue;
+                const auto [tw, th] = surface.text_size(p.label_text, p.label_size, true);
+                requests.push_back(LabelRequest{cx, cy, r, tw, th, p.label_dx, p.label_dy, p.label_offset_authored});
+                label_points.push_back(i);
+            }
+            if (legend_shown)
+                obstacles.push_back(LabelObstacle{legend_box_x, legend_box_y, legend_box_x + legend_box_w, legend_box_y + legend_box_h});
+            if (title_shown)
+                obstacles.push_back(LabelObstacle{title_off_x, title_off_y, title_off_x + title_w, title_off_y + title_h});
+
+            const auto placed = place_labels(requests, obstacles, image_w, image_h);
+
+            // Tethers first, so each label's white halo masks the line where it meets the text.
+            // AD map_elements LabelTether convention (also used by cc/tal/draw-tree.cc for
+            // auto-placed labels): a hairline black stroke, which renders as mid-grey.
+            for (const auto& pl : placed) {
+                if (pl.leader)
+                    surface.line(pl.leader_x0, pl.leader_y0, pl.leader_x1, pl.leader_y1, BLACK, 0.3);
+            }
+            // kateri gives every point label a default thin white halo (pointLabelHaloWidthFactor)
+            // so it reads over the dark point cloud; without it the black glyphs vanish into the
+            // points they sit on.
+            constexpr double kPointLabelHaloWidthFactor = 0.04;
+            for (size_t k = 0; k < placed.size(); ++k) {
+                const PR& p = pr[label_points[k]];
+                // The box is [x0, y0]..[x1, y1] with the baseline-left anchor at (x0, y1).
+                surface.text_font(placed[k].x0, placed[k].y1, p.label_text, p.label_size, BLACK, false, false, p.label_size * kPointLabelHaloWidthFactor);
+            }
+        }
+
+        // ---- legend (geometry above) ----
+        if (legend_shown) {
+            const bool add_counter = legend_add_counter;
+            const double point_size = legend_point_size, text_size = legend_text_size, interline = legend_interline;
+            const double row_h = legend_row_h, point_space = legend_point_space;
+            const double max_text_w = legend_max_text_w, max_count_w = legend_max_count_w, count_left_pad = legend_count_left_pad;
+            const double box_x = legend_box_x, box_y = legend_box_y, pad_l = legend_pad_l, pad_t = legend_pad_t;
+            surface.rectangle(box_x, box_y, legend_box_w, legend_box_h, BLACK, 1.0, WHITE);
 
             const double dx = box_x + pad_l;
             double baseline = box_y + pad_t + row_h; // kateri: box.origin.dy + textSize[0].height + padding.top
@@ -916,43 +993,28 @@ namespace ae::map_draw
             }
         }
 
-        // ---- title (kateri _Defaults.title "tl", offset from box O; helvetica bold/normal) ----
-        // The "info-" front styles carry a whitespace-only title (" ") — a deliberate blank
-        // title (§1.2); skip drawing it entirely so nothing is rendered.
-        const auto title_is_blank = [](std::string_view s) { return s.find_first_not_of(" \t") == std::string_view::npos; };
-        if (resolved.title_set && resolved.title.shown.value_or(true) && resolved.title.text.text.has_value() && !title_is_blank(*resolved.title.text.text)) {
-            const auto& t = resolved.title;
-            double off_x = 30.0, off_y = 30.0; // kateri title default offset
-            if (t.box.has_value() && t.box->offset.has_value()) {
-                off_x = (*t.box->offset)[0];
-                off_y = (*t.box->offset)[1];
-            }
-            const double font = t.text.font_size.value_or(28.0);
-            const bool bold = t.text.font_weight.value_or("normal") == "bold";
-            const bool italic = t.text.font_slant.value_or("normal") == "italic";
-            ::Color col = BLACK;
-            if (t.text.color.has_value())
-                col = ::Color{static_cast<std::string_view>(*t.text.color)};
+        // ---- title (kateri _Defaults.title "tl", offset from box O; helvetica bold/normal;
+        //      geometry hoisted above) ----
+        if (title_shown) {
             // Multi-line title (kateri PlotText: the "t" string is split on newlines via
             // LineSplitter, then paintTitle draws each line advancing the baseline by
             // lineHeight*(interline+1)). origin "tl": box top-left at device (off_x, off_y);
             // kateri draws the first baseline at box.origin.dy + textHeight + padding.top
             // (padding 0). Baseline-left anchor.
-            const double interline = t.text.interline.value_or(0.2);
-            std::string_view rest{*t.text.text};
+            std::string_view rest{*resolved.title.text.text};
             double baseline = 0.0;
             bool first = true;
             while (true) {
                 const size_t nl = rest.find('\n');
                 const std::string_view line = rest.substr(0, nl);
-                const auto [lw, lh] = surface.text_size(line, font, true);
+                const auto [lw, lh] = surface.text_size(line, title_font, true);
                 (void)lw;
                 if (first) {
-                    baseline = off_y + lh;
+                    baseline = title_off_y + lh;
                     first = false;
                 }
-                surface.text_font(off_x, baseline, line, font, col, bold, italic);
-                baseline += lh * (interline + 1.0);
+                surface.text_font(title_off_x, baseline, line, title_font, title_color, title_bold, title_italic);
+                baseline += lh * (title_interline + 1.0);
                 if (nl == std::string_view::npos)
                     break;
                 rest.remove_prefix(nl + 1);
