@@ -5,7 +5,7 @@
     "subtype": "A(H3N2)",
     "data": [
         {
-        "N": "<name> - without subtype, e.g. LAOS/1742/2020",
+        "N": "<name> - without subtype, e.g. EXAMPLEA/1742/2020",
         "d": ["YYYY-MM-DD"],
         "C": "continent",
         "c": "country",

@@ -250,15 +250,15 @@ def passage_type(ag):
 
 
 def norm_tree_name(s: str) -> str:
-    """TOGO/764/2022_OR_4D211EF9 -> TOGO/764/2022 (strip passage+seq-hash, upper)."""
+    """EXAMPLEB/764/2022_OR_0BADC0DE -> EXAMPLEB/764/2022 (strip passage+seq-hash, upper)."""
     return re.sub(r"_[A-Za-z0-9]+_[0-9A-Fa-f]{6,}$", "", s).upper()
 
 
 def norm_chart_name(s: str) -> str:
     """Strip the leading subtype prefix and uppercase, so chart names match tree tips:
-    A(H3N2)/THAILAND/8/2022 -> THAILAND/8/2022; B/HONG KONG/269/2017 -> HONG KONG/269/2017.
+    A(H3N2)/EXAMPLEC/8/2022 -> EXAMPLEC/8/2022; B/EXAMPLECITY/269/2017 -> EXAMPLECITY/269/2017.
     Handles A(...)/, B(...)/ and a bare A/ or B/; a name with no such prefix (e.g.
-    BHUTAN/212/2019 — country starting with B, no slash) is left untouched."""
+    BEXAMPLE/212/2019 — country starting with B, no slash) is left untouched."""
     return re.sub(r"^([AB]\([^)]*\)|[AB])/", "", s).upper()
 
 

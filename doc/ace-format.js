@@ -59,7 +59,7 @@
                 "L": "V",                                          //  lineage: "Y[AMAGATA]" or "V[ICTORIA]"
                 "P": "MDCK2/SIAT1 (2016-05-12)",                   //  passage
                 "R": "NYMC-51C",                                   //  reassortant
-                "I": "CDC 2016-045",                               // serum id, e.g "CDC 2016-045"
+                "I": "LAB 0000-000",                               // serum id, e.g "LAB 0000-000"
                 "A": "QKIPGNDNSTATLCLG...",                        //  aligned amino-acid sequence
                 "B": "CAAAAAATTCCTGGAAAT...",                      //  aligned nucleotide sequence
                 "Ai": [[pos1, "aas"]]                              // insertions at the aa level

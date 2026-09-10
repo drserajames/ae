@@ -114,8 +114,8 @@ Each `--chart` is `LABEL=PATH`; the label names the centre in the viewer's
 
 ## How the link is made
 
-Tree tip names (`TOGO/764/2022_OR_4D211EF9`) and chart antigen names
-(`A(H3N2)/THAILAND/8/2022`) are normalised to a common `LOCATION/ID/YEAR` key
+Tree tip names (`EXAMPLEB/764/2022_OR_0BADC0DE`) and chart antigen names
+(`A(H3N2)/EXAMPLEC/8/2022`) are normalised to a common `LOCATION/ID/YEAR` key
 (passage tag + sequence hash stripped from tips; subtype prefix stripped from
 antigens). The full ~70 k-leaf seqdb tree is **pruned to the induced subtree of
 linked tips** (degree-2 nodes collapsed) so the file stays light and every visible

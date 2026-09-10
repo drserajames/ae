@@ -63,8 +63,8 @@ keeps the table ~4× smaller and lets C1 read any position the user asks for.
 `norm` is the normalised strain key `LOCATION/ID/YEAR` (uppercase) used to link
 tree tips to chart antigens. It is the join key throughout the bundle. The leading
 subtype prefix is stripped from chart names — `A(...)/`, `B(...)/`, or a bare `A/`/`B/`
-(so `B/HONG KONG/269/2017` → `HONG KONG/269/2017`), while a name with no such prefix
-(`BHUTAN/212/2019`) is left untouched — so B/Vic names match the bare tree tips.
+(so `B/EXAMPLECITY/269/2017` → `EXAMPLECITY/269/2017`), while a name with no such prefix
+(`BEXAMPLE/212/2019`) is left untouched — so B/Vic names match the bare tree tips.
 
 ---
 
@@ -97,11 +97,11 @@ collapsed during pruning. `x` is **cumulative branch length** from the root
   "children": [ ... ],    // [live] child nodes; [] at a leaf
 
   // leaf-only fields:
-  "name": "TOGO/764/2022_OR_4D211EF9",  // [live] full tip name (with passage+hash)
-  "norm": "TOGO/764/2022",              // [live] normalised join key
+  "name": "EXAMPLEB/764/2022_OR_0BADC0DE",  // [live] full tip name (with passage+hash)
+  "norm": "EXAMPLEB/764/2022",              // [live] normalised join key
   "date": "2022-03-14",                 // [live] collection date ("" if unknown)
   "continent": "AFRICA",                // [live] uppercase continent
-  "country": "TOGO",                    // [live] country
+  "country": "EXAMPLEB",                    // [live] country
   "clade": "3C.2a1b.2a",                // [live] clade label (canonical after E1) or null
   "ag": [3, 17],                        // [live] antigen indices (chart 0) for this norm
 
@@ -156,8 +156,8 @@ plots raw layout coords).
 ```jsonc
 {
   "i": 17,                    // index within this chart's antigen list
-  "name": "A(H3N2)/THAILAND/8/2022",
-  "norm": "THAILAND/8/2022",  // join key
+  "name": "A(H3N2)/EXAMPLEC/8/2022",
+  "norm": "EXAMPLEC/8/2022",  // join key
   "passage": "MDCK1",         // raw passage string (classified type in "pt" + tree.passage)
   "pt": "cell",               // [v3] passage type from semantic T.p: "egg"|"cell"|"reassortant"|null (P1)
   "date": "2022-02-01",
@@ -165,7 +165,7 @@ plots raw layout coords).
   "clade": "3C.2a1b.2a",      // [v3] primary clade = last-matching report rule among "clades", or null
   "clades": ["3C.2a1b.2a"],   // all clade labels (semantic T.C)
   "continent": "ASIA",        // [v3] uppercase continent, from semantic T.C9 (null if absent)
-  "country": "THAILAND",      // [v3] country, from semantic T.c9 (null if absent)
+  "country": "EXAMPLEC",      // [v3] country, from semantic T.c9 (null if absent)
   "ref": false,               // [v3] reference antigen (select_reference_antigens or semantic T.R)
   "vac": false,               // [v3] vaccine strain (semantic T.V truthy)
   "serology": false,          // [v3] report serology test antigen (semantic T.serology)
@@ -185,7 +185,7 @@ plots raw layout coords).
 ```jsonc
 {
   "i": 3, "name": "...", "x": 0.1, "y": 0.2,   // x/y null if not positioned
-  "norm": "THAILAND/8/2022",   // [v3] join key, normalised like antigens (F1)
+  "norm": "EXAMPLEC/8/2022",   // [v3] join key, normalised like antigens (F1)
   "homologous": [0, 1, 304],   // [v9 #4] ALL antigen indices sharing this norm (egg+cell of the strain); [] if none
   "homologous0": 0,            // [v9 #4] scalar back-compat alias = first homologous index, or null
   "passage": "SIAT1",          // [v6 #6] raw serum passage string (str(serum.passage()))

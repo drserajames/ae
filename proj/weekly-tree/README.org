@@ -1,6 +1,20 @@
 # Time-stamp: <2022-05-16 10:15:29 eu>
 * Making weekly tree by incrementally adding new strains to the trees of previous week
 
+** Curated strain lists are runtime inputs, not repo content
+
+=export= reads its curated include/exclude lists from plain text files (one strain
+name or seq_id per line, =#= starts a comment):
+
+  bvic-exclude.txt  byam-exclude.txt
+  h1-include.txt    h1-include-extra.txt  h1-exclude.txt
+  h3-include.txt    h3-exclude.txt
+
+They hold **real WHO CC strain identifiers**, so they are gitignored and must never be
+committed (see [[file:../../tools/WHO-DATA-GATE.md][tools/WHO-DATA-GATE.md]]). Keep them
+in the per-week results directory or next to this script; =export= looks in the current
+directory first, then in the script directory, and fails with a clear message if absent.
+
 ** Create and initialize new directory
 
 ${AE_ROOT}/proj/weekly-tree/init

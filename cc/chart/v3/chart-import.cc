@@ -188,7 +188,7 @@ inline void read_sera(ae::chart::v3::Sera& target, simdjson::ondemand::array sou
                 if (key == "s") { // str | serum species, e.g "FERRET"
                     serum.serum_species(ae::chart::v3::SerumSpecies{static_cast<std::string_view>(field.value())});
                 }
-                else if (key == "I") { // str | serum id, e.g "CDC 2016-045"
+                else if (key == "I") { // str | serum id, e.g "LAB 0000-000"
                     serum.serum_id(ae::chart::v3::SerumId{static_cast<std::string_view>(field.value())});
                 }
                 else if (key == "h") { // array of numbers | homologous antigen indices, e.g. [0]

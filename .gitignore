@@ -10,3 +10,9 @@ __pycache__
 # WHO-data gate: local private current-season strain list — must never be committed
 .who-strain-list
 .who-strain-list.txt
+
+# WHO-data gate: weekly-tree curated strain lists are RUNTIME INPUTS (real strain
+# names/seq-ids) and must never be committed — see tools/WHO-DATA-GATE.md
+/proj/weekly-tree/*-include.txt
+/proj/weekly-tree/*-include-extra.txt
+/proj/weekly-tree/*-exclude.txt
