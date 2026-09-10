@@ -469,6 +469,13 @@ namespace ae::map_draw
         }
 
         // ---- resolve the front style (§1.2) ----
+        // Unlike a nested "{R:<name>}" reference (tolerated by resolve() for depth > 0), the
+        // caller-supplied front style name must exist: silently falling through here used to
+        // render the byte-identical unstyled base map for a typo'd/invented style name, which
+        // is a silent-corruption footgun in batch runs.
+        if (chart.styles().find_if_exists(style_name) == nullptr)
+            throw std::runtime_error{fmt::format("cannot draw styled map: unknown style \"{}\"", style_name)};
+
         Resolved resolved;
         resolve(chart.styles(), std::string{style_name}, resolved, 0);
 
