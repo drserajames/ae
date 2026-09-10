@@ -239,6 +239,15 @@ independent and can be handed to separate agents in parallel; dependencies noted
 | **J** | `ae.report` renderer seam + flag | A | S | `MapRenderer` interface, `NativeRenderer`, `AE_REPORT_MAP_RENDERER`; keep kateri default + fallback. Wire producer **and** consumer (a feature isn't done until end-to-end). |
 | **K** | Fidelity harness + figure-matrix sign-off | B–J | **M–L**, iterative | The long tail: per-family px-diff to <~1–2%, document irreducible AA diffs, flag any map that can't match and why. |
 
+> **F and G are implemented but still pixel-unverified.** The figure-matrix run could not
+> diff them: the `sc-*` / `-sci-*` / `-sco-*` styles were built on an in-memory chart at
+> serum-coverage time and never written to any `.ace`, so none of the ~1850 kateri goldens had
+> a chart that reproduced it. That structural blocker is now fixed — `serum_coverage_export`
+> (and `multiple_circles.generate_lab`) can save the chart they rendered from, opt-in via
+> `AE_REPORT_PERSIST_RENDER_CHART`, with the write → read → render round trip verified exact.
+> A kateri golden pass (macOS) is still needed to close F/G; the exact recipe is
+> [`tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md`](tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md).
+
 **Stays on kateri (do not port):** interactive drag-adjust + live relax animation
 (`RLAX`/`LAYT`/`get_moved_points`/`handle_relax`) and the operator GUI. The native renderer
 is the **batch** map engine only.

@@ -37,6 +37,10 @@ from ae.utils import kateri
 ENV_VAR = "AE_REPORT_MAP_RENDERER"
 DEFAULT_BACKEND = "native"
 
+# Opt-in: also save the chart that was handed to the renderer, next to the maps it produced.
+# See persist_render_chart_selected() / write_render_chart() at the bottom of this module.
+ENV_VAR_PERSIST_RENDER_CHART = "AE_REPORT_PERSIST_RENDER_CHART"
+
 # ----------------------------------------------------------------------
 
 class MapRenderer:
@@ -201,6 +205,49 @@ def write_styled_ace(chart: ae_backend.chart_v3.Chart, filename: Path):
     (stubbed out in cc/chart/v3/chart.hh) would be needed to bake it in-process."""
     print(f">>> [map_renderer.native] writing styled chart -> {filename}", file=sys.stderr)
     chart.write(Path(filename))
+
+def persist_render_chart_selected() -> bool:
+    """True when `AE_REPORT_PERSIST_RENDER_CHART` is set to a truthy value.
+
+    Off by default, so an ordinary report run writes exactly the files it wrote before.
+    Turn it on for a **reference-generation** run: see `write_render_chart`."""
+    value = (os.environ.get(ENV_VAR_PERSIST_RENDER_CHART) or "").strip().lower()
+    return value not in ("", "0", "no", "false", "off")
+
+def write_render_chart(chart: ae_backend.chart_v3.Chart, filename: Path) -> Path:
+    """Save the chart that was handed to the map renderer, so the maps it produced can be
+    re-rendered (and pixel-compared) later.
+
+    Several report map families are drawn from a chart that is styled **in memory** and then
+    thrown away — `serum_coverage_export` (the `sc-*` / `-sci-*` / `-sco-*` serum-circle and
+    serum-coverage styles) and `multiple_circles.generate_lab` (`mc-plain` / `mc-circles`).
+    Those styles therefore appear in NO `.ace` on disk: `styled.ace` is written by a different
+    command, from a differently-styled chart (`export` -> `populate_for_style`), and it neither
+    carries the `sc-*`/`mc-*` styles nor the per-serum `CI<fold>` semantic attributes the
+    circle radii come from. The consequence for P2 is that ~1850 kateri golden PDFs per report
+    run have no chart that reproduces them, so the most geometry-heavy part of the native
+    renderer (milestones F/G: empirical vs theoretical radius, fold, dash, angle radius-lines,
+    within/outside coverage restyle) cannot be pixel-verified at all.
+
+    This writes that chart out verbatim — the SAME object the renderer consumed, so the file
+    is a faithful record and not a reconstruction. Both backends are served: the native one
+    renders from a serialisation of this chart already (`NativeRenderer.export_pdfs` writes it
+    to a temp `.ace`), and the kateri one is sent the same bytes over the socket
+    (`kateri.communicator.send_chart`). A write -> read -> render round trip is exact: the
+    `c["R"]` styles (including `CI`/`SC` modifier blocks with angles and radius-lines) and the
+    sera's `CI<fold>` attributes all survive, and the re-rendered maps are pixel-identical —
+    see `test/test-serum-coverage-style-persistence.py`. (Pixel, not byte: Cairo stamps a
+    `/CreationDate` into every PDF, so even two renders of the same chart differ in bytes.)
+
+    Opt-in via `AE_REPORT_PERSIST_RENDER_CHART` (or an explicit `persist_chart=True` at the
+    call site). It only ever ADDS a file, but a report chart is ~1 MB per lab, so it is off by
+    default and turned on for reference-generation runs. See
+    `tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md`."""
+    filename = Path(filename)
+    filename.parent.mkdir(parents=True, exist_ok=True)
+    print(f">>> [map_renderer] persisting render chart -> {filename}", file=sys.stderr)
+    chart.write(filename)
+    return filename
 
 def sig_page_viewport(chart: ae_backend.chart_v3.Chart, used_viewport) -> list[float]:
     """Native replacement for the `kateri.set_style(style) + get_viewport()` round-trip in
