@@ -66,19 +66,23 @@ also now writes layout coordinates (`Projection.set_coordinates` / `Layout.__set
 
 | # | Subsystem | AD source | ae target | State |
 |---|-----------|-----------|-----------|-------|
-| 1 | Map drawing | `acmacs-draw`, `acmacs-map-draw` | `cc/map-draw/` / `cc/geo/` | ⚪ mostly **shelved** — interactive/report antigenic maps are done in **kateri** (Dart app, separate repo, driven over a socket via `py/ae/utils/kateri.py`). **A headless C++ Cairo renderer (`cc/map-draw/` + `map-draw` CLI / `ae_backend.map_draw`) was revived** for the Linux **whocc-chains** batch path (#7) where kateri can't run. `cc/draw/cairo-surface.*` kept (shared); **geographic** maps = `cc/geo/` + `geo-draw` (done) |
+| 1 | Map drawing | `acmacs-draw`, `acmacs-map-draw` | `cc/map-draw/` / `cc/geo/` | 🟢 done — the headless C++ Cairo renderer (`cc/map-draw/` + `map-draw` CLI / `ae_backend.map_draw`) was revived for the Linux **whocc-chains** batch path (#7), then given a **semantic-style interpreter** (`styled-draw.cc` → `export_styled_map`) that consumes the same on-chart `c["R"]`/`c["p"]` styling kateri does. It is now the **default report map renderer** (`AE_REPORT_MAP_RENDERER=native`); **kateri is retained only for the interactive drag-adjust/relax GUI** and as the opt-in fallback. `cc/draw/cairo-surface.*` shared; **geographic** maps = `cc/geo/` + `geo-draw` (done) |
 | 2 | hidb (historical influenza DB) | `hidb-5` | `cc/hidb/` | 🟢 done — reader + authoring (make/convert/stat), `ae_backend.hidb` |
 | 3 | TAL (phylo tree drawing / sig pages) | `acmacs-tal` | `cc/tal/` + `tal-draw` + `py/ae/tal/` | 🟢 feature-complete (core) — tree render, clades/time-series, colouring, aa-transitions, settings-v3 `.tal` reader, signature pages |
-| 4 | ssm-report (seasonal report) | `ssm-report` | `py/ae/report/` | 🟡 vcm engine consolidated; all figures generate on ae (kateri maps / `stat` / `geo-draw` / `tal-draw`); adjust ported (`ae.adjust` + kateri drag). Remaining: a full assembled-report run + geo clade colouring (#1). See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) |
+| 4 | ssm-report (seasonal report) | `ssm-report` | `py/ae/report/` | 🟢 done — vcm engine consolidated; the full assembled 36-page report reproduces end-to-end on `ae.report`; all figure families generate on ae (**native** maps / `stat` / `geo-draw` / `tal-draw`); adjust ported (`ae.adjust` + kateri drag). See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) (its status header predates P2 and still describes maps as kateri-rendered) and [`TODO.md`](TODO.md) |
 | 5 | webserver | `acmacs-webserver` | `py/ae/webserver/` | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data verified |
 | 6 | CLI wrappers over `chart_v3` | various `bin/chart-*` | `bin/` | 🟢 done |
 
-> Note: **interactive/report antigenic-map drawing lives in `kateri`** (a Dart/Flutter viewer +
-> PDF generator, `github.com/drserajames/kateri`) — ae drives it over a Unix socket
-> (`ae.utils.kateri`: send `CHRT`, `set_style`, `pdf`/`get_chart`). The **one** C++ antigenic-map
-> renderer in ae is the headless `cc/map-draw/` (`map-draw` CLI / `ae_backend.map_draw`), revived
-> for the **Linux whocc-chains batch path** (#7) where kateri (macOS-only) can't run — not for the
-> interactive/report path. The other ae-side "map drawing" is the geographic world map (`cc/geo`).
+> Note (corrected 2026-09-10): **antigenic-map drawing for the report is now native C++.**
+> `cc/map-draw/` (`map-draw` CLI / `ae_backend.map_draw`) started as the chains-path fidelity port
+> of AD ChartDraw and, via the **P2** workstream, gained a semantic-style interpreter
+> (`export_styled_map`) that resolves the same `c["R"]` named styles the report bakes. `ae.report`
+> chooses the backend with **`AE_REPORT_MAP_RENDERER`**, **default `native`**
+> (`py/ae/report/map_renderer.py`). **kateri** (a Dart/Flutter viewer + PDF generator,
+> `github.com/drserajames/kateri`, driven over a Unix socket by `ae.utils.kateri`) is kept for the
+> **interactive** drag-adjust/relax GUI and as the `AE_REPORT_MAP_RENDERER=kateri` fallback — a
+> report run needs no kateri process. The other ae-side "map drawing" is the geographic world map
+> (`cc/geo`). Open P2 tail + branch status: [`TODO.md`](TODO.md), [`P2-RENDER-DESIGN.md`](P2-RENDER-DESIGN.md).
 
 **Coordination essentials (full rules in `TODO.md`):**
 - `meson.build` is the main conflict risk — keep edits in a commented `# --- <subsystem> ---`

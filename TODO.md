@@ -1,15 +1,49 @@
 # ae — Porting Roadmap (from AD / Acmacs-D)
 
-This file tracks the work remaining to bring `ae` (Acmacs-E) to feature parity with
-the older `AD` (Acmacs-D) tree at `~/AC/eu/AD`. It is the **coordination point** for
-multiple agents working in parallel — claim a subsystem before starting, update its
-status, and respect the shared-file rules below.
+**Last updated: 2026-09-10** (third pass — folds in three previously-undocumented branches
+(`renderer-correctness`, `build-env-fixes`, `serum-circle-style-persist`) that close or
+partially-close several of the second pass's open defects and remove milestone K's
+serum-coverage persistence blocker, and corrects milestone I's mode count from three to five
+by reading the actual `map-draw-label-placement` source; the first two passes predated all of
+this. Second pass recorded the milestone I / K outcomes, the `sigp-vector` review, and the
+newly-found open defects; the first pass predated all of them).
 
-> Background: `ae` has already ported the **core chart engine** (optimize/relax, merge,
-> grid-test, procrustes, serum circles, stress), **sequences/seqdb**, **virus
-> name/passage parsing**, **locationdb**, **tree manipulation**, and **WHO CC XLSX/TSV
-> ingestion**. What remains is several whole subsystems (~57k LOC) plus a long tail of
-> CLI wrappers.
+**What this file is.** The record of the AD → ae port: the subsystem table, the
+per-subsystem milestones and their verification evidence, and the **coordination rules**
+for agents working this tree in parallel (those rules are still live — see
+[Coordination rules](#coordination-rules-read-before-starting)).
+
+**What this file is *not*.** It is **not** the tracker for current work. **The AD → ae
+port proper is complete** — every subsystem below is 🟢 apart from a deliberately-deferred
+tail ([Deferred / won't-fix](#deferred--wont-fix--the-honest-tail)). Active work is the
+**P2 native-renderer workstream** ([below](#active-workstream--p2-native-report-map-renderer)),
+whose real tracker is `P2-RENDER-DESIGN.md` §4. Sections 1–6 further down are kept as
+**history**: they are accurate about *how* each subsystem was built and verified, but where
+they describe what is *still to do* they are stale. **Where a section carries a dated
+correction note at its top, that note wins over the body.**
+
+> Background: `ae` ported the **core chart engine** (optimize/relax, merge, grid-test,
+> procrustes, serum circles, stress), **sequences/seqdb**, **virus name/passage parsing**,
+> **locationdb**, **tree manipulation**, and **WHO CC XLSX/TSV ingestion** first, then the
+> remaining subsystems (~57k LOC) plus the CLI-wrapper tail. All of that has since landed.
+
+---
+
+## Where current status actually lives
+
+This file is history. For what is being worked on **now**, read these:
+
+| Document | What it holds |
+|----------|---------------|
+| [`P2-RENDER-DESIGN.md`](P2-RENDER-DESIGN.md) | **The current tracker.** The rendering contract (how `c["R"]` named styles + `c["p"]` resolve), the architecture, and **§4 the milestone table A–K** for the native report renderer. |
+| [`P2-RENDER-SPIKE-PLAN.md`](P2-RENDER-SPIKE-PLAN.md) | The go/no-go analysis that preceded P2 — the enumerated kateri↔`map-draw` gap and the staged recommendation. Historical, but the gap table is still the clearest statement of *what a report map needs*. |
+| [`cc/map-draw/TODO.md`](cc/map-draw/TODO.md) | The **chains-path** renderer brief: fidelity strategy and milestones **M1–M7** (AD ChartDraw reproduction for whocc-chains). Predates the P2 semantic-style work in the same directory. |
+| [`tools/p2-fidelity/README.md`](tools/p2-fidelity/README.md) | The pixel-diff **fidelity harness** (`fidelity.py`) — the scoreboard every renderer milestone proves itself against. |
+| [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) | ssm-report / vcm consolidation state, the capstone reproduction, and the accepted won't-fixes. *(Its status header predates P2 and still describes maps as kateri-rendered — see [Deferred / won't-fix](#deferred--wont-fix--the-honest-tail).)* |
+| [`py/ae/whocc/chains/TODO.md`](py/ae/whocc/chains/TODO.md) | whocc-chains port status + the `combine_cheating_assays` follow-up. |
+| [`doc/SIGPAGE.md`](doc/SIGPAGE.md), [`cc/tal/PORTING.md`](cc/tal/PORTING.md) | Signature-page and TAL porting detail. |
+| [`tools/WHO-DATA-GATE.md`](tools/WHO-DATA-GATE.md) | The mechanical WHO-data gate (`tools/who-data-gate.py`) that every commit must pass. |
+| [`interactive/PLAN.md`](interactive/PLAN.md) | The standalone HTML tree+map viewer (`interactive/`, added 2026-06-18). Not an AD port and **not tracked in this file**; noted so it isn't mistaken for the deferred TAL `.html` output. |
 
 ---
 
@@ -17,39 +51,321 @@ status, and respect the shared-file rules below.
 
 | # | Subsystem | AD source | ~LOC | ae target | Owner | Status |
 |---|-----------|-----------|-----:|-----------|-------|--------|
-| 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/` | *(map-draw agent)* | ⚪ mostly **SHELVED** — interactive/report antigenic maps done in **kateri** (Dart, separate repo). **A headless C++ Cairo renderer (`cc/map-draw/` + `map-draw` CLI / `ae_backend.map_draw`) was REVIVED** for the Linux **whocc-chains** batch path (#7) where kateri (macOS-only) can't run, reproducing AD ChartDraw at ~4% mean pixel-diff. `cc/draw/cairo-surface.*` is **kept** (TAL #3 draws trees with it). See §1. |
+| 1 | **Map drawing** (Cairo render engine + map-draw) | `acmacs-draw` + `acmacs-map-draw` | ~31,000 | `cc/draw/`, `cc/map-draw/`, `cc/geo/` | *(map-draw agent)* | 🟢 done — **the native C++ Cairo renderer is now the report's DEFAULT map engine, not a chains-only fallback.** `cc/map-draw/` (`map-draw` CLI / `ae_backend.map_draw`) was revived as an AD-ChartDraw fidelity port for the Linux **whocc-chains** batch path (#7), then gained a **semantic-style interpreter** (`styled-draw.cc`, P2 milestones A/B/C/E/F/G) that consumes the *same* on-chart `c["R"]` named styles + `c["p"]` base plot-spec kateri consumes. `ae.report` picks the backend via `AE_REPORT_MAP_RENDERER` — **default `native`** (`py/ae/report/map_renderer.py`, flipped in `a7f51c7`), `kateri` = opt-in fallback. **kateri is retained only for the interactive drag-adjust / relax GUI**, not for report figures. Geographic maps = `cc/geo/` + `geo-draw` (done, incl. clade pies). Open P2 tail: milestones **I** (label auto-placement) and **K** (figure-matrix sign-off) — see [Active workstream](#active-workstream--p2-native-report-map-renderer) and §1. |
 | 2 | **hidb** (historical influenza DB) | `hidb-5` | ~4,600 | `cc/hidb/` | *(hidb agent)* | 🟢 done — reader + authoring (make/convert/stat), verified |
-| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` + `py/ae/tal/` | *(tal agent)* | 🟢 feature-complete (core) — tree render; clades / time-series / **dash-bar-aa-at** columns; **leaf colouring by clade / continent / aa-at-pos** + mode-aware legend; title / **aa-transitions** (+ computation — fixed a `cc/tree` stub); **hz-sections**; node select/apply + **positioned `apply.text` labels (DrawOnTree)**; **per-clade `show:false` hiding**; **settings-v3 `.tal` reader** (`tal-signature-page --tal`); signature page = tree + **kateri** map + **WHOCC vaccine** marks. ✅ **report-tree fidelity matched vs AD** (2026-06-17): **continent-coloured matrix** (it was a colour-*mode* bug, not a palette gap — AD colours by continent, which ae already had); **exact page widths** (ported AD's `Layout::width_relative_to_height` — bvic 631.6 / h3 648.6 / h1 794.3, was all ~640); **geo inset** (lower-left continent world map); **continent legend** (top-right, named); **clade-label column** (right brackets); `edge >=` node-select; ✅ **curated `draw-aa-transitions` labels** (the on-tree clade/transition labels) — the AD draw-time `node_id` ae lacks was sidestepped by placing each at the **MRCA of its `?first`/`?last` leaf seq_ids** (MRCA(first,last) IS that node); 33/44/40 labels render on bvic/h3/h1. All rasterise+eyeball-verified vs AD. **Report-tree fidelity is complete.** ✅ Tail also done (2026-06-17): **`for-each`** loops + **`ladderize`** (`max-edge-length` stub in `cc/tree/tree.cc` implemented + wired through `tal-draw`) + **`.names`** output (draw-order leaf names). Only **`.html`** interactive tree viewer deferred — a standalone tree-inspection tool the seasonal report doesn't consume (not a kateri overlap: kateri views *maps*, not trees); under consideration, not yet started — see [`cc/tal/PORTING.md`](cc/tal/PORTING.md) |
-| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (vcm engine consolidated) | *(report agent)* | 🟢 vcm **library tier** in `ae.report` (Phases 0–3 + 1b) — **verified faithful** vs a real later report's vcm (`2026-0223`): `commander`/`download`/`main_loop`/`dirs`/`modules`/`chart_modifier`/`latex` differ only by the deliberate decoupling + warning fixes. **adjust ported** — `ae.adjust` + kateri point-drag. ✅ **ASSEMBLED-REPORT RUN REPRODUCED (capstone)** — the full real `2026-0223-ssm` report builds on `ae.report` (`report.py` → **36-page `report.pdf`, visually identical** to the AD/vcm reference) after a **2-file/3-edit** per-report adaptation (`report.py` + `conference_data.py` → `from ae.report import latex`/`conference_data_base`). Capstone gaps: (a) ✅ **geographic CLOSED** — `geo-draw` + `geographic.make_geo(color_by="coloring")` consume the report's `geographic_coloring` aa/clade `apply` rules (AD `ColoringByAminoAcid` port via seqdb + packed per-antigen dots; built + verified on real H1 hidb); (b) ✅ **tree fidelity matched vs real bvic/h3/h1 `.tal`** (2026-06-17) — **all 6 TAL-subsystem gaps fixed + rasterise-verified** (canvas/portrait, exact page widths, continent-coloured matrix, top-right continent legend + right clade-label column, lower-left geo inset, black edges, and the curated `draw-aa-transitions` on-tree labels via MRCA-of-`?first`/`?last`) — tracked under #3; (c) ✅ **per-report glue DONE**. ✅ **per-map antigenic-map export rewired to `ae.report`+kateri** — all 21 `<subtype>-<lab>/0do` library imports → `ae.report.*` + the 3 subtype modifiers mix in the concrete `ConferenceData`; verified end-to-end via kateri: **h1-cdc** `out.1.clades.pdf` pixel-identical to reference, **bvic-crick** full B clade set correct (surfaced + fixed an `ae.utils.org` ragged-row bug). ✅ **FULL FIGURE REGENERATION on ae against a current hidb** (2026-06-16; hidb refreshed to H1→2026-03/H3→2026/B→2026-04): **19/19** per-map dirs regenerated via kateri (the 2 `-vidrl` needed a `dirs.find_previous_chart` fix — return `None` when a previous report exists but lacks this dir's 2-back chart, instead of raising, matching the caller's "eliminate not found"); maps **pixel-verified vs the pristine original report** (content-identical, <1% differing pixels = anti-aliasing edges, across H1/H3/B + 6 labs); **stat** reproduced (`ae.report.stat` Python `hidb5-stat` port — structurally identical + monotonic superset of the report's, ae≥ref on all 1577 leaves); **geo** reproduced for **all three subtypes H1/H3/B** (`make_geo(color_by="coloring")` — same clade representation; extra dots = real hidb accretion; H3 large at 223–1501 loc/month); then a **fully ae-generated 36-page `report.pdf`** re-assembled from the regenerated figures (maps + trees + geo + `ae.report.latex`). No AD `hidb5-stat`/`geographic-draw`, no `vcm`. **The `ae.report` seasonal report is end-to-end reproducible.** ✅ **DOWNLOAD-STAGE REPRODUCTION** (2026-06-16/17): added `from_chain` reproduce knobs (`$VCM_CHAIN_REPRODUCE` sha1-match, `$VCM_CHAIN_INCREMENTAL` pin); **15 chain dirs byte-faithfully reconstructed** (sha1), **3 simple-merge custom dirs content-faithful** (Feb source-tables extracted from the frozen chart; maps remade — seqdb-reduced clade counts), **2 incremental/special dirs not reconstructable** (frozen chart is the artifact). seqdb (not clades.json, which is git-tracked + unchanged) drives the custom-dir drift; no Feb seqdb recoverable yet. **bvic-vidrl** has a manual **−1 column-basis** on one serum (`B/AUSTRIA/1359417/2021 A9878`, 6.0→5.0) not in the automated path — replaying it needs the **forced-column-bases setter**, now **available on `ad-port`**: `set_forced_column_bases` + seeded `relax(seed=…)` were **merged from `main` (racmacs-fixes) into `ad-port` 2026-06-17** (built green, bindings import-verified), so the replay was done in `ae`. ✅ **bvic-vidrl −1 colbasis replay REPRODUCED** (2026-06-17): warm-start `relax` from the server map with the one serum's cb 6→5 — sera within **0.028 map-units** of the report, kateri-rendered `clades-v2` figure visually identical; generalised as the core `Chart.reduce_column_bases(sera, by)` binding ([drserajames/ae#4](https://github.com/drserajames/ae/pull/4)). **Status: ✅ COMPLETE — the `ae.report` seasonal report is end-to-end reproducible.** Accepted limitations (won't-fix): the **Feb seqdb is not recoverable and will not be pursued**, so the 3 simple-merge custom dirs (bvic-cdc/niid, h3-hint-cdc) remain content-faithful with seqdb-reduced clade counts; **`h3-hi-guinea-pig-big-cdc` is not reconstructable** from inputs (the frozen chart is the artifact) — accepted as-is. TAL tree fidelity (#3) finished + pushed. See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md#report-reproduction-from-server-inputs-download-stage) |
+| 3 | **TAL** (phylo tree drawing / signature pages) | `acmacs-tal` | ~10,700 | `cc/tal/` + `tal-draw` + `py/ae/tal/` | *(tal agent)* | 🟢 feature-complete (core) — tree render; clades / time-series / **dash-bar-aa-at** columns; **leaf colouring by clade / continent / aa-at-pos** + mode-aware legend; title / **aa-transitions** (+ computation — fixed a `cc/tree` stub); **hz-sections**; node select/apply + **positioned `apply.text` labels (DrawOnTree)**; **per-clade `show:false` hiding**; **settings-v3 `.tal` reader** (`tal-signature-page --tal`); signature page = tree + **kateri** map + **WHOCC vaccine** marks. ✅ **report-tree fidelity matched vs AD** (2026-06-17): **continent-coloured matrix** (it was a colour-*mode* bug, not a palette gap — AD colours by continent, which ae already had); **exact page widths** (ported AD's `Layout::width_relative_to_height` — bvic 631.6 / h3 648.6 / h1 794.3, was all ~640); **geo inset** (lower-left continent world map); **continent legend** (top-right, named); **clade-label column** (right brackets); `edge >=` node-select; ✅ **curated `draw-aa-transitions` labels** (the on-tree clade/transition labels) — the AD draw-time `node_id` ae lacks was sidestepped by placing each at the **MRCA of its `?first`/`?last` leaf seq_ids** (MRCA(first,last) IS that node); 33/44/40 labels render on bvic/h3/h1. All rasterise+eyeball-verified vs AD. **Report-tree fidelity is complete.** ✅ Tail also done (2026-06-17): **`for-each`** loops + **`ladderize`** (`max-edge-length` stub in `cc/tree/tree.cc` implemented + wired through `tal-draw`) + **`.names`** output (draw-order leaf names). Only **`.html`** interactive tree viewer deferred — a standalone tree-inspection tool the seasonal report doesn't consume (not a kateri overlap: kateri views *maps*, not trees); under consideration, not yet started — see [`cc/tal/PORTING.md`](cc/tal/PORTING.md). **Update 2026-09-10:** the `for-each` / `ladderize` / `.names` tail listed as "remaining" in §3's last checkbox **is done** (2026-06-17) — only `.html` is deferred. Signature pages on `main` still compose a `tal-draw` tree with **kateri**-rendered section maps via `pdfjam`/`pdflatex`; a **single-canvas native** compositor is prototyped on the unmerged `sigp-vector` branch (see [Branch status](#branch-status--unmerged-branches)) |
+| 4 | **ssm-report** (seasonal report, Python+LaTeX) | `ssm-report` | ~8,900 | `py/ae/report/` (vcm engine consolidated) | *(report agent)* | 🟢 vcm **library tier** in `ae.report` (Phases 0–3 + 1b) — **verified faithful** vs a real later report's vcm (`2026-0223`): `commander`/`download`/`main_loop`/`dirs`/`modules`/`chart_modifier`/`latex` differ only by the deliberate decoupling + warning fixes. **adjust ported** — `ae.adjust` + kateri point-drag. ✅ **ASSEMBLED-REPORT RUN REPRODUCED (capstone)** — the full real `2026-0223-ssm` report builds on `ae.report` (`report.py` → **36-page `report.pdf`, visually identical** to the AD/vcm reference) after a **2-file/3-edit** per-report adaptation (`report.py` + `conference_data.py` → `from ae.report import latex`/`conference_data_base`). Capstone gaps: (a) ✅ **geographic CLOSED** — `geo-draw` + `geographic.make_geo(color_by="coloring")` consume the report's `geographic_coloring` aa/clade `apply` rules (AD `ColoringByAminoAcid` port via seqdb + packed per-antigen dots; built + verified on real H1 hidb); (b) ✅ **tree fidelity matched vs real bvic/h3/h1 `.tal`** (2026-06-17) — **all 6 TAL-subsystem gaps fixed + rasterise-verified** (canvas/portrait, exact page widths, continent-coloured matrix, top-right continent legend + right clade-label column, lower-left geo inset, black edges, and the curated `draw-aa-transitions` on-tree labels via MRCA-of-`?first`/`?last`) — tracked under #3; (c) ✅ **per-report glue DONE**. ✅ **per-map antigenic-map export rewired to `ae.report`+kateri** — all 21 `<subtype>-<lab>/0do` library imports → `ae.report.*` + the 3 subtype modifiers mix in the concrete `ConferenceData`; verified end-to-end via kateri: **h1-cdc** `out.1.clades.pdf` pixel-identical to reference, **bvic-crick** full B clade set correct (surfaced + fixed an `ae.utils.org` ragged-row bug). ✅ **FULL FIGURE REGENERATION on ae against a current hidb** (2026-06-16; hidb refreshed to H1→2026-03/H3→2026/B→2026-04): **19/19** per-map dirs regenerated via kateri (the 2 `-vidrl` needed a `dirs.find_previous_chart` fix — return `None` when a previous report exists but lacks this dir's 2-back chart, instead of raising, matching the caller's "eliminate not found"); maps **pixel-verified vs the pristine original report** (content-identical, <1% differing pixels = anti-aliasing edges, across H1/H3/B + 6 labs); **stat** reproduced (`ae.report.stat` Python `hidb5-stat` port — structurally identical + monotonic superset of the report's, ae≥ref on all 1577 leaves); **geo** reproduced for **all three subtypes H1/H3/B** (`make_geo(color_by="coloring")` — same clade representation; extra dots = real hidb accretion; H3 large at 223–1501 loc/month); then a **fully ae-generated 36-page `report.pdf`** re-assembled from the regenerated figures (maps + trees + geo + `ae.report.latex`). No AD `hidb5-stat`/`geographic-draw`, no `vcm`. **The `ae.report` seasonal report is end-to-end reproducible.** ✅ **DOWNLOAD-STAGE REPRODUCTION** (2026-06-16/17): added `from_chain` reproduce knobs (`$VCM_CHAIN_REPRODUCE` sha1-match, `$VCM_CHAIN_INCREMENTAL` pin); **15 chain dirs byte-faithfully reconstructed** (sha1), **3 simple-merge custom dirs content-faithful** (Feb source-tables extracted from the frozen chart; maps remade — seqdb-reduced clade counts), **2 incremental/special dirs not reconstructable** (frozen chart is the artifact). seqdb (not clades.json, which is git-tracked + unchanged) drives the custom-dir drift; no Feb seqdb recoverable yet. **bvic-vidrl** has a manual **−1 column-basis** on one serum (`B/<CITY>/<N>/<YYYY> <SERUM_ID>`, 6.0→5.0) not in the automated path — replaying it needs the **forced-column-bases setter**, now **available on `ad-port`**: `set_forced_column_bases` + seeded `relax(seed=…)` were **merged from `main` (racmacs-fixes) into `ad-port` 2026-06-17** (built green, bindings import-verified), so the replay was done in `ae`. ✅ **bvic-vidrl −1 colbasis replay REPRODUCED** (2026-06-17): warm-start `relax` from the server map with the one serum's cb 6→5 — sera within **0.028 map-units** of the report, kateri-rendered `clades-v2` figure visually identical; generalised as the core `Chart.reduce_column_bases(sera, by)` binding ([drserajames/ae#4](https://github.com/drserajames/ae/pull/4)). **Status: ✅ COMPLETE — the `ae.report` seasonal report is end-to-end reproducible.** Accepted limitations (won't-fix): the **Feb seqdb is not recoverable and will not be pursued**, so the 3 simple-merge custom dirs (bvic-cdc/niid, h3-hint-cdc) remain content-faithful with seqdb-reduced clade counts; **`h3-hi-guinea-pig-big-cdc` is not reconstructable** from inputs (the frozen chart is the artifact) — accepted as-is. TAL tree fidelity (#3) finished + pushed. See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md#report-reproduction-from-server-inputs-download-stage). **Update 2026-09-10:** the per-map figure step no longer goes through kateri — it renders **natively** by default through the `MapRenderer` seam (`py/ae/report/map_renderer.py`, P2 milestone J; default flipped in `a7f51c7`), and the `export` step's trailing kateri round-trips (`styled.ace` write, sig-page mapi viewport) have native replacements (`write_styled_ace` / `sig_page_viewport`). MIGRATION.md's status header predates P2 and still describes the maps as kateri-rendered. |
 | 5 | **webserver** (HTTPS chart serving) | `acmacs-webserver` | ~2,100 | `py/ae/webserver/` (Python rewrite) | *(webserver agent)* | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data endpoints verified end-to-end |
 | 6 | **CLI wrappers** (thin shells over `chart_v3` API) | various `bin/chart-*` | small | `bin/` | CLI agent | 🟢 done |
 | 7 | **whocc-chains** (incremental-chain engine + web + renderer) | `acmacs-py/chain202105` + `acmacs-whocc/web/chains-202105` | ~1,800 | `py/ae/whocc/chains/` + `cc/map-draw/` | *(chains agent)* | 🟢 done — engine + stdlib-`http.server` web + matplotlib diagnostics + revived C++ renderer (#1); **fidelity reproduces AD across 6 lab/subtype/assay combos**. Live AD `chain202105` untouched; switchover is a separate gated call. See [`py/ae/whocc/chains/TODO.md`](py/ae/whocc/chains/TODO.md). |
 
 Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 
+**All seven subsystems are 🟢.** The AD → ae port proper is finished; what is left is the
+P2 renderer tail below and the deliberately-deferred items after it.
+
+---
+
+## Active workstream — P2: native report-map renderer
+
+**What P2 is.** Render the seasonal report's antigenic maps **headlessly in C++** instead of
+launching kateri per map: faster reports, Linux-capable, one engine. The renderer consumes the
+*same* on-chart styling the report already bakes (`c["R"]` named styles + `c["p"]` base
+plot-spec), so it is a drop-in for the report's map step. Full contract, architecture and the
+**A–K milestone table** are in [`P2-RENDER-DESIGN.md`](P2-RENDER-DESIGN.md) §4 — **that is the
+live tracker; the summary here is a signpost, not a substitute.**
+
+**Where it stands** (derived from `main`'s history and tree, 2026-09-10):
+
+| P2 milestone | State | Evidence |
+|---|---|---|
+| **A** spine: style resolver + selector engine + per-point styling + transform/recenter/viewport + title + plain legend (also brought the background **grid**, milestone D) | 🟢 | `c5a0a0e` → `cc/map-draw/styled-draw.cc` |
+| **B** legend box (swatch paling, counter, box metrics) | 🟢 | `978bb37` |
+| **C** title / fonts / text metrics / PDF page geometry | 🟢 | `95c1b7a`, `7031c68` (label halo) |
+| **D** background grid + border | 🟢 grid (landed with A). *Unverified:* the styled path draws **no outer map border** (kateri draws none); whether AD's border is wanted for report maps has not been decided. |
+| **E** remaining selectors + composed style families; `:bright`/`:pale` colour model | 🟢 | `f853fbe` |
+| **F** serum circles · **G** serum coverage | 🟢 | `67e9b0c`; fill/alpha bugs fixed in `73a8439`/`dc32bd0` |
+| **H** time-series / continent / serology / pale families | 🟢 (folded into E's composed-family work; serology legend paling + multi-line title in `da7c37e`) | |
+| **J** `ae.report` renderer seam + flag | 🟢 | `5abb295` (seam) + **`a7f51c7` (native made the default)**; batch path `8bdd16e`; the last `c["p"]`/kateri dependency dropped by the native semantic→legacy bake (`fc920c4`, PR #32) |
+| **I** **label auto-placement** | 🟡 **implemented, unmerged** | branch `map-draw-label-placement` (7 commits); **five** selectable modes, `automatic` the default — see below |
+| **K** **figure-matrix sign-off** | 🟡 **partial — "K′"** | branch `p2-figure-matrix`; **5 of 9 families** signed off — see below |
+
+### Open item — milestone I: label auto-placement
+
+**Implemented on the unmerged `map-draw-label-placement` branch** (`cc/map-draw/label-placement.{hh,cc}`
++ `styled-draw.cc`). `main` still renders labels only at the explicit offsets carried by the style
+(`l.p` → `label_dx/label_dy`), drawn with kateri's white halo (`pointLabelHaloWidthFactor`).
+
+> **Correction to a long-standing assumption (2026-09-10).** The design doc and earlier revisions of
+> this file describe milestone I as *porting AD's* overlap-avoidance and leader lines. **AD has no
+> label auto-placement to port.** `acmacs-map-draw/cc/labels.cc` is marked *obsolete*; the live path
+> is `acmacs-draw/cc/draw-points.cc` `Points::draw_labels`, which simply evaluates
+> `PointLabel::text_offset()` and draws. No overlap, collision, intersection or leader-line logic
+> exists anywhere in AD's map renderer, and kateri's `addPointLabel` behaves the same. The reason is
+> structural: the report **authors** a per-chart `lox`/`loy` offset table
+> (`py/ae/semantic/{vaccine,serology}.py`) — **the human is the placement algorithm.** So milestone I
+> is *new work*, not a port, and it has **no AD golden to be verified against**.
+
+The implementation takes its shape from the one auto-placer already in this tree,
+`cc/tal/draw-tree.cc`'s MRCA-label solver:
+
+- **Scope.** `chart-export` emits `l.p` only when it differs from kateri's `[0, 1]` default, so
+  "offset ≠ default" is exactly "the chart carries an authored offset". Those labels are **pinned
+  verbatim and become obstacles**; only unadjusted labels are placed.
+- **Candidates in kateri's offset space** (12 directions × 9 scales), not device coordinates — a
+  placed label renders through the same `label_offset()` mapping as an authored one, so the placer
+  can only choose an offset the operator could have typed. `[0, 1]` at scale 1 is the first
+  candidate and carries a bonus, so an unobstructed label does not move.
+- **Scoring**: continuous penetration penalties (box-vs-ink overlap area, off-canvas area, tether
+  length inside ink, superlinear distance from the point, angular deviation from "below"), plus
+  pairwise label-box overlap, tether crossing, and tether-through-text.
+- **Solver**: static costs precomputed once, then iterated best response to a fixpoint.
+  Deterministic; 79 styles render in 0.4 s.
+
+**Verified no-regression (hard numbers):** `clades-v1` and `ts-2025-08` (all labels authored) render
+**0 differing pixels**; the chains CLI path renders **0 differing pixels**; and with auto-placement
+disabled every serology map is **0 differing pixels** vs pre-milestone.
+
+**Deliberate scope limit — the chains path (`draw.cc`) is untouched.** Its acceptance criterion is a
+pixel match to frozen AD PNGs, and AD draws vaccine labels at a fixed offset, so auto-placing there
+would *lower* chains fidelity.
+
+**This diverges from the kateri golden by design** for serology maps, which milestone K must account
+for (hence the disable switch).
+
+**Five selectable labelling modes (corrected 2026-09-10 — supersedes an earlier three-mode
+framing that predated `inside_layered` and the exact default-tuning rationale below)**, all on
+the unmerged `map-draw-label-placement` branch (7 commits ahead of `main`, tip `863c8c3`). Read
+straight from the "FIVE MODES" doc comment at the top of
+[`cc/map-draw/label-placement.hh`](cc/map-draw/label-placement.hh) (`enum class LabelMode {
+automatic, automatic_lines, inside, inside_layered, pinned }`), summarised here:
+
+- **`automatic`** (the default) — auto-placed, never tethered. Because an untethered label has
+  nothing but proximity to say which point it names, this mode is tuned to stay tight to its own
+  point: a much heavier distance penalty than `automatic_lines`, a hinge past half a text-height
+  of clear space, and a saturating point-cloud penalty so a candidate inside a dense cluster isn't
+  charged repeatedly for the same ink.
+- **`automatic_lines`** — the same search, tuned loosely, plus an AD-style tether
+  (`LabelTether{BLACK, 0.3px}`, the same convention `cc/tal/draw-tree.cc` already uses for
+  auto-placed MRCA labels) once a label ends up far enough away that the association would
+  otherwise be lost. Distance is cheap here because the leader line carries the association.
+- **`inside`** — every label drawn **centred in its point** (offset `[0, 0]`), split across lines
+  and shrunk to fit the point's circle, trailing passage suffix (`-cell`/`-egg`) stripped. Nothing
+  to avoid, tether, or search for.
+- **`inside_layered`** — the *same* layout as `inside`; only the paint order differs. The caller
+  interleaves each label with its own point in z-order (point, its label, then the next point)
+  instead of painting every point and only then every label, so where two antigens overlap, the
+  upper point's disk covers the lower one's label the same way it already covers the lower one's
+  ink — `inside` smears overlapping labels together, `inside_layered` reads cleanly.
+- **`pinned`** — no auto-placement at all: every label keeps its offset. This is the
+  pre-milestone-I behaviour and what the fidelity harness uses to measure parity against a kateri
+  golden.
+
+Authored `l.p` offsets are honoured verbatim in `automatic`, `automatic_lines` and `pinned` (and
+are obstacles for the rest); the `inside` pair is the deliberate exception — an authored offset is
+an instruction about where *outside* the point the label goes, which inside-placement has no use
+for, so it is ignored there. Selection: `AE_MAP_DRAW_LABEL_AUTOPLACE` via `label_mode_from_env()`
+(names `auto`/`auto-lines`/`inside`/`inside-layered`/`off`; aliases `1`=auto,
+`layered`=inside-layered, `0`/`pinned`=off; an unrecognised value falls back to `automatic` rather
+than failing the render) or an explicit `LabelMode` passed to `export_styled_map`. Consumed in
+`cc/map-draw/styled-draw.cc` around the label-drawing block (`label_mode_used`,
+`labels_inside_points(mode)`, `place_labels(...)`, verified by reading that branch's
+`styled-draw.cc` directly).
+
+### Open item — milestone K: figure-matrix sign-off — **partial ("K′")**
+
+The **harness** — [`tools/p2-fidelity/fidelity.py`](tools/p2-fidelity/fidelity.py) — renders
+natively, rasterises with `pdftoppm`, and pixel-compares against the kateri golden with
+`magick compare -metric AE` at strict and `-fuzz 30%`. **The full run has now been done for the
+families that have a reference**; results are in
+[`tools/p2-fidelity/FIGURE-MATRIX-RESULTS.md`](tools/p2-fidelity/FIGURE-MATRIX-RESULTS.md) on the
+unmerged `p2-figure-matrix` branch.
+
+**Run scope: 219 maps, 18 lab dirs, 3 subtypes, 0 failures.** Goldens were admitted only if
+**kateri-produced** (detected from the PDF signature — native has been the report default since
+2026-07-10, so a naive run would have been **circular**), still-current, and not stale: 219 of 796
+candidates qualified.
+
+| family | n | fuzz30 mean | max | `<2 %` | verdict |
+|--------|--:|------------:|----:|-------:|---------|
+| by-clade | 31 | 0.87 % | 1.51 % | 31/31 | PASS |
+| by-clade −6m | 31 | 0.96 % | 1.57 % | 31/31 | PASS |
+| by-clade −12m | 31 | 0.96 % | 1.57 % | 31/31 | PASS |
+| serology | 18 | 1.57 % | 2.51 % | 13/18 | PASS (marginal) |
+| time-series | 108 | 0.82 % | 1.38 % | 108/108 | PASS |
+| **ALL** | **219** | **0.93 %** | 2.51 % | **214/219 (97.7 %)** | |
+
+**The irreducible-AA floor was measured, not asserted.** Rasterising the **same PDF** with two
+rasterisers (poppler-splash vs poppler-cairo) — provably zero content difference — costs
+**6.11 % strict / 0.98 % fuzz30**. Consequences: the **strict metric is unusable here** (the observed
+native-vs-kateri strict mean of 4.24 % is *below* the same-content floor), and the observed fuzz30
+mean of 0.93 % is **at the AA-class scale**. The 5 maps over 2 % are all serology, each within
+0.5–0.9 pp of *its own* measured floor. Best-of-9 integer-shift alignment is **always (0, 0)**, which
+closes the milestone-A viewport/recenter risk. **No true content differences** (points, palette,
+frame, legend rows) were detected in any of the 219 maps.
+
+**Not signed off — 4 of 9 families have no usable reference** (a missing-reference problem, not a
+renderer failure):
+
+| family | blocker | what would close it |
+|--------|---------|---------------------|
+| **serum circles / coverage** ⚠ | `sc-*`/`-sci-*`/`-sco-*` styles are built in-memory at addendum time and **were never persisted** (verified: zero such styles across 69 charts in 3 runs), though 1852 goldens exist. **Blocker removed, unmerged (2026-09-10):** the `serum-circle-style-persist` branch (2 commits, `5fc2c6a`+`3b31a78`) adds `map_renderer.write_render_chart()`, wired in opt-in (`AE_REPORT_PERSIST_RENDER_CHART` / `persist_chart=`, off by default) to `serum_coverage_export` (→ `serum-coverage/styled-serum-coverage.ace`) and `multiple_circles.generate_lab` (→ `<lab>/styled-multiple-circles.ace`), so the chart these maps are drawn from can now be saved verbatim instead of discarded. Round trip verified exact by the branch author (20/20 `sc-*` maps pixel-identical on `test/chart1.ace`; 284/284 at production scale, 6925 antigens × 142 sera). Also ships a runnable recipe for the reference pass itself: `tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md` (on that branch). | The persistence blocker is gone (unmerged) — **but the reference pass has not been run.** What still closes it: a real kateri golden pass (macOS) per that recipe, then the pixel comparison. **F and G remain pixel-unverified; this update does not change that.** |
+| info maps | no `out.1.info-*.pdf` in any of 6 report runs; 171/171 render clean, nothing to diff | one kateri `export_info` pass, then re-run the harness |
+| multiple-serum-circles | committed references are `%PDF-1.4 /Producer (R 4.2.0)` — R/Racmacs output, ~11 months older than the charts | a kateri reference pass for `mc-plain`/`mc-circles` |
+| signature-page section maps | never persisted standalone; also bypass the `MapRenderer` seam entirely | route `signature_page.py` through `MapRenderer`, then emit per-section reference PDFs |
+
+⚠ **Serum circles/coverage is the significant gap: milestones F and G remain pixel-unverified**, and
+they are the most geometry-heavy part of the renderer. The reference pass was **not** faked by
+reconstructing the styles — a reconstruction would measure the reconstruction, not the renderer.
+**Update 2026-09-10:** the *structural* blocker (no chart on disk carries the styles) is now fixed,
+unmerged, on `serum-circle-style-persist` — see the table row above. The reference pass itself
+still needs a real kateri process on macOS and has not been run in this pass; F/G's
+pixel-unverified status is unchanged.
+
+**K cannot be closed outright.** It is signed off for the five reference-backed families — the batch
+report path native actually serves today — and explicitly not for the other four.
+
+### Open item — single-canvas signature pages
+
+Prototyped on the **unmerged `sigp-vector`** branch: the `tal-draw` tree and the per-section
+`map-draw` maps drawn as **vectors into one shared `cairo_pdf_surface`**, replacing the
+`pdfjam`/`pdflatex` stitch of separate tree and kateri map PDFs. Design + measured fidelity are
+in `cc/tal/SIG-PAGE-COMPOSITOR.md` — **which exists only on that branch**
+(`git show sigp-vector:cc/tal/SIG-PAGE-COMPOSITOR.md`). `main` still composes sig pages the old
+way. This was the "downstream, out of P2 scope" item in `P2-RENDER-DESIGN.md` §4.
+
+---
+
+## Open defects and environment issues (found 2026-09-10; #2, #4–#7 fixed unmerged, #3 partially, as of the third pass)
+
+These surfaced while doing the P2 work above. **Update (third pass, 2026-09-10):** five of the
+seven are now fixed on unmerged branches (`renderer-correctness`, `build-env-fixes`) — see the
+per-row detail and [Branch status](#branch-status--unmerged-branches). None of these fixes are on
+`main`.
+
+| # | Item | Where | Detail |
+|---|------|-------|--------|
+| 1 | **WHO-data gate is weaker than it looks** | `tools/who-data-gate-baseline.txt`, `tools/who-data-gate.py` | The baseline **grandfathers** matches past the scanner. That is how a **real strain name + serum ID sat in this very file** in plain text, in violation of the file's own rule, without ever being flagged (now replaced with placeholders). **The baseline may be hiding more.** Separately, no private strain list (`$WHO_STRAIN_LIST` / `.who-strain-list`) is configured, so the gate runs on **regex rules only**. Worth a dedicated audit. (A `who-data-gate-audit` branch exists, owned by another agent — not detailed here.) |
+| 2 | ~~`export_styled_map` silently accepts an unknown style name~~ — **FIXED, unmerged** | `cc/map-draw/styled-draw.cc` | Was: `sc-000-f2.0-e`, `mc-plain`, `sigsec-00` and an invented `totally-bogus-style-xyz` all produced **byte-identical** PDFs — the unstyled base render — a **plausible-but-wrong map with no error**. **Closed by `a18ff29`** on the unmerged `renderer-correctness` branch: `export_styled_map` now checks `chart.styles().find_if_exists(style_name)` before resolving and throws `std::runtime_error("cannot draw styled map: unknown style \"<name>\"")` for an unresolvable top-level style name. Verified by the branch author: a known style still renders; `"totally-bogus-style-xyz"` now raises and leaves no output file. Still open on `main`. |
+| 3 | **Unexplained sub-pixel frame/axis difference — PARTIALLY addressed, unmerged** | `cc/map-draw/`, milestone K | Was: in the K diff panels the **central axis lines, the legend box edge and the bottom frame line** show up markedly darker than the surrounding glyph-edge noise. **The right/bottom frame-line component is fixed by `0541db1`** on the unmerged `renderer-correctness` branch: native drew the right/bottom grid/frame line in 0/219 fidelity maps because a boundary grid line landing exactly on the device edge is a pixel-snapping tie that rounds off-page; the fix clamps every grid-line coordinate to `[0.5, extent − 0.5]` (verified via a synthetic 800×800 chart: 7/800 stray-AA pixels → 801/800 solid grid-colour pixels on the edge row/column). **Caveat found reading the diff (genuinely unverified either way):** the clamp applies to *every* grid line, including `gx==0`/`gy==0` — i.e. the left/top edges shift ~0.5px inward too, not just the far edge that the bug report described as broken. Neither the branch author nor this pass checked whether that changes anything that previously rendered correctly on the left/top. Likely negligible (well under the ~1% AA noise floor already tolerated against the 2% K threshold) but not confirmed. **Not addressed by this branch:** reading `cc/map-draw/styled-draw.cc` on `renderer-correctness` shows the **central axis lines** are drawn by the *same* grid loop but at *interior* coordinates the clamp never touches (`std::clamp` only moves values outside `[0.5, extent-0.5]`), and the **legend box edge** is a wholly separate `surface.rectangle(box_x, box_y, box_w, box_h, BLACK, 1.0, WHITE)` call in the legend block — neither is touched by `0541db1`. So: **right/bottom frame line closed; central-axis-line and legend-box-edge darkness remain open and unexplained.** Do not mark this defect closed until the full fidelity harness is re-run against `renderer-correctness` (not done — see milestone K above) and the axis/legend components are specifically checked. |
+| 4 | ~~`./build.sh` aborts at the final `stubs` target~~ — **FIXED, unmerged** | `build.sh`, `meson.build`, `tools/gen-stubs.sh` | Was: `stubgen` resolves to the Python 3.10 `mypy`, whose `.so` is x86_64; `set -e` killed the script there, so **`build/` → `build-py314/` and the verify step never ran**. **Fixed by `0f40116`** on the unmerged `build-env-fixes` branch: the `ae_backend_stubs` meson target now runs the new `tools/gen-stubs.sh` instead of `find_program('stubgen')` directly. It prefers the *build* interpreter's own `mypy.stubgen` (also fixing the long-standing "Failed to import, skipping" warning, by putting the build dir on `PYTHONPATH`), falls back to `stubgen` on `PATH`, and — deliberately no `set -e` — warns and exits 0 when neither works, so `ninja` and `build.sh` continue past it. `CLAUDE.md` on that branch documents the new behaviour. Still open on `main`. |
+| 5 | ~~A fresh worktree cannot bootstrap `subprojects/`~~ — **FIXED, unmerged** | `build.sh` | Was: `git clone` of the vendored wraps fails when hook templates can't be written, so `build.sh` cannot populate a clean `subprojects/`; workaround was a manual `rsync -a --exclude='.*'`. **Fixed by `5b66700`** on the unmerged `build-env-fixes` branch: a new `bootstrap_subprojects()` step probes whether `subprojects/` can take those writes and, when denied, resolves every missing wrap in a throwaway project outside the tree (`meson subprojects download`, retried up to 3× against truncated downloads) and copies each result in with dot-entries stripped — automating the `rsync` workaround. No-op when the in-tree write succeeds (the normal case). Still open on `main`. |
+| 6 | ~~`geo-draw --help` is not a recognised flag~~ — **FIXED, unmerged** | `cc/geo/geo-draw-main.cc` | Was: it treats the argument as an **output path** and writes a file literally named `--help` into the cwd. **Fixed by `60a96df`** on the unmerged `build-env-fixes` branch: `--help`/`-h` now print a `usage()` block and exit 0, and any other unrecognised `-`-prefixed argument errors (exit 1) instead of falling through to `positional`. The identical pattern was then applied to `map-draw` (`chart-draw-main.cc`) and `tal-draw` (`tal-draw-main.cc`) by `b1bdeea` on the unmerged `renderer-correctness` branch — see Branch status below. Still open on `main`. |
+| 7 | ~~Stale docstrings in the renderer seam~~ — **FIXED, unmerged** | `py/ae/report/map_renderer.py` | Was: `selected_backend_name()` and `get_map_renderer()` both still said the default is `kateri`, contradicting `DEFAULT_BACKEND = "native"` beside them. **Closed by `d3314b9`** on the unmerged `renderer-correctness` branch: both docstrings now say `native` is the default and `kateri` the opt-in fallback. Still open on `main`. |
+
+---
+
+## Deferred / won't-fix — the honest tail
+
+Things that are **knowingly not done**. None of them block the port; each is recorded so the
+next reader doesn't rediscover it as a surprise.
+
+| Item | State | Detail |
+|---|---|---|
+| **TAL `.html` interactive tree viewer** | ⏸ **deferred, not started** | AD `tal`'s standalone HTML tree-inspection output. The seasonal report does not consume it. Unrelated to `interactive/` (an ae-native HTML tree+map viewer, its own thing — see [`interactive/PLAN.md`](interactive/PLAN.md)). |
+| **whocc-chains production switchover** | 🚦 **GATED — must not happen unprompted** | The ae port is **fidelity-verified across 6 lab/subtype/assay combos**; the **live AD `chain202105` remains production**. Flipping production to the ae chain is a **separate, explicit, reversible decision by the owner**. Do not do it as a side effect of other work. |
+| **`combine_cheating_assays` in `chart_v3.merge`** | 🔎 **open, uninvestigated** | ae assigns a geometric-mean titer to a small number of antigen×serum cells (**0–3 per chain step**) where AD leaves them **missing**. Negligible map impact but a **real low-frequency merge difference**. It is **ae-core** (`cc/chart/v3/merge.cc`), *not* part of the chains port. See [`py/ae/whocc/chains/TODO.md`](py/ae/whocc/chains/TODO.md). |
+| **ssm-report: Feb seqdb not recoverable** | ❌ **accepted won't-fix — CLOSED, do not reopen** | No Feb seqdb is recoverable, so **3 simple-merge custom dirs** stay **content-faithful with reduced clade counts**. Deliberate owner decision. |
+| **ssm-report: `h3-hi-guinea-pig-big-cdc` not reconstructable** | ❌ **accepted won't-fix — CLOSED, do not reopen** | Cannot be rebuilt from inputs; the frozen chart **is** the artifact. |
+
+---
+
+## Branch status — unmerged branches
+
+**Thirteen** documented branches are ahead of `main` and **none is behind it** (re-verified
+2026-09-10, third pass, via `git merge-base --is-ancestor main <branch>` for every branch below,
+including the three newly-documented ones) — i.e. each contains all of `main`, so each is a
+**fast-forward on its own**; merging several in sequence can still conflict where they touch the
+same code. All are P2 / report follow-ups. A fourteenth branch, **`who-data-gate-audit`** (3
+commits ahead, also confirmed a clean fast-forward), exists and is explicitly owned by another
+agent — noted here for completeness only; its content and disposition are not described or
+verified in this pass.
+
+> **`main` is untouched at `5f5db9d`.** None of the work below has been merged. Anything read from
+> `main` — including this file — is the pre-P2 state.
+
+| Branch | Ahead | What it is | Disposition |
+|---|--:|---|---|
+| `fix-main-loop-native-guard` | 2 | `report/main_loop`: skip kateri only for `@headless` batch commands in native mode | **Ready.** The original single commit was a **regression** — it suppressed kateri for *every* command because native is the default, silently breaking the interactive `style` / `serum_coverage` commands and the drag-adjust GUI (`CommanderBasic.style()` is guarded by `is_connected()`, so the chart was simply never sent, with no error). Narrowed to `not (headless and native_selected())` and verified by running the real `MainLoop`. |
+| `fix-serum-coverage-sigtrap` | 2 | unchecked `sera()[serum_index{n}]` in the pybind accessors (traps under `build-py314` FAST hardening, silently OOB on `build-arm64`) + clean the output dir to the current run | **Ready.** Reviewed; real bug of exactly the class `CLAUDE.md` warns about. |
+| `mc-native` | 1 | `report/multiple_circles`: render maps natively, drop kateri | **Redundant — verified by content**, not by commit message: a true ancestor of `sigp-vector` (merge `58c4756`) and `git diff mc-native sigp-vector -- …/multiple_circles.py` is **empty**. Safe to delete. |
+| `serology-polish` | 1 | `map-draw`: match kateri's miter halo join on point labels | **Redundant — verified by content**: true ancestor (merge `97dd2fd`); the one-line payload is present verbatim at `cc/draw/cairo-surface.cc:335`. Safe to delete. |
+| `sigp` | 2 | first single-canvas sig-page compositor + its design doc | **Superseded.** *Not* an ancestor of `sigp-vector`, so compared by content: touches a strict subset (7 of 15 files); its only unique code is the `SigTile`/`compose_sig_page` PNG-tile prototype that `sigp-vector` deliberately replaced, with **zero remaining references**. Safe to delete. (Its design-doc §1 is a fuller LaTeX-baseline write-up but is **wrong** where it matters — it claims `compose_grid` fills column-major; it does not.) |
+| `sigp-vector` | 6 | fully-**vector** single-canvas sig-page compositor; page/text size matched to the `compose_grid` LaTeX baseline | The live candidate. Merges as a **fast-forward**; file sets disjoint from the two `fix-*` branches, so landing order does not matter. **Land together with `sigp-vector-fixes`.** |
+| `sigp-vector-fixes` | 2 | the two blocking defects found reviewing `sigp-vector` (see below) | **Ready.** Rendered output unchanged (max pixel diff **0** at 150 dpi). |
+| `map-draw-label-placement` | 7 | milestone I — label auto-placement, **five** selectable modes (`automatic` default, `automatic_lines`, `inside`, `inside_layered`, `pinned`) — see [Open item — milestone I](#open-item--milestone-i-label-auto-placement) | Implemented, unmerged; verified no-regression on authored-offset maps (0 differing pixels vs pre-milestone) — not yet run through the full K fidelity harness. |
+| `p2-figure-matrix` | 1 | milestone K′ figure-matrix results + method | **Ready** (documentation only). |
+| `renderer-correctness` | 4 | four correctness fixes: styled-render grid-line edge clamp (`0541db1`, closes the right/bottom-frame-line part of open defect #3, caveat re left/top edges — see Open defects), `export_styled_map` unknown-style hard error (`a18ff29`, closes #2), `map-draw`/`tal-draw` `-`-prefixed CLI-arg rejection (`b1bdeea`, extends `build-env-fixes`'s `geo-draw` fix to the other two CLIs), stale kateri-default docstring fix (`d3314b9`, closes #7) | **Individually verified, not harness-verified.** Each fix verified by its author (synthetic pixel counts / binary runs / grep) — see Open defects above for per-fix detail and caveats. The full 219-map fidelity harness has **not** been re-run against this branch; milestone K's signed-off numbers (on `p2-figure-matrix`) predate it. |
+| `build-env-fixes` | 3 | three build/env fixes closing open defects #4/#5/#6: `build.sh` `subprojects/` bootstrap for sandboxes that forbid git-metadata writes (`5b66700`), best-effort (non-fatal) `ae_backend` stub generation via the new `tools/gen-stubs.sh` (`0f40116`), `geo-draw --help`/bad-flag handling instead of writing a file called `--help` (`60a96df`) | **Ready.** Each fix verified by its author (`build.sh`/`CLAUDE.md` doc updated to match reality; `gen-stubs.sh` observed to warn+exit 0 on this machine's broken stubgen; `geo-draw --help`/bad-flag behaviour run directly against the built binary). |
+| `serum-circle-style-persist` | 2 | removes milestone K's serum-circles/coverage persistence blocker: `map_renderer.write_render_chart()` (`5fc2c6a`) persists the in-memory chart `serum_coverage_export`/`multiple_circles.generate_lab` render from (opt-in, off by default) + ships `tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md`; a `serum_circle.style` deep-copy fix for per-serum radius-line colour (`3b31a78`) | **Ready, but does not itself close F/G.** Persistence round-trip verified exact by the author (20/20 maps on `test/chart1.ace`, 284/284 at production scale). The actual kateri reference pass + pixel comparison has not been run — needs a real kateri process on macOS; see "Open item — milestone K" above. |
+| `docs-todo-refresh` | 3 | this file, brought back in line with reality (three passes: initial refresh, milestone I/K + defects, this branch-status/defect-closure update) | **Ready** (documentation only). |
+
+### `sigp-vector` — two blockers found and fixed (on `sigp-vector-fixes`)
+
+1. **`finish()` did not write the PDF.** It called `cairo_show_page` + `cairo_surface_flush` but not
+   `cairo_surface_finish`, which is what emits the trailer. Proven empirically: immediately after
+   `finish()` the file was **0 bytes**, gaining `%%EOF` only on destruction. It worked only because
+   CPython refcounting dropped the local canvas at return — a retained traceback frame or a reference
+   cycle yields a **silently truncated PDF**. Both the header comment and the pybind docstring
+   already claimed it wrote the file, so the contract was right and the implementation wrong.
+2. **No cairo error-status check.** A poisoned `cairo_t` makes cairo **silently no-op every
+   subsequent operation**, so one bad map blanks the rest of the page and `finish()` still writes a
+   superficially successful PDF with no diagnostic — precisely the failure mode that matters on the
+   headless Linux batch path. Now checked via `cairo_status()` / `cairo_surface_status()`, reported
+   as `std::runtime_error` (the mechanism already used in that file), **outside** the per-style
+   `try`/`catch`: a C++ failure in one style is survivable, a poisoned context is not.
+
+**Still open on `sigp-vector`** (deliberately out of scope for the fix branch): `tree_caption` is
+silently dropped on the native path (`bin/tal-signature-page:78` passes it; the report path does not,
+so the assembled report is unaffected); the stale "column-major" comments in `_sig_page_layout`
+contradict the correct row-major code and are actively misleading; and `export_tree_into` passes an
+empty `output` to `render_tree_core`, which could emit a sidecar with `"pdf": ""` (cannot fire today).
+
+Also worth knowing, not defects: the "native" sig-page path still shells out to `build/tal-draw` once
+for draw-order leaf names — it drops kateri/pdfjam/pdflatex, not all subprocesses — and flipping
+`native=True` to the default changes output for every existing caller by the known native↔kateri
+delta, without a flag day.
+
 ---
 
 ## Coordination rules (read before starting)
 
-1. **Claim your subsystem** — put your agent label in the Owner column above and set
-   status to 🟡 before editing code. One subsystem per agent; they're independent.
+These are **still live** — every one below was re-verified against the tree on 2026-09-10.
+
+1. **Claim your work** — the subsystem table is now historical (all 🟢), so for new work claim
+   the *milestone/branch* instead: say what you are taking in the Owner column or in the P2
+   section above, and set 🟡 before editing code. One workstream per agent.
+   - **Worktree caveat (still very much live).** `ae` runs several **git worktrees** off the one
+     repo (`git worktree list` — `.worktrees/*` plus sibling `ae-*` dirs; the set changes with
+     active work). They share history but **each has its own working tree**, so uncommitted
+     changes do *not* propagate between them and two agents can hold the same file in different
+     states. **Confirm which worktree/branch your task targets and edit only inside it.** `main`
+     is checked out in the top-level `ae/` directory.
 2. **`meson.build` is a shared file** — it is the main merge-conflict risk. Keep your
    edits confined to a clearly-commented block (`# --- <subsystem> ---`) and add your
    files/targets there. If two agents must touch it, coordinate by appending, not
-   reflowing existing lines.
+   reflowing existing lines. *(Convention verified in place: `# --- tal (subsystem #3) ---`,
+   `# --- hidb (subsystem #2) ---`, `# --- geo … ---`, `# --- map-draw (subsystem #1, revived) ---`.)*
 3. **Python bindings** live in `cc/py/*.cc` and are registered in
    [`cc/py/module.cc`](cc/py/module.cc) + [`cc/py/module.hh`](cc/py/module.hh). Add a
    new `void ae::py::<name>(pybind11::module_&)` file and one registration line — do not
-   reorder existing registrations.
-4. **Build procedure** is the native-arm64 Apple-Clang-16 dance documented in
-   [`CLAUDE.md`](CLAUDE.md) → *Building natively for arm64*. Do **not** use `./mk` or
-   Homebrew LLVM. All Cairo/Pango/etc. deps come from arm64 Homebrew at `/opt/homebrew`.
+   reorder existing registrations. *(Verified: `tal`, `hidb`, `map_draw` were each **appended**
+   to the end of the `PYBIND11_MODULE` body with a `// --- <subsystem> ---` comment.)*
+4. **Build with [`./build.sh`](build.sh)** — the self-checking wrapper that encodes the working
+   native-arm64 / Apple-Clang / Python-3.14 recipe (`./build.sh check` = preflight only), then
+   `source ae-env.sh`. Do **not** use `./mk` or Homebrew LLVM. Cairo/Pango/etc. come from arm64
+   Homebrew at `/opt/homebrew`. *(The compiler is now Apple **clang 21** / macOS 26.5 SDK; any
+   "Apple Clang 16" wording elsewhere in this file or in CLAUDE.md predates the Jun-2026 Xcode bump.)*
+   See [`CLAUDE.md`](CLAUDE.md) → *Build system*.
 5. **New C++ code**: always `fmt::format_to(` (never bare `format_to(`) — see CLAUDE.md.
 6. **Verify before marking 🟢** — each subsystem below has explicit verification
    criteria. A subsystem is not "done" until it compiles in the arm64 build *and* its
    verification command produces the expected output.
 7. **Update this file** as you complete milestones (check the boxes).
-8. **No real surveillance data in committed files.** Keep real strain names, titers, serum
+8. **No real surveillance data in committed files — and there is now a mechanical gate.**
+   Run [`tools/who-data-gate.py`](tools/who-data-gate.py) over your changes before committing
+   (it also runs from hooks/CI); see [`tools/WHO-DATA-GATE.md`](tools/WHO-DATA-GATE.md).
+   Keep real strain names, titers, serum
    IDs, lab data, and sequences out of source, docs (incl. this file), comments, and test
    fixtures — use synthetic placeholders (e.g. `A(H3N2)/<CITY>/N/YYYY`, `<SERUM_ID>`) or
    clearly-synthetic test data (like `test/chart1.ace`, which uses German-city names in
@@ -59,9 +375,31 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 
 ---
 
-## 1. Map drawing  *(owner: map-draw agent — antigenic maps ⚪ SHELVED (kateri); geographic `geo-draw` 🟢 done, incl. clade pies)*
+## 1. Map drawing  *(owner: map-draw agent — 🟢 done: native antigenic renderer is the report default; geographic `geo-draw` done, incl. clade pies)*
 
-> **⚠ COURSE CORRECTION (kateri audit).** Antigenic-**map** drawing is **already implemented
+> **⚠⚠ SUPERSEDING NOTE (2026-09-10) — read this before the two notes that follow.**
+> The "SHELVED / drawing lives in kateri" framing below is **history and is no longer true**.
+> Sequence of events, in order:
+>
+> 1. The C++ antigenic-map renderer was shelved (maps → kateri) — the *kateri audit* note below.
+> 2. It was **revived** (`6d7c685`, Jul 2026) as an AD-ChartDraw fidelity port for the Linux
+>    **whocc-chains** batch path (#7), where kateri (macOS-only) cannot run — brief in
+>    [`cc/map-draw/TODO.md`](cc/map-draw/TODO.md), milestones M1–M7.
+> 3. **P2** then added a *semantic-style interpreter* on top of it (`cc/map-draw/styled-draw.cc`,
+>    `export_styled_map` / `export_styled_maps`) that resolves the **same** `c["R"]` named styles +
+>    `c["p"]` base plot-spec kateri resolves — so it renders **report** maps, not just chains maps.
+> 4. `ae.report` now selects the backend through `AE_REPORT_MAP_RENDERER` and its **default is
+>    `native`** (`py/ae/report/map_renderer.py`; `a7f51c7`). The `export` step's remaining kateri
+>    round-trips have native replacements, so a report run needs **no kateri process**.
+>
+> **kateri is retained for the interactive GUI only** — drag-adjust and live relax
+> (`RLAX`/`LAYT`/`get_moved_points`/`handle_relax`), plus the `AE_REPORT_MAP_RENDERER=kateri`
+> fallback. It is deliberately **not** ported. Current design + milestones:
+> [`P2-RENDER-DESIGN.md`](P2-RENDER-DESIGN.md).
+>
+> Everything below this note is retained as the record of how we got here.
+
+> **⚠ COURSE CORRECTION (kateri audit) — HISTORICAL (superseded by the note above).** Antigenic-**map** drawing is **already implemented
 > in `kateri`** (`github.com/drserajames/kateri`, a Dart/Flutter app — its README: *"antigenic
 > map viewer and pdf generator"*). It does the semantic-style resolution (`lib/src/plot_spec.dart`
 > — the `// implement in kateri!` resolver), interactive viewing, **and headless PDF**
@@ -85,15 +423,17 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done · ⚪ blocked
 >   NOT a kateri job** and remain a genuine **ae-side C++ Cairo renderer still to build** — see
 >   "Remaining ae-side map drawing" below. Don't over-apply the kateri framing to them.
 
+*(Historical — true when written, reversed by the revival in step 2 of the superseding note.)*
 The C++ **antigenic**-map renderer (its M1–M4 milestones and code) has been **removed from this
 branch** — it lives on **`map-draw-shelved`** (`drserajames/map-draw-shelved`) if ever needed as a
 headless fallback. `cc/draw/cairo-surface.*` graduated out of it into shared `cc/draw/`
 infrastructure (used by TAL #3 and the geographic renderer below). What remains under map-draw on
 `ad-port` is the geographic renderer:
 
-### Remaining ae-side map drawing — **geographic time-series maps** *(map-draw agent — in progress)*
+### Geographic time-series maps *(map-draw agent — 🟢 done; all slices below complete)*
 
-The *one* piece of "map drawing" that genuinely belongs in ae C++ (kateri does not do it).
+Written when this was the *one* piece of "map drawing" thought to belong in ae C++ (kateri does
+not do it); the antigenic renderer has since come back too (see the superseding note).
 Needed by **ssm-report #4** for its `geographic_ts` pages (`geo/<VT>-geographic-<YYYY-MM>.pdf`).
 New code lives in **`cc/geo/`** + the **`geo-draw`** CLI; reuses the shared `cc/draw/cairo-surface.*`.
 
@@ -335,9 +675,12 @@ calls `pdf.line()/text()/background()`). Crucially, the **map-draw subsystem #1 
 that TAL is the primary consumer of, not a map-draw deliverable.** TAL should drive any future
 surface additions it needs (Phase B M2+ wants *filled rectangle* and *rotated text* — add them
 to `cc/draw/cairo-surface.*` directly; no map-draw coordination required since #1 is dormant).
-The `ae::draw::Surface` abstraction remains optional/deferred. NOTE: `AntigenicMaps`
+The `ae::draw::Surface` abstraction remains optional/deferred. ~~NOTE: `AntigenicMaps`
 signature-page panels still need *map* rendering — get those map PDFs from **kateri**, not a
-C++ renderer; TAL composes them with the tree.
+C++ renderer; TAL composes them with the tree.~~ **(Superseded 2026-09-10:** #1 is not dormant
+and there **is** a C++ report-grade map renderer — `ae::map_draw::export_styled_map`. On `main`
+the sig-page panels are still kateri-rendered and stitched; the native single-canvas replacement
+is on the unmerged `sigp-vector` branch.**)**
 
 **Milestones:**
 - [x] **Explore `acmacs-tal`; identify the tree-layout + draw entry points.** →
@@ -460,8 +803,11 @@ C++ renderer; TAL composes them with the tree.
       structure matches AD `sp/<prefix>.sp.pdf` (map count/columns track the current `.tal`). Tests:
       `python3 cc/tal/test/test-section-maps.py` (synthetic, no WHO data). Full notes + fidelity gaps:
       [`doc/SIGPAGE.md`](doc/SIGPAGE.md). Built ae-tree for **py3.14** (`build-py314`, `build`→it).
-- [ ] **Remaining (low-value tail only):** `for-each` loops / `max-edge-length` ladderize / other
-      `tal` outputs (`.names`/`.html`). **`clades-whocc` struck** — obsolete in AD (clades assigned
+- [~] **Remaining (low-value tail only) — mostly closed 2026-06-17:** `for-each` loops,
+      `max-edge-length` ladderize and the `.names` output are **done** (see the subsystem table
+      row); the **only** item still outstanding is the **`.html`** interactive tree viewer, which
+      is **deferred, not started** (the seasonal report does not consume it).
+      **`clades-whocc` struck** — obsolete in AD (clades assigned
       upstream at tree-build, stored in the `.tjz`, which `tal-draw` reads; persisted relabelling is
       covered by `Tree::set_clades` + `export`).
 
@@ -547,7 +893,18 @@ C++ renderer; TAL composes them with the tree.
 
 ---
 
-## 4. ssm-report — seasonal report generation  *(owner: report agent — 🟡 assembly core done)*
+## 4. ssm-report — seasonal report generation  *(owner: report agent — 🟢 done; end-to-end reproducible)*
+
+> **⚠ CORRECTION (2026-09-10).** Two things in this section are out of date:
+> **(a)** the report is **complete** — the assembled 36-page report reproduces end-to-end on
+> `ae.report` (the subsystem-table row records the evidence); the milestone checkbox at the end
+> of this section that still reads "*Build the rest of the report-figure pipeline*" is **done**.
+> **(b)** the repeated "figures come from **kateri**, not map-draw" statements are **reversed**:
+> antigenic-map figures now render **natively** by default (`AE_REPORT_MAP_RENDERER=native`,
+> `py/ae/report/map_renderer.py`), with kateri as the opt-in fallback and the interactive tool.
+> Remaining report-side kateri users on `main` are `multiple_circles` and the signature-page
+> section maps — both have native replacements on unmerged branches
+> ([Branch status](#branch-status--unmerged-branches)).
 
 > 🟢 **DONE (py314-kateri agent, 2026-06-18):** the "kateri handshake fails under Python 3.14"
 > report was a **misdiagnosis** — it is **not** an asyncio/kateri-transport bug. The report's
@@ -728,6 +1085,13 @@ Quick, independently-verifiable wins. Each is a small Python script in `bin/` im
 
 ## Reference: current `ae_backend` surface (already ported)
 
-Submodules exposed from [`cc/py/module.cc`](cc/py/module.cc): `chart_v3`, `chart_v2`,
-`seqdb` / `raw_sequence`, `tree`, `virus`, `whocc` (+ `whocc.xlsx`), `locdb_v3`, `utils`.
-No `draw`/`map_draw`, `hidb`, or `tal` submodules yet — those are the gaps above.
+Submodules exposed from [`cc/py/module.cc`](cc/py/module.cc), in registration order
+(re-read from the file 2026-09-10): `seqdb` / `raw_sequence`, `tree`, `virus`,
+`whocc` (+ `whocc.xlsx`), `locdb_v3`, `chart_v3`, `chart_v2`, `utils`, **`tal`**, **`hidb`**,
+**`map_draw`**.
+
+> The earlier line here — *"No `draw`/`map_draw`, `hidb`, or `tal` submodules yet — those are
+> the gaps above"* — is **obsolete**: all three are registered and built. `map_draw` exposes the
+> chains renderer (`export_map`) **and** the P2 styled renderer (`export_styled_map` /
+> `export_styled_maps`). On the unmerged `sigp-vector` branch `tal` additionally exposes
+> `SigPageCanvas` (the single-canvas compositor).
