@@ -151,7 +151,7 @@ namespace ae::map_draw
             // is deliberately low: an untethered label a whole text-height from its point is
             // more confusing than a short connector is ugly.
             const double leader_threshold = std::max(lab.point_radius * 0.6, lab.text_h * 0.75);
-            if (gap > leader_threshold && dist > 1.0e-6) {
+            if (gap > leader_threshold && dist > 1.0e-6 && lab.text_w > 0.0 && lab.text_h > 0.0) {
                 c.leader = true;
                 const double ux = (nx - lab.point_x) / dist, uy = (ny - lab.point_y) / dist;
                 c.lx0 = lab.point_x + ux * lab.point_radius;
@@ -183,6 +183,11 @@ namespace ae::map_draw
         for (std::size_t i = 0; i < labels.size(); ++i) {
             const Candidate c = make_candidate(labels[i], labels[i].offset_x, labels[i].offset_y);
             result[i] = LabelPlacement{c.offset_x, c.offset_y, c.box.x0, c.box.y0, c.box.x1, c.box.y1, false, 0.0, 0.0, 0.0, 0.0};
+            // A zero-size label (the report's `-no-label` style variants set `l.s` to 0, which
+            // draws nothing) is left exactly where it is: it is neither an obstacle nor worth
+            // placing, and tethering to an invisible box would draw a line to nowhere.
+            if (labels[i].text_w <= 0.0 || labels[i].text_h <= 0.0)
+                continue;
             if (labels[i].pinned)
                 ink.push_back(c.box);
             else

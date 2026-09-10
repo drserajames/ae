@@ -102,3 +102,31 @@ corresponding **cached AD PNG**, verified **at high zoom, side-by-side**.
   the montages, known gaps), saved under the test dir with paths listed.
 - **No WHO surveillance data** in committed ae files/comments (real strain names/titers/serum IDs
   stay out of the repo — keep them only in the test dir).
+
+---
+
+## P2 milestone I — point-label auto-placement *(styled path only)*
+
+`cc/map-draw/label-placement.{hh,cc}`, used by `styled-draw.cc` (`export_styled_map`).
+
+**What it does.** A label whose style modifier carries no `l.p` — the operator has not
+hand-adjusted it — is searched into free space instead of always being dropped straight below
+its point, and gets an AD-style tether (`LabelTether{BLACK, 0.3px}`) when it ends up far enough
+away that the association would otherwise be lost. Labels with an authored `l.p` are honoured
+verbatim and become obstacles for the rest. Candidates are enumerated in kateri's *offset
+space*, so a placed label renders through the same `label_offset()` mapping as an authored one,
+and kateri's `[0, 1]` default is the first candidate (with a small bonus) — an unobstructed
+label does not move.
+
+**There is no AD algorithm to port.** AD's `acmacs-draw` `Points::draw_labels` (and the obsolete
+`map_elements::Labels::draw`) just evaluate `PointLabel::text_offset()` for the authored offset
+hint and draw; kateri's `addPointLabel` does the same. Neither has collision avoidance or leader
+lines — the report's per-chart `lox`/`loy` table means the human is the placement algorithm. The
+solver therefore follows the one auto-placer already in the tree, `cc/tal/draw-tree.cc`'s MRCA
+placer (discrete candidates + continuous penetration penalty + iterated best response), scaled
+down for the handful of labels a map carries.
+
+**Deliberately NOT applied to the chains path** (`draw.cc` `export_map` / `mark_vaccines`). That
+renderer's acceptance criterion is a pixel match against the frozen AD PNGs (M7 above), and AD
+draws those vaccine labels at a fixed offset with no placement pass — auto-placing them would
+*lower* chains fidelity. Verified: the chains CLI output is byte-identical before and after.
