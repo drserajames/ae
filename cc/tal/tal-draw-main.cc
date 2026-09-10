@@ -15,6 +15,23 @@
 // (Newick or phylo-tree-v3 JSON) to a PDF. Mirrors chart-draw (subsystem #1);
 // Cairo is linked only into this target. See cc/tal/PORTING.md.
 
+// Usage text. Printed to stdout for an explicit --help (exit 0) and to stderr on a
+// usage error (exit 1). Without this, an unrecognised or misspelt flag (or --help itself)
+// fell through to the positional arguments and was used as the *output path* — tal-draw
+// wrote a file literally named after the flag instead of erroring.
+static std::string usage(std::string_view prog)
+{
+    return fmt::format("Usage: {0} [--settings=config.json] [--labels] [--color-by-clade] [--clades]\n"
+                       "          [--color-by-continent] [--color-by-pos=N]\n"
+                       "          [--time-series] [--interval=year|month|week|day] [--legend] [--geo-inset] [--aa-transitions]\n"
+                       "          [--ladderize=none|number-of-leaves|max-edge-length]\n"
+                       "          [--title=TEXT] <tree.newick|tree.json[.xz]> <output.pdf|.names> [image-size-px]\n"
+                       "  --settings=FILE loads all draw options (incl. per-clade colour/name overrides) from\n"
+                       "  a JSON config; other flags are ignored when it is given (image-size-px still overrides).\n"
+                       "  --help, -h      show this help\n",
+                       prog);
+}
+
 int main(int argc, char* const argv[])
 {
     int exit_code = 0;
@@ -65,19 +82,21 @@ int main(int argc, char* const argv[])
                 settings_file = arg.substr(11);
             else if (arg.substr(0, 15) == "--mrca-sidecar=")
                 mrca_sidecar = std::string{arg.substr(15)};
+            else if (arg == "--help" || arg == "-h") {
+                fmt::print("{}", usage(argv[0]));
+                return 0;
+            }
+            else if (arg.size() > 1 && arg[0] == '-') {
+                // Never treat an option-looking argument as a path: an unknown (or
+                // malformed) flag used to become the output filename.
+                fmt::print(stderr, "ERROR: unrecognised or incomplete option: {}\n{}", arg, usage(argv[0]));
+                return 1;
+            }
             else
                 positional.push_back(arg);
         }
         if (positional.size() < 2) {
-            fmt::print(stderr,
-                       "Usage: {} [--settings=config.json] [--labels] [--color-by-clade] [--clades]\n"
-                       "          [--color-by-continent] [--color-by-pos=N]\n"
-                       "          [--time-series] [--interval=year|month|week|day] [--legend] [--geo-inset] [--aa-transitions]\n"
-                       "          [--ladderize=none|number-of-leaves|max-edge-length]\n"
-                       "          [--title=TEXT] <tree.newick|tree.json[.xz]> <output.pdf|.names> [image-size-px]\n"
-                       "  --settings=FILE loads all draw options (incl. per-clade colour/name overrides) from\n"
-                       "  a JSON config; other flags are ignored when it is given (image-size-px still overrides).\n",
-                       argv[0]);
+            fmt::print(stderr, "{}", usage(argv[0]));
             return 1;
         }
         // --settings provides the full declarative config; a positional image-size still wins.
