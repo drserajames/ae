@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <numbers>
 #include <string>
 
@@ -364,6 +365,20 @@ namespace ae::draw
         cairo_text_extents_t ext;
         cairo_text_extents(context_, str.c_str(), &ext);
         return {ext.width, ext.height};
+    }
+
+    std::pair<double, double> CairoPdf::text_ink_height(std::string_view utf8, double font_size, bool helvetica)
+    {
+        const std::string str{utf8};
+        // Same face and same fontScaleToMatchCanvas as text_size/text_font, so the extents describe
+        // the glyphs those two would lay down. cairo's y_bearing is the ink top measured from the
+        // baseline with y growing DOWN, i.e. negative for anything above it.
+        const double scaled = helvetica ? font_size * kFontScaleToMatchCanvas : font_size;
+        cairo_select_font_face(context_, helvetica ? "Helvetica" : "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, scaled);
+        cairo_text_extents_t ext;
+        cairo_text_extents(context_, str.c_str(), &ext);
+        return {std::max(0.0, -ext.y_bearing), std::max(0.0, ext.y_bearing + ext.height)};
     }
 
 } // namespace ae::draw
