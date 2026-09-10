@@ -6,7 +6,8 @@ ae.report.main_loop — the async command loop and command-marking decorators.
 `main_loop()` is the entry point a report driver script calls: it parses the CLI, starts
 the kateri and socket-server tasks (unless the chosen command opts out), and runs a
 `MainLoop`. Commands are ordinary methods on the driver's commander marked with the
-`@command` decorator; `@no_kateri`, `@headless` and `@no_loop` tune how the loop runs them.
+`@command` decorator; `@no_kateri`, `@headless`, `@no_loop` and `@interactive_kateri` tune
+how the loop runs them.
 `MainLoop` runs the command once and, unless `@no_loop`, keeps running — a
 `MainModuleWatcher` reloads changed source and re-runs. Ported from the vcm ssm-report
 tooling.
@@ -56,6 +57,9 @@ def main_loop(start_kateri: bool = True) -> NoReturn:
         from .map_renderer import native_selected
         cmd = getattr(commander, args.command)
         no_kateri_cmd = getattr(cmd, "main_loop_no_kateri", False)
+        # @interactive_kateri: kateri for a person at a terminal, kateri-free for scripts.
+        if not no_kateri_cmd and getattr(cmd, "main_loop_interactive_kateri", False) and not kateri_wanted():
+            no_kateri_cmd = True
         headless = getattr(cmd, "main_loop_headless", False)
         if start_kateri and not no_kateri_cmd and not (headless and native_selected()):
             tasks: list[Task] = [kateri.KateriTask(headless=headless), kateri.SocketServerTask()]
@@ -109,6 +113,35 @@ def headless(cmd: Callable) -> Callable:
     the command as "needs no visible kateri", which `main_loop` uses to skip launching kateri
     altogether when the native map renderer is selected."""
     cmd.main_loop_headless = True
+    return cmd
+
+def kateri_wanted() -> bool:
+    """Whether this run should get a visible kateri: a person running `./0do <cmd>` at a
+    terminal does, a scripted / batch / background run does not.
+
+    The discriminator is "is stdout a terminal". Every scripted path redirects it — the
+    report's own repro wrappers run `( cd $FOLDER && ./0do $cmd ) >/dev/null 2>&1 &`
+    (scripts/repro/headless-lib.sh `kat`/`noka`), and so do nohup / CI / cron runs — while an
+    interactive invocation leaves it on the tty. `AE_REPORT_KATERI=1` forces kateri on
+    (e.g. when piping through `tee`), `AE_REPORT_KATERI=0` forces it off."""
+    forced = os.environ.get("AE_REPORT_KATERI")
+    if forced is not None:
+        return forced.strip().lower() not in ("", "0", "no", "false", "off")
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):  # detached / closed stdout
+        return False
+
+def interactive_kateri(cmd: Callable) -> Callable:
+    """decorator for a command that *shows* its result in kateri but does not need it: launch
+    kateri on an interactive run, stay kateri-free otherwise — see `kateri_wanted`. A softer
+    `@no_kateri`, and orthogonal to `@no_loop`: it decides only whether kateri is launched,
+    never how long the loop runs (a `@no_loop` command still exits after one pass, closing
+    the window with it).
+
+    The command must write its output *before* touching the communicator, so the kateri-free
+    path produces exactly the same files."""
+    cmd.main_loop_interactive_kateri = True
     return cmd
 
 def no_loop(cmd: Callable) -> Callable:

@@ -23,7 +23,7 @@ from ae import semantic
 
 import ae.report.download
 import ae.report.dirs
-from .main_loop import command, no_kateri, no_loop, headless
+from .main_loop import command, no_kateri, no_loop, headless, interactive_kateri
 from .chart_modifier import ChartModifier
 from . import map_renderer
 from .map_renderer import get_map_renderer
@@ -60,21 +60,36 @@ class CommanderBasic:
         return chart_modifier
 
     @command
-    @no_kateri
+    @interactive_kateri
     @no_loop
-    def prestyle(self) -> ChartModifier:
+    async def prestyle(self) -> ChartModifier:
         """`prestyle` command: build prestyles on the downloaded chart, write `prestyled.ace`
-        and link `adjusted.ace`. No kateri.
+        and link `adjusted.ace`; on an interactive run, show the prestyled map in kateri.
 
-        This used to launch kateri solely to bake the legacy plot spec (`c["p"]`) into the
-        chart (`export_to_legacy` + `get_chart`). That `c["p"]` is no longer consumed —
-        `multiple_circles` now resolves clade fills from the semantic styles (`c["R"]`)
-        directly — so the bake and its kateri round-trip are removed; the in-memory prestyled
-        chart is serialised natively instead."""
+        Single-shot as it has always been (`@no_loop`): the window comes up with the map on it
+        and goes away with the command — unlike `style`, prestyle does not hold it open. It is
+        the operator's look at the map before choosing the rotations / outlier moves that
+        follow (`chart-rotate`, `adjust/0do`).
+
+        `prestyled.ace` is written natively and unconditionally *before* kateri is touched, so
+        a scripted run (which gets no kateri — `@interactive_kateri`) produces exactly the same
+        files. The `get_viewport` await is only a round-trip: it makes kateri actually take and
+        draw the chart before `@no_loop` tears the app down, which a fire-and-forget
+        `send_chart` would not.
+
+        The kateri round-trip this command used to make was a different thing: it baked the
+        legacy plot spec (`c["p"]`) via `export_to_legacy` + `get_chart` and only then wrote
+        the chart. Nothing consumes `c["p"]` any more — `multiple_circles` resolves clade fills
+        from the semantic styles (`c["R"]`) directly — so the bake stays gone; only the display
+        is kept."""
         chart_modifier = self.chart_modifier(ae.report.dirs.VcmDirs.downloaded_filename())
         chart_modifier.populate_for_prestyle()
         chart_modifier.chart.write(ae.report.dirs.VcmDirs.prestyled_filename())
         ae.report.dirs.VcmDirs.link_adjusted()
+        if kateri.communicator.is_connected():
+            kateri.communicator.send_chart(chart_modifier.chart)
+            kateri.communicator.set_style(chart_modifier.style_for_legacy_plot_spec())
+            await kateri.communicator.get_viewport()   # round-trip: ensure the map is drawn
         return chart_modifier
 
     @command
