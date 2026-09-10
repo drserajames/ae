@@ -710,10 +710,11 @@ def _sig_page_layout(n_maps: int, tree_aspect: float, *, margin_mm: float = 2.0,
                      paper_h_mm: float = 210.0) -> tuple[float, float, tuple, list]:
     """Auto-width signature-page geometry (a device-space port of `compose_grid`'s
     ``auto_width`` branch). Returns ``(page_w_mm, page_h_mm, tree_rect_mm, cell_rects_mm)``
-    with every rect ``(x, y, w, h)`` in mm from the page top-left. The maps fill an
-    ``rows x cols`` grid column-major (``cols = ceil(n / 3)``, AD lays the maps 3 rows
-    high), sized so the grid (and the tree) are ``grid_h`` tall and the page width grows
-    with the column count."""
+    with every rect ``(x, y, w, h)`` in mm from the page top-left. The maps fill a
+    ``rows x cols`` grid **row-major** — left to right, then down (``cols = ceil(n / 3)``,
+    AD lays the maps 3 rows high) — which is `compose_grid`'s fill order: its auto_width
+    branch builds row *r* from ``range(r * cols, (r + 1) * cols)``. Cells are sized so the
+    grid (and the tree) are ``grid_h`` tall and the page width grows with the column count."""
     cols = max(1, math.ceil(n_maps / 3))            # AD lays the maps 3 rows high
     rows = math.ceil(n_maps / cols) if n_maps else 1
     avail_h = paper_h_mm - 2.0 * margin_mm - 10.0
@@ -734,7 +735,7 @@ def _sig_page_layout(n_maps: int, tree_aspect: float, *, margin_mm: float = 2.0,
     grid_left = margin_mm + tree_w + panel_gap
     cells = []
     for i in range(n_maps):
-        r, c = divmod(i, cols)                       # row-major, matching compose_grid's auto_width pdfjam baseline
+        r, c = divmod(i, cols)                       # row-major = compose_grid's row r = range(r*cols, (r+1)*cols)
         cells.append((grid_left + c * (cell + col_gap), margin_mm + r * (cell + row_gap), cell, cell))
     return page_w, page_h, tree_rect, cells
 
@@ -814,7 +815,8 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         tx, ty, tw, th = (v * _MM2PT for v in tree_rect)
 
         canvas = ae_backend.tal.SigPageCanvas(str(output), page_w_pt, page_h_pt)
-        # Section maps: one job per style, framed, in device points (column-major top-to-bottom).
+        # Section maps: one job per style, framed, in device points; `cells` are already in
+        # compose_grid's row-major fill order (left to right, then down) — see _sig_page_layout.
         jobs = [(styled[i]["name"], cells[i][0] * _MM2PT, cells[i][1] * _MM2PT,
                  cells[i][2] * _MM2PT, cells[i][3] * _MM2PT, True) for i in range(len(styled))]
         canvas.render_maps(str(styled_ace), 0, float(map_width), jobs)
