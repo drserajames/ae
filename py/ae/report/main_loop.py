@@ -27,8 +27,9 @@ from .modules import Modules
 def main_loop(start_kateri: bool = True) -> NoReturn:
     """Entry point for a report driver script: parse the CLI (`--command-list`, or a command
     name plus `-e/--exit-on-exception`), chdir to the driver's directory, spin up the kateri
-    + socket-server tasks (unless the command is `@no_kateri`), and run the async `MainLoop`.
-    Exits the process; never returns normally."""
+    + socket-server tasks (unless the command is `@no_kateri`, or is a `@headless` batch
+    command and the native map renderer is selected), and run the async `MainLoop`. Exits the
+    process; never returns normally."""
 
     commander = Modules.commander()
 
@@ -44,16 +45,19 @@ def main_loop(start_kateri: bool = True) -> NoReturn:
     if args.command:
         os.chdir(Path(sys.argv[0]).parent)
         # P2: with the native map renderer selected (AE_REPORT_MAP_RENDERER unset/native) the
-        # whole report runs kateri-free — the map-PDF, styled.ace and sig-page-mapi kateri
-        # round-trips are all replaced by in-process native code (see map_renderer.py). So do
-        # NOT launch the kateri app / socket server in native mode; only the opt-in kateri
-        # backend needs them. (Without this guard main_loop still spawned kateri for `export`
-        # et al. because those commands are not @no_kateri — defeating the P2 "no kateri
-        # process" goal and hard-failing where kateri/socket bind is unavailable.)
+        # *batch* commands run kateri-free — their map-PDF, styled.ace and sig-page-mapi kateri
+        # round-trips are all replaced by in-process native code (see map_renderer.py) — so do
+        # NOT launch the kateri app / socket server for them. Those are exactly the @headless
+        # commands (`export`, `serum_coverage_export`, …): @headless already means "batch PDF
+        # export, no visible window needed". The interactive commands (`style`,
+        # `serum_coverage`) are NOT @headless and still need a real kateri to display and drag
+        # points in, whatever the map-render backend is — kateri remains the interactive
+        # viewer. The opt-in kateri backend keeps launching it for everything, as before.
         from .map_renderer import native_selected
-        no_kateri_cmd = getattr(getattr(commander, args.command), "main_loop_no_kateri", False)
-        if start_kateri and not no_kateri_cmd and not native_selected():
-            headless = getattr(getattr(commander, args.command), "main_loop_headless", False)
+        cmd = getattr(commander, args.command)
+        no_kateri_cmd = getattr(cmd, "main_loop_no_kateri", False)
+        headless = getattr(cmd, "main_loop_headless", False)
+        if start_kateri and not no_kateri_cmd and not (headless and native_selected()):
             tasks: list[Task] = [kateri.KateriTask(headless=headless), kateri.SocketServerTask()]
         else:
             tasks: list[Task] = []
@@ -101,7 +105,9 @@ def no_kateri(cmd: Callable) -> Callable:
 def headless(cmd: Callable) -> Callable:
     """decorator to launch kateri headless (window parked off-screen, app kept out of the
     Dock/menu-bar) for batch PDF-export commands — no window pop-up or focus steal. Do NOT use
-    on interactive commands (style/adjust) that need a visible, draggable window."""
+    on interactive commands (style/adjust) that need a visible, draggable window. It also marks
+    the command as "needs no visible kateri", which `main_loop` uses to skip launching kateri
+    altogether when the native map renderer is selected."""
     cmd.main_loop_headless = True
     return cmd
 
