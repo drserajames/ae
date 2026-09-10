@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <numbers>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -924,7 +926,14 @@ namespace ae::map_draw
         // Milestone I: labels the operator has NOT hand-placed (no `l.p` on the chart) are
         // auto-placed into free space, with an AD-style tether when they end up far from their
         // point; authored offsets are honoured verbatim. See cc/map-draw/label-placement.hh.
+        //
+        // This is the one place the native renderer deliberately draws something neither AD nor
+        // kateri would (both simply honour the offset hint), so it is switchable: setting
+        // AE_MAP_DRAW_LABEL_AUTOPLACE=0 pins every label to its offset, which is what the
+        // fidelity harness needs when it measures parity against a kateri golden.
         {
+            const char* const autoplace_env = std::getenv("AE_MAP_DRAW_LABEL_AUTOPLACE");
+            const bool autoplace = autoplace_env == nullptr || std::string_view{autoplace_env} != "0";
             std::vector<size_t> label_points; // parallel to `requests`
             std::vector<LabelRequest> requests;
             std::vector<LabelObstacle> obstacles;
@@ -940,7 +949,7 @@ namespace ae::map_draw
                 if (!p.has_label)
                     continue;
                 const auto [tw, th] = surface.text_size(p.label_text, p.label_size, true);
-                requests.push_back(LabelRequest{cx, cy, r, tw, th, p.label_dx, p.label_dy, p.label_offset_authored});
+                requests.push_back(LabelRequest{cx, cy, r, tw, th, p.label_dx, p.label_dy, p.label_offset_authored || !autoplace});
                 label_points.push_back(i);
             }
             if (legend_shown)
