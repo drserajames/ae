@@ -240,10 +240,19 @@ arch -arm64 /opt/homebrew/bin/ninja -C build-py314
 ln -sfn build-py314 build
 ```
 
-> The final `Generating ae_backend_stubs` step may print `ae_backend: Failed to import,
-> skipping` — the build-time stub generator can't import the freshly-linked module. It is
-> non-fatal (ninja exits 0) and does not affect the module; `PYTHONPATH=build-py314` import
-> works.
+> The final `Generating ae_backend_stubs` step is **best-effort and never fatal**. The .pyi
+> stubs are a mypy/IDE convenience, not part of the library, so it runs through
+> [`tools/gen-stubs.sh`](tools/gen-stubs.sh), which prefers the *build* interpreter's own
+> `mypy.stubgen`, falls back to `stubgen` on `PATH`, and warns + exits 0 when neither works
+> (no mypy installed, or — as on this machine — a `PATH` stubgen belonging to an
+> architecture-broken Python 3.10 that cannot import a `cpython-314` arm64 extension anyway).
+> Expect a `[warn] gen-stubs: …` line; ninja still exits 0 and the module is unaffected.
+> To actually get stubs: `/opt/homebrew/bin/python3.14 -m pip install mypy`.
+>
+> Before this was wired up, `find_program('stubgen')` resolved to that broken 3.10 stubgen and
+> the target failed — and because it is the *last* target, ninja exited 1 after all 253 real
+> targets had succeeded, so `build.sh` (running under `set -e`) died before creating the
+> `build/` symlink or running the arch/import verification.
 
 ### Why the arm64 meson and ninja matter
 
@@ -361,16 +370,40 @@ failure" in the ssm-report `style` step) was found and fixed this way on 2026-06
 ## Build system (standard path)
 
 **Preferred:** run **`./build.sh`** — a self-checking wrapper that encodes the working
-arm64/Apple-Clang/py3.14 recipe below (preflight checks, generated native file, `arch -arm64`
-meson/ninja, `CMAKE_POLICY_VERSION_MINIMUM=3.5`, CA-bundle → `SSL_CERT_FILE`, arch+import verify,
-`build/`→`build-py314/`). Then `source ae-env.sh` to set `AE_ROOT`/`PYTHONPATH`/data vars.
-`./build.sh check` runs preflight only. (Added on the `build-onboarding` branch.)
+arm64/Apple-Clang/py3.14 recipe below (preflight checks, generated native file, subprojects
+bootstrap, `arch -arm64` meson/ninja, `CMAKE_POLICY_VERSION_MINIMUM=3.5`, CA-bundle →
+`SSL_CERT_FILE`, arch+import verify, `build/`→`build-py314/`). Then `source ae-env.sh` to set
+`AE_ROOT`/`PYTHONPATH`/data vars. `./build.sh check` runs preflight only. (Added on the
+`build-onboarding` branch.)
 
-> **Fresh-checkout gotcha:** meson downloads the vendored subprojects (wraps) over HTTPS using the
-> build Python. Homebrew's **python@3.14 ships no CA bundle**, so on a clean `subprojects/` every
-> wrap download fails with `CERTIFICATE_VERIFY_FAILED`. Export `SSL_CERT_FILE` to a cert bundle
-> (`/etc/ssl/cert.pem` or `brew --prefix ca-certificates`/…/cacert.pem) — `build.sh` does this
-> automatically. The existing checkout hides the problem because its wraps are already cached.
+> **Fresh-checkout gotcha 1 — CA bundle.** meson downloads the vendored subprojects (wraps) over
+> HTTPS using the build Python. Homebrew's **python@3.14 ships no CA bundle**, so on a clean
+> `subprojects/` every wrap download fails with `CERTIFICATE_VERIFY_FAILED`. Export `SSL_CERT_FILE`
+> to a cert bundle (`/etc/ssl/cert.pem` or `brew --prefix ca-certificates`/…/cacert.pem) —
+> `build.sh` does this automatically. An existing checkout hides the problem because its wraps are
+> already cached.
+
+> **Fresh-checkout gotcha 2 — git-metadata writes in `subprojects/`.** Populating a clean
+> `subprojects/` needs two writes that **sandboxes protecting VCS metadata refuse anywhere inside
+> the project** (agent sandboxes do this):
+> - a **git repository** — `lexy` and `range-v3` are `[wrap-git]`, so meson runs `git clone`
+>   straight into `subprojects/`, and git writes `.git/config` and copies the template hooks into
+>   `.git/hooks/`: *"cannot copy '…/templates/hooks/commit-msg.sample' to
+>   '…/subprojects/lexy/.git/hooks/commit-msg.sample': Operation not permitted"* → `meson setup`
+>   dies with **"Git command failed"**;
+> - a **`.gitmodules` file** — several `[wrap-file]` release tarballs (e.g. xlnt) contain one, and
+>   meson's archive extraction dies with *"failed to unpack archive … Operation not permitted:
+>   '…/subprojects/xlnt-1.5.0/.gitmodules'"*.
+>
+> `build.sh` **handles this**: it probes whether `subprojects/` accepts those writes and, if not,
+> has meson resolve every wrap into a throwaway project under `$TMPDIR` (where the writes are
+> allowed) and copies the resulting directories in, minus their dot-entries — all wrap semantics
+> (hashes, `patch_directory` overlays, `patch_url`, git revisions) stay with meson. Downloads are
+> retried up to 3× (short reads show up as hash mismatches). In a normal, unsandboxed shell the
+> probe passes and this is a no-op. If the bootstrap cannot complete, `build.sh` **stops with an
+> actionable message** naming the manual fallback
+> (`rsync -a --exclude='.*' /path/to/other/ae/subprojects/ ./subprojects/`) rather than failing
+> obscurely inside meson.
 
 Legacy path (do **not** use):
 
