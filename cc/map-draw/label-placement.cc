@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -77,11 +78,20 @@ namespace ae::map_draw
 
         // Clearance kept between a label box and the ink it must avoid, in em.
         constexpr double kBoxPadEm = 0.12;
-        // `inside` mode: fraction of the point's inscribed box the text may use, and the font
+        // `inside` mode: fraction of the point's radius the text block may reach, and the font
         // size below which shrinking stops (whichever of the two floors is larger).
         constexpr double kInsideFitMargin = 0.95;
         constexpr double kInsideMinFontSize = 5.0;    // device px / PDF points
         constexpr double kInsideMinFontFactor = 0.35; // of the authored label size
+        // Baseline-to-baseline distance of a multi-line inside label, in em. Tighter than a
+        // normal paragraph's leading — these are one-word lines of caps and digits, and every
+        // em of block height is font size the fit has to give back.
+        constexpr double kInsideLinePitch = 1.12;
+        constexpr std::size_t kInsideMaxLines = 3;
+        constexpr std::size_t kInsideMaxTokens = 6; // beyond this the tail is not split further
+        // An extra line must buy at least this much font size to be worth it — otherwise the
+        // name stays on one line. Splitting is a means to a bigger label, not an end.
+        constexpr double kInsideSplitGain = 1.05;
         // Hysteresis toward kateri's [0, 1] default, so a label with no real reason to move
         // does not drift off it and the render stays as close to the pre-auto-placement one
         // as the collisions allow.
@@ -210,6 +220,60 @@ namespace ae::map_draw
             return c;
         }
 
+        // ---- `inside` mode: breaking a name across lines ----
+
+        // The name's own separators, as [begin, end) offsets into it. A break goes AFTER a '/'
+        // or '-' (the separator stays with the line it terminates, so "XY/1234/25" can become
+        // "XY/" + "1234/25") and at a space (which is dropped). Nothing is ever split
+        // mid-token: an arbitrary break inside "1234" reads as a different number.
+        std::vector<std::pair<std::size_t, std::size_t>> split_tokens(std::string_view text)
+        {
+            std::vector<std::pair<std::size_t, std::size_t>> tokens;
+            std::size_t start = 0;
+            for (std::size_t i = 0; i < text.size(); ++i) {
+                if ((text[i] == '/' || text[i] == '-') && i + 1 < text.size()) {
+                    tokens.emplace_back(start, i + 1);
+                    start = i + 1;
+                }
+                else if (text[i] == ' ') {
+                    if (i > start)
+                        tokens.emplace_back(start, i);
+                    start = i + 1;
+                }
+            }
+            if (start < text.size())
+                tokens.emplace_back(start, text.size());
+            if (tokens.empty()) // all-whitespace: one unbreakable token, so the caller has a line
+                tokens.emplace_back(0, text.size());
+            // A name with more separators than this would blow the arrangement count for no
+            // gain — keep the head and leave the tail as one unbreakable token.
+            if (tokens.size() > kInsideMaxTokens) {
+                const auto last = tokens.back().second;
+                tokens.resize(kInsideMaxTokens);
+                tokens.back().second = last;
+            }
+            return tokens;
+        }
+
+        // Radius of the smallest circle, concentric with the point, that contains a block of
+        // `n` lines measured {advance, ink above baseline, ink below baseline} and stacked
+        // `pitch` apart. The block is centred on its INK (not on the em boxes), and each line
+        // is tested at its own corners — which is the whole reason splitting pays: a circle is
+        // widest across its middle, so a middle line may be far wider than a top one.
+        double block_radius(const std::vector<std::array<double, 3>>& lines, double pitch)
+        {
+            const double top = -lines.front()[1];
+            const double bottom = static_cast<double>(lines.size() - 1) * pitch + lines.back()[2];
+            const double mid = (top + bottom) / 2.0;
+            double radius = 0.0;
+            for (std::size_t i = 0; i < lines.size(); ++i) {
+                const double baseline = static_cast<double>(i) * pitch - mid;
+                const double extreme = std::max(std::abs(baseline - lines[i][1]), std::abs(baseline + lines[i][2]));
+                radius = std::max(radius, std::hypot(lines[i][0] / 2.0, extreme));
+            }
+            return radius;
+        }
+
     } // namespace
 
     // ----------------------------------------------------------------------
@@ -256,13 +320,87 @@ namespace ae::map_draw
         return label;
     }
 
-    double inside_font_size(double font_size, double text_w, double text_h, double point_radius)
+    InsideBlock inside_block(std::string_view label, double font_size, double point_radius, const InsideMeasure& measure)
     {
-        const double diagonal = std::hypot(text_w, text_h);
-        // The largest text box of this aspect ratio inscribed in the point has diagonal 2r.
-        const double fitting = diagonal > 0.0 ? font_size * (2.0 * point_radius * kInsideFitMargin / diagonal) : font_size;
+        const std::string_view text = strip_passage_suffix(label);
+        InsideBlock block{};
+        block.font_size = std::max(0.0, font_size);
+        if (text.empty() || font_size <= 0.0 || point_radius <= 0.0 || !measure) {
+            // A zero-size label (the report's `-no-label` variants set `l.s` to 0) or an empty
+            // one: hand back an empty block, which the caller measures as a 0 x 0 box and skips.
+            block.font_size = 0.0;
+            return block;
+        }
+
+        const auto tokens = split_tokens(text);
+        const auto line_text = [text, &tokens](std::size_t first, std::size_t last) { // inclusive token range
+            return text.substr(tokens[first].first, tokens[last].second - tokens[first].first);
+        };
+        // Everything is measured once at the authored size and scaled: within a font the metrics
+        // are linear in size to well under a pixel, and the winner is re-measured at the size it
+        // is actually drawn at before anything is positioned.
+        const double pitch = font_size * kInsideLinePitch;
+        std::vector<std::array<double, 3>> measured;
+        std::vector<std::size_t> best_cuts, cuts;
+        double best_fit = 0.0;
+
+        // Arrangements: every way of cutting the token sequence into at most kInsideMaxLines
+        // contiguous groups. One bit per internal boundary — a handful of masks for a name.
+        const std::size_t boundaries = tokens.size() - 1;
+        for (unsigned mask = 0; mask < (1u << boundaries); ++mask) {
+            const auto lines = static_cast<std::size_t>(std::popcount(mask)) + 1;
+            if (lines > kInsideMaxLines)
+                continue;
+            cuts.clear();
+            measured.clear();
+            std::size_t first = 0;
+            for (std::size_t b = 0; b <= boundaries; ++b) {
+                if (b == boundaries || (mask & (1u << b)) != 0) {
+                    measured.push_back(measure(line_text(first, b), font_size));
+                    cuts.push_back(b);
+                    first = b + 1;
+                }
+            }
+            const double radius = block_radius(measured, pitch);
+            if (radius <= 0.0)
+                continue;
+            // The size this arrangement would render at, capped at the authored size so that
+            // arrangements which all fit comfortably tie and the fewest-lines one keeps the win.
+            const double fit = std::min(font_size, font_size * point_radius * kInsideFitMargin / radius);
+            const double needed = cuts.size() > best_cuts.size() ? best_fit * kInsideSplitGain : best_fit;
+            if (fit > needed) {
+                best_fit = fit;
+                best_cuts = cuts;
+            }
+        }
+        if (best_cuts.empty())
+            best_cuts.push_back(boundaries);
+
+        // A name that cannot reach the floor is drawn AT the floor and overflows its point —
+        // with the arrangement that overflows least, which is the same one that fitted largest.
         const double floor_size = std::max(kInsideMinFontSize, font_size * kInsideMinFontFactor);
-        return std::clamp(fitting, std::min(floor_size, font_size), font_size);
+        block.font_size = std::clamp(best_fit, std::min(floor_size, font_size), font_size);
+
+        // Re-measure the winner at the size it will be drawn at, then stack the lines and centre
+        // the block's ink on the point.
+        measured.clear();
+        std::size_t first = 0;
+        for (const std::size_t b : best_cuts) {
+            const std::string_view line = line_text(first, b);
+            measured.push_back(measure(line, block.font_size));
+            block.lines.push_back(InsideLine{std::string{line}, measured.back()[0], 0.0});
+            first = b + 1;
+        }
+        const double drawn_pitch = block.font_size * kInsideLinePitch;
+        const double top = -measured.front()[1];
+        const double bottom = static_cast<double>(measured.size() - 1) * drawn_pitch + measured.back()[2];
+        const double mid = (top + bottom) / 2.0;
+        for (std::size_t i = 0; i < block.lines.size(); ++i) {
+            block.lines[i].baseline_dy = static_cast<double>(i) * drawn_pitch - mid;
+            block.width = std::max(block.width, block.lines[i].width);
+        }
+        block.height = bottom - top;
+        return block;
     }
 
     // ----------------------------------------------------------------------
@@ -281,11 +419,12 @@ namespace ae::map_draw
 
         std::vector<std::size_t> autos; // indexes into `labels` that we actually place
         for (std::size_t i = 0; i < labels.size(); ++i) {
-            // `inside` mode drops each auto label onto offset [0, 0] — kateri's "blended
-            // across the point" branch of label_offset(), i.e. the text box centred on the
-            // point centre. Nothing to search: the whole point of the mode is that the label
-            // sits ON the thing it names.
-            const bool centre_in_point = mode == LabelMode::inside && !labels[i].pinned;
+            // `inside` mode drops EVERY label onto offset [0, 0] — kateri's "blended across
+            // the point" branch of label_offset(), i.e. the text box centred on the point
+            // centre. Nothing to search: the whole point of the mode is that the label sits ON
+            // the thing it names. An authored offset says where OUTSIDE the point the operator
+            // wants the label, which this mode has no use for, so it is overridden.
+            const bool centre_in_point = mode == LabelMode::inside;
             const Candidate c = centre_in_point ? make_candidate(labels[i], 0.0, 0.0, false) : make_candidate(labels[i], labels[i].offset_x, labels[i].offset_y, false);
             result[i] = LabelPlacement{c.offset_x, c.offset_y, c.box.x0, c.box.y0, c.box.x1, c.box.y1, false, 0.0, 0.0, 0.0, 0.0};
             // A zero-size label (the report's `-no-label` style variants set `l.s` to 0, which

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -926,9 +927,11 @@ namespace ae::map_draw
         // Milestone I: labels the operator has NOT hand-placed (no `l.p` on the chart) are
         // placed by cc/map-draw/label-placement.{hh,cc} in one of three modes — `auto`
         // (default: overlap-avoided, no leader lines), `auto-lines` (the same search plus an
-        // AD-style tether when the label lands far from its point), `inside` (drawn centred in
-        // the point at a shrunk font, passage suffix stripped) — or not placed at all
-        // (`off`/`0`). Authored offsets are honoured verbatim in every mode.
+        // AD-style tether when the label lands far from its point), `inside` (every label
+        // drawn centred in its point, split across lines and shrunk to fit, passage suffix
+        // stripped) — or not placed at all (`off`/`0`). Authored offsets are honoured verbatim
+        // in every mode except `inside`, which is about the one place an outside-placement hint
+        // cannot mean anything and so overrides it.
         //
         // This is the one place the native renderer deliberately draws something neither AD nor
         // kateri would (both simply honour the offset hint), so it is switchable: the caller
@@ -937,8 +940,19 @@ namespace ae::map_draw
         // measures parity against a kateri golden.
         {
             const LabelMode mode = label_mode.value_or(label_mode_from_env());
-            // Text + font size as DRAWN, parallel to `requests` (`inside` mode strips and shrinks).
+            const bool inside_mode = mode == LabelMode::inside;
+            // Text + font size as DRAWN, parallel to `requests`; in `inside` mode the text has
+            // been broken into lines and shrunk instead, and `label_blocks` carries it.
             std::vector<std::pair<std::string, double>> label_draw;
+            std::vector<InsideBlock> label_blocks;
+            // inside_block owns the arrangement search but not the metrics — hand it the
+            // Helvetica ones the labels are drawn with.
+            const InsideMeasure measure = [&surface](std::string_view text, double font_size) {
+                const auto [w, h] = surface.text_size(text, font_size, true);
+                (void)h; // the em; the fit needs this string's real ink extent instead
+                const auto [above, below] = surface.text_ink_height(text, font_size, true);
+                return std::array<double, 3>{w, above, below};
+            };
             std::vector<LabelRequest> requests;
             std::vector<LabelObstacle> obstacles;
             obstacles.reserve(order.size() + 2);
@@ -952,20 +966,20 @@ namespace ae::map_draw
                 obstacles.push_back(LabelObstacle{cx - r, cy - r, cx + r, cy + r}); // every drawn point is ink
                 if (!p.has_label)
                     continue;
-                const bool pinned = p.label_offset_authored || mode == LabelMode::pinned;
-                std::string text{p.label_text};
-                double size = p.label_size;
-                if (mode == LabelMode::inside && !pinned) {
-                    // Shrink the (suffix-stripped) text to the point's inscribed box, then
-                    // re-measure at the size we will actually draw — the scaling above assumes
-                    // metrics are linear in font size, which is only approximately true.
-                    text = std::string{strip_passage_suffix(text)};
-                    const auto [w0, h0] = surface.text_size(text, size, true);
-                    size = inside_font_size(size, w0, h0, r);
+                const bool pinned = inside_mode || p.label_offset_authored || mode == LabelMode::pinned;
+                if (inside_mode) {
+                    // The block comes back already broken into lines, shrunk to the point and
+                    // centred on it; the placer only has to resolve the [0, 0] offset, for which
+                    // the block's ink box is the text box.
+                    InsideBlock block = inside_block(p.label_text, p.label_size, r, measure);
+                    requests.push_back(LabelRequest{cx, cy, r, block.width, block.height, 0.0, 0.0, pinned});
+                    label_blocks.push_back(std::move(block));
+                    label_draw.emplace_back(std::string{}, 0.0);
+                    continue;
                 }
-                const auto [tw, th] = surface.text_size(text, size, true);
+                const auto [tw, th] = surface.text_size(p.label_text, p.label_size, true);
                 requests.push_back(LabelRequest{cx, cy, r, tw, th, p.label_dx, p.label_dy, pinned});
-                label_draw.emplace_back(std::move(text), size);
+                label_draw.emplace_back(std::string{p.label_text}, p.label_size);
             }
             if (legend_shown) // furniture made of text: a label sliding under it is unreadable
                 obstacles.push_back(LabelObstacle{legend_box_x, legend_box_y, legend_box_x + legend_box_w, legend_box_y + legend_box_h, true});
@@ -986,6 +1000,17 @@ namespace ae::map_draw
             // points they sit on.
             constexpr double kPointLabelHaloWidthFactor = 0.04;
             for (size_t k = 0; k < placed.size(); ++k) {
+                if (inside_mode) {
+                    // The block's ink box is centred on the point, so the box centre is what its
+                    // lines are positioned against: each one horizontally centred, at its own
+                    // baseline offset.
+                    const InsideBlock& block = label_blocks[k];
+                    const double bcx = (placed[k].x0 + placed[k].x1) / 2.0, bcy = (placed[k].y0 + placed[k].y1) / 2.0;
+                    for (const auto& line : block.lines)
+                        surface.text_font(bcx - line.width / 2.0, bcy + line.baseline_dy, line.text, block.font_size, BLACK, false, false,
+                                          block.font_size * kPointLabelHaloWidthFactor);
+                    continue;
+                }
                 const auto& [text, size] = label_draw[k];
                 // The box is [x0, y0]..[x1, y1] with the baseline-left anchor at (x0, y1).
                 surface.text_font(placed[k].x0, placed[k].y1, text, size, BLACK, false, false, size * kPointLabelHaloWidthFactor);

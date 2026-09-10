@@ -80,9 +80,10 @@ void ae::py::map_draw(pybind11::module_& mdl)
         pybind11::doc("Render a chart's on-chart semantic style (c[\"R\"] named style + c[\"p\"] base plot-spec) to output "
                       "(.png raster, else PDF), mirroring kateri set_style + get_pdf. P2 milestone A.\n"
                       "labels: placement mode for labels with no authored offset — \"auto\" (default: overlap-avoided, "
-                      "no leader lines), \"auto-lines\" (same, with leader lines), \"inside\" (centred in the point, "
-                      "shrunk, passage suffix stripped), \"off\" (keep every offset as authored). Empty = take it from "
-                      "AE_MAP_DRAW_LABEL_AUTOPLACE."));
+                      "no leader lines), \"auto-lines\" (same, with leader lines), \"off\" (keep every offset as "
+                      "authored); or \"inside\", which puts EVERY label inside the point it names (authored offsets "
+                      "overridden, name split across lines, font shrunk to fit, passage suffix stripped). Empty = take "
+                      "it from AE_MAP_DRAW_LABEL_AUTOPLACE."));
 
     // --- P2 batch: load the chart ONCE, render many (style -> output) pairs ---
     // A report renders ~16 named styles from the SAME ~12 MB chart. `export_styled_map`

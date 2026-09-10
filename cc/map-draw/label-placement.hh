@@ -1,6 +1,9 @@
 #pragma once
 
+#include <array>
+#include <functional>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -36,13 +39,17 @@
 //     (`LabelTether{BLACK, 0.3px}`, the convention cc/tal/draw-tree.cc uses for auto-placed
 //     MRCA labels) once the label ends up far enough away that the association would be lost.
 //     Distance is cheap here precisely because the leader line carries the association.
-//   * `inside` — the label is drawn CENTRED IN its point (offset [0, 0]) at a font shrunk to
-//     the point's inscribed box, with the passage suffix stripped (see strip_passage_suffix
-//     and inside_font_size). Nothing to avoid, nothing to tether.
+//   * `inside` — EVERY label is drawn CENTRED IN its point (offset [0, 0]), split across lines
+//     and shrunk to fit the point's circle, with the passage suffix stripped (see
+//     inside_block). Nothing to avoid, nothing to tether, and nothing to search.
 //   * `pinned` — no auto-placement at all: every label keeps its offset, which is what the
 //     fidelity harness needs when it measures parity against a kateri golden.
-// Authored `l.p` offsets are honoured verbatim in EVERY mode (and are obstacles for the
-// rest) — a hand-adjusted offset is the operator's explicit instruction about that label.
+// Authored `l.p` offsets are honoured verbatim in `automatic`, `automatic_lines` and `pinned`
+// (and are obstacles for the rest) — a hand-adjusted offset is the operator's explicit
+// instruction about that label. `inside` is the exception: an authored offset is an
+// instruction about where OUTSIDE the point the label goes, which that mode has no use for,
+// so it is ignored and every label goes inside. A mode that put some labels inside and left
+// the hand-adjusted ones outside would read as a bug rather than a choice.
 // ======================================================================
 
 namespace ae::map_draw
@@ -116,18 +123,52 @@ namespace ae::map_draw
     // …"cell") keeps them, and a label that is nothing but the suffix is left alone.
     std::string_view strip_passage_suffix(std::string_view label);
 
-    // Font size at which `text_w` x `text_h` (measured at `font_size`) fits the box inscribed
-    // in a point of radius `point_radius`, clamped to [floor, font_size]. The floor is
-    // max(kInsideMinFontSize, font_size * kInsideMinFontFactor): a label that cannot reach it
-    // is drawn AT the floor and overflows its point rather than being moved outside — see the
-    // `inside` note in cc/map-draw/TODO.md for why.
-    double inside_font_size(double font_size, double text_w, double text_h, double point_radius);
+    // One line of an `inside` label, positioned relative to the POINT CENTRE: draw `text` at
+    // font `InsideBlock::font_size` with its baseline-left anchor at
+    // (centre_x - width / 2, centre_y + baseline_dy).
+    struct InsideLine
+    {
+        std::string text{};
+        double width{0.0};       // advance width at the block's font size
+        double baseline_dy{0.0}; // baseline offset from the point centre, downward positive
+    };
+
+    // A whole `inside` label: the lines to draw and the ink box they occupy, centred on the
+    // point in both axes. `width`/`height` are what the caller hands the placer as the label's
+    // text box, so the block comes back centred through the ordinary label_offset() mapping.
+    struct InsideBlock
+    {
+        std::vector<InsideLine> lines{};
+        double font_size{0.0};
+        double width{0.0}, height{0.0};
+    };
+
+    // Measure one candidate line at `font_size`: {advance width, ink above baseline, ink below
+    // baseline}. The caller owns the text metrics, so it supplies this (CairoPdf::text_size +
+    // ::text_ink_height, both on the Helvetica face the labels are drawn with).
+    using InsideMeasure = std::function<std::array<double, 3>(std::string_view text, double font_size)>;
+
+    // Lay `label` out inside a point of radius `point_radius`, for a label whose authored size
+    // is `font_size`. The passage suffix is stripped, then the plausible ways of breaking the
+    // name across lines at its own separators ("XY/1234/25" -> "XY/" + "1234/25", or three
+    // lines, …) are each fitted to the point and the one that RENDERS LARGEST wins — a circle
+    // is widest across its middle, so two short centred lines commonly beat one long one. Fit
+    // is against the circle itself, per line (a line near the middle may be wider than one at
+    // the top), not against the inscribed square. Ties go to fewer lines.
+    //
+    // The font never exceeds `font_size` and never goes below
+    // max(kInsideMinFontSize, font_size * kInsideMinFontFactor): a name that cannot reach that
+    // floor is laid out with the arrangement that overflows least, drawn AT the floor, and
+    // allowed to spill out of its point rather than being moved outside — see the `inside`
+    // note in cc/map-draw/TODO.md for why.
+    InsideBlock inside_block(std::string_view label, double font_size, double point_radius, const InsideMeasure& measure);
 
     // Place every label. Pinned labels are returned at their authored offset (and are treated
     // as obstacles for the rest); un-pinned ones are placed as `mode` prescribes.
     // `canvas_w`/`canvas_h` bound the image so a label is never pushed off the page.
-    // Deterministic: same input, same output. In `inside` mode the caller must already have
-    // shrunk/stripped the text (the metrics in each LabelRequest are the ones it will draw).
+    // Deterministic: same input, same output. In `inside` mode EVERY label is centred on its
+    // point regardless of its authored offset, and the caller must already have laid the text
+    // out with inside_block (the metrics in each LabelRequest are the block's).
     std::vector<LabelPlacement> place_labels(const std::vector<LabelRequest>& labels, const std::vector<LabelObstacle>& obstacles, double canvas_w, double canvas_h, LabelMode mode);
 
 } // namespace ae::map_draw

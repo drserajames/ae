@@ -111,19 +111,20 @@ corresponding **cached AD PNG**, verified **at high zoom, side-by-side**.
 
 **What it does.** A label whose style modifier carries no `l.p` — the operator has not
 hand-adjusted it — is placed by this module instead of always being dropped straight below its
-point. Labels with an authored `l.p` are honoured verbatim **in every mode** and become
-obstacles for the rest: a hand-adjusted offset is the operator's explicit instruction about
-that label. Candidates are enumerated in kateri's *offset space*, so a placed label renders
-through the same `label_offset()` mapping as an authored one, and kateri's `[0, 1]` default is
-the first candidate (with a small bonus) — an unobstructed label does not move.
+point. Labels with an authored `l.p` are honoured verbatim in `auto`, `auto-lines` and `off`,
+and become obstacles for the rest: a hand-adjusted offset is the operator's explicit
+instruction about that label. (`inside` is the exception — see below.) Candidates are
+enumerated in kateri's *offset space*, so a placed label renders through the same
+`label_offset()` mapping as an authored one, and kateri's `[0, 1]` default is the first
+candidate (with a small bonus) — an unobstructed label does not move.
 
 ### The four modes
 
-| Mode | What un-authored labels do |
-|------|----------------------------|
-| **`auto`** (default) | Searched into free space, **no leader lines ever**. |
+| Mode | What labels do |
+|------|----------------|
+| **`auto`** (default) | Un-authored labels searched into free space, **no leader lines ever**. |
 | `auto-lines` | The same search, plus an AD-style tether (`LabelTether{BLACK, 0.3px}`) once the label lands far enough away that the association would be lost. |
-| `inside` | Drawn **centred in the point** at a font shrunk to fit it, with a trailing `-cell`/`-egg` passage suffix stripped. No tethers, no search. |
+| `inside` | **Every** label — authored offset or not — drawn inside the point it names: passage suffix stripped, name broken across lines, font shrunk to fit, block centred on the point. No tethers, no search. |
 | `off` (aliases `pinned`, `0`) | No auto-placement at all — every label exactly at its offset. What the fidelity harness needs when it measures parity against a kateri golden. |
 
 **Selecting one.** `ae::map_draw::export_styled_map(..., std::optional<LabelMode>)` in C++;
@@ -147,15 +148,38 @@ reads through the label's white halo, text over text never does.) On the report 
 this pulls the three un-authored labels from gaps of 5.0 / 1.6 / 0.4 text-heights down to
 0 / 0 / 0.4 — each one touching or all but touching its own point.
 
-**`inside`: what happens when the label does not fit.** The font is scaled so the text box is
-inscribed in the point (`inside_font_size`), but never below
+**`inside` ignores authored offsets — deliberately.** An `l.p` is an instruction about where
+*outside* the point the operator wants the label; in this mode there is no outside, so the hint
+cannot be honoured and is overridden. Putting only the un-adjusted labels inside would leave a
+map with a couple of labels in their points and the rest ranged around them, which reads as a
+bug rather than a choice. `inside` means **all** of them.
+
+**`inside`: breaking the name across lines** (`inside_block`). A circle is widest across its
+middle, so two or three short centred lines usually fit at a bigger font than one long line.
+The name is cut at its **own separators** — after a `/` or `-` (which stays with the line it
+ends, so `XY/1234/25` can become `XY/` + `1234/25`) or at a space — never mid-token, because a
+broken token reads as a different string; a name with no separator at all simply stays on one
+line and shrinks. Every arrangement of up to three lines is fitted and **the one that renders
+LARGEST wins**, not the one with the fewest lines: on the report H3 serology map that is worth
+7–17 % of font size per label. Ties (typically: everything fits at the authored size) go to
+fewer lines, and an extra line must buy at least 5 % to be taken at all, so splitting never
+happens for its own sake.
+
+Fitting is against the **circle**, not the inscribed square, and per line: each line's corners
+must lie within the point, so a line near the middle may be much wider than one at the top —
+which is exactly what makes the extra line pay. Lines are measured by their real ink extent
+about the baseline (`CairoPdf::text_ink_height`), not by the em box `text_size` reports, so the
+block is both fitted and centred on the glyphs the reader actually sees.
+
+**`inside`: what happens when the label still does not fit.** The font is never below
 `max(5 px, 0.35 x authored size)` — and a label that cannot reach that floor is **drawn at the
-floor and allowed to overflow its point**, not moved outside. Overflowing still reads as
-belonging to that point (it is centred on it), whereas silently reverting some labels to
-outside placement would produce a mixed rendering that looks like a bug rather than a choice;
-the operator asked for inside labels, and an overflow is visible feedback that the point is too
-small for that name. The suffix strip is a whole trailing `-cell`/`-egg` only (case-insensitive)
-and never consumes the entire label.
+floor and allowed to overflow its point**, not moved outside, in the arrangement that overflows
+least (the same one that fitted largest). Overflowing still reads as belonging to that point
+(it is centred on it), whereas silently reverting some labels to outside placement would
+produce a mixed rendering that looks like a bug rather than a choice; the operator asked for
+inside labels, and an overflow is visible feedback that the point is too small for that name.
+The suffix strip is a whole trailing `-cell`/`-egg` only (case-insensitive) and never consumes
+the entire label.
 
 **There is no AD algorithm to port.** AD's `acmacs-draw` `Points::draw_labels` (and the obsolete
 `map_elements::Labels::draw`) just evaluate `PointLabel::text_offset()` for the authored offset

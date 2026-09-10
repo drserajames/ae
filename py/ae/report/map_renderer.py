@@ -90,9 +90,12 @@ class NativeRenderer(MapRenderer):
 
     `label_mode` picks how point labels with no authored offset are placed: `"auto"` (the
     native default: overlap-avoided, no leader lines), `"auto-lines"` (same, with leader
-    lines), `"inside"` (centred in the point, shrunk, passage suffix stripped) or `"off"`
-    (every label exactly at its offset). `""` defers to `AE_MAP_DRAW_LABEL_AUTOPLACE`, which
-    is how a batch run selects a mode without touching code. Authored offsets always win."""
+    lines) or `"off"` (every label exactly at its offset) — in all three an authored offset
+    wins. `"inside"` is the exception: it puts EVERY label inside the point it names (split
+    across lines, shrunk to fit, passage suffix stripped), overriding authored offsets, which
+    describe outside placement and so mean nothing there. `""` defers to
+    `AE_MAP_DRAW_LABEL_AUTOPLACE`, which is how a batch run selects a mode without touching
+    code."""
 
     backend_name = "native"
 
