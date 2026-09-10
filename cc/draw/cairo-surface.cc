@@ -38,8 +38,32 @@ namespace ae::draw
         context_ = cairo_create(surface_);
     }
 
+    // Borrowed-context constructor (single-canvas compositor). context_ is the caller's cairo_t
+    // (a shared page surface); we neither create nor destroy it. We save its graphics state and
+    // set a device-space transform (translate to the sub-rect origin, then scale so the logical
+    // [0,logical_w]x[0,logical_h] box fills the (dst_w, dst_h) rect) plus a clip to that rect, so
+    // every draw primitive below lands inside (dst_x, dst_y, dst_w, dst_h). The destructor
+    // restores the saved state, leaving the caller's context/surface untouched.
+    CairoPdf::CairoPdf(_cairo* context, double dst_x, double dst_y, double dst_w, double dst_h, double logical_w, double logical_h)
+        : borrowed_{true}
+    {
+        surface_ = nullptr; // not owned; never destroyed
+        context_ = context;
+        cairo_save(context_);
+        cairo_translate(context_, dst_x, dst_y);
+        if (logical_w > 0.0 && logical_h > 0.0)
+            cairo_scale(context_, dst_w / logical_w, dst_h / logical_h);
+        cairo_rectangle(context_, 0.0, 0.0, logical_w, logical_h);
+        cairo_clip(context_);
+        cairo_new_path(context_);
+    }
+
     CairoPdf::~CairoPdf()
     {
+        if (borrowed_) {
+            cairo_restore(context_); // caller owns context_ + its surface; only undo our save/transform/clip
+            return;
+        }
         if (!png_filename_.empty()) {
             cairo_surface_flush(surface_);
             cairo_surface_write_to_png(surface_, png_filename_.c_str());
@@ -308,7 +332,7 @@ namespace ae::draw
             cairo_text_path(context_, str.c_str());
             set_source(context_, halo_color);
             cairo_set_line_width(context_, halo_width * kFontScaleToMatchCanvas);
-            cairo_set_line_join(context_, CAIRO_LINE_JOIN_ROUND);
+            cairo_set_line_join(context_, CAIRO_LINE_JOIN_MITER); // match kateri PDF default halo join
             cairo_stroke_preserve(context_);
             set_source(context_, color);
             cairo_fill(context_);

@@ -368,9 +368,24 @@ disables the gate. Raises if the chart has fewer than 2 layers.)")) //
         // ----------------------------------------------------------------------
 
         .def(
-            "antigen", [](Chart& chart, size_t antigen_no) -> Antigen& { return chart.antigens()[antigen_index{antigen_no}]; }, "antigen_no"_a, pybind11::return_value_policy::reference_internal) //
+            "antigen",
+            [](Chart& chart, size_t antigen_no) -> Antigen& {
+                // Bounds-check so an out-of-range index raises a catchable Python IndexError
+                // rather than an unchecked operator[] that traps under libc++ FAST hardening
+                // (build-py314) or silently reads OOB memory (non-hardened builds).
+                if (antigen_no >= *chart.antigens().size())
+                    throw pybind11::index_error{fmt::format("antigen index {} out of range (chart has {} antigens)", antigen_no, *chart.antigens().size())};
+                return chart.antigens()[antigen_index{antigen_no}];
+            },
+            "antigen_no"_a, pybind11::return_value_policy::reference_internal) //
         .def(
-            "serum", [](Chart& chart, size_t serum_no) -> Serum& { return chart.sera()[serum_index{serum_no}]; }, "serum_no"_a, pybind11::return_value_policy::reference_internal) //
+            "serum",
+            [](Chart& chart, size_t serum_no) -> Serum& {
+                if (serum_no >= *chart.sera().size())
+                    throw pybind11::index_error{fmt::format("serum index {} out of range (chart has {} sera)", serum_no, *chart.sera().size())};
+                return chart.sera()[serum_index{serum_no}];
+            },
+            "serum_no"_a, pybind11::return_value_policy::reference_internal) //
 
         .def(
             "antigen_date_range", [](const Chart& chart, bool test_only) { return chart.antigens().date_range(test_only, chart.reference()); }, "test_only"_a = true,

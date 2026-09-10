@@ -66,19 +66,23 @@ also now writes layout coordinates (`Projection.set_coordinates` / `Layout.__set
 
 | # | Subsystem | AD source | ae target | State |
 |---|-----------|-----------|-----------|-------|
-| 1 | Map drawing | `acmacs-draw`, `acmacs-map-draw` | `cc/map-draw/` / `cc/geo/` | ⚪ mostly **shelved** — interactive/report antigenic maps are done in **kateri** (Dart app, separate repo, driven over a socket via `py/ae/utils/kateri.py`). **A headless C++ Cairo renderer (`cc/map-draw/` + `map-draw` CLI / `ae_backend.map_draw`) was revived** for the Linux **whocc-chains** batch path (#7) where kateri can't run. `cc/draw/cairo-surface.*` kept (shared); **geographic** maps = `cc/geo/` + `geo-draw` (done) |
+| 1 | Map drawing | `acmacs-draw`, `acmacs-map-draw` | `cc/map-draw/` / `cc/geo/` | 🟢 done — the headless C++ Cairo renderer (`cc/map-draw/` + `map-draw` CLI / `ae_backend.map_draw`) was revived for the Linux **whocc-chains** batch path (#7), then given a **semantic-style interpreter** (`styled-draw.cc` → `export_styled_map`) that consumes the same on-chart `c["R"]`/`c["p"]` styling kateri does. It is now the **default report map renderer** (`AE_REPORT_MAP_RENDERER=native`); **kateri is retained only for the interactive drag-adjust/relax GUI** and as the opt-in fallback. `cc/draw/cairo-surface.*` shared; **geographic** maps = `cc/geo/` + `geo-draw` (done) |
 | 2 | hidb (historical influenza DB) | `hidb-5` | `cc/hidb/` | 🟢 done — reader + authoring (make/convert/stat), `ae_backend.hidb` |
 | 3 | TAL (phylo tree drawing / sig pages) | `acmacs-tal` | `cc/tal/` + `tal-draw` + `py/ae/tal/` | 🟢 feature-complete (core) — tree render, clades/time-series, colouring, aa-transitions, settings-v3 `.tal` reader, signature pages |
-| 4 | ssm-report (seasonal report) | `ssm-report` | `py/ae/report/` | 🟡 vcm engine consolidated; all figures generate on ae (kateri maps / `stat` / `geo-draw` / `tal-draw`); adjust ported (`ae.adjust` + kateri drag). Remaining: a full assembled-report run + geo clade colouring (#1). See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) |
+| 4 | ssm-report (seasonal report) | `ssm-report` | `py/ae/report/` | 🟢 done — vcm engine consolidated; the full assembled 36-page report reproduces end-to-end on `ae.report`; all figure families generate on ae (**native** maps / `stat` / `geo-draw` / `tal-draw`); adjust ported (`ae.adjust` + kateri drag). See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) (its status header predates P2 and still describes maps as kateri-rendered) and [`TODO.md`](TODO.md) |
 | 5 | webserver | `acmacs-webserver` | `py/ae/webserver/` | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data verified |
 | 6 | CLI wrappers over `chart_v3` | various `bin/chart-*` | `bin/` | 🟢 done |
 
-> Note: **interactive/report antigenic-map drawing lives in `kateri`** (a Dart/Flutter viewer +
-> PDF generator, `github.com/drserajames/kateri`) — ae drives it over a Unix socket
-> (`ae.utils.kateri`: send `CHRT`, `set_style`, `pdf`/`get_chart`). The **one** C++ antigenic-map
-> renderer in ae is the headless `cc/map-draw/` (`map-draw` CLI / `ae_backend.map_draw`), revived
-> for the **Linux whocc-chains batch path** (#7) where kateri (macOS-only) can't run — not for the
-> interactive/report path. The other ae-side "map drawing" is the geographic world map (`cc/geo`).
+> Note (corrected 2026-09-10): **antigenic-map drawing for the report is now native C++.**
+> `cc/map-draw/` (`map-draw` CLI / `ae_backend.map_draw`) started as the chains-path fidelity port
+> of AD ChartDraw and, via the **P2** workstream, gained a semantic-style interpreter
+> (`export_styled_map`) that resolves the same `c["R"]` named styles the report bakes. `ae.report`
+> chooses the backend with **`AE_REPORT_MAP_RENDERER`**, **default `native`**
+> (`py/ae/report/map_renderer.py`). **kateri** (a Dart/Flutter viewer + PDF generator,
+> `github.com/drserajames/kateri`, driven over a Unix socket by `ae.utils.kateri`) is kept for the
+> **interactive** drag-adjust/relax GUI and as the `AE_REPORT_MAP_RENDERER=kateri` fallback — a
+> report run needs no kateri process. The other ae-side "map drawing" is the geographic world map
+> (`cc/geo`). Open P2 tail + branch status: [`TODO.md`](TODO.md), [`P2-RENDER-DESIGN.md`](P2-RENDER-DESIGN.md).
 
 **Coordination essentials (full rules in `TODO.md`):**
 - `meson.build` is the main conflict risk — keep edits in a commented `# --- <subsystem> ---`
@@ -240,10 +244,19 @@ arch -arm64 /opt/homebrew/bin/ninja -C build-py314
 ln -sfn build-py314 build
 ```
 
-> The final `Generating ae_backend_stubs` step may print `ae_backend: Failed to import,
-> skipping` — the build-time stub generator can't import the freshly-linked module. It is
-> non-fatal (ninja exits 0) and does not affect the module; `PYTHONPATH=build-py314` import
-> works.
+> The final `Generating ae_backend_stubs` step is **best-effort and never fatal**. The .pyi
+> stubs are a mypy/IDE convenience, not part of the library, so it runs through
+> [`tools/gen-stubs.sh`](tools/gen-stubs.sh), which prefers the *build* interpreter's own
+> `mypy.stubgen`, falls back to `stubgen` on `PATH`, and warns + exits 0 when neither works
+> (no mypy installed, or — as on this machine — a `PATH` stubgen belonging to an
+> architecture-broken Python 3.10 that cannot import a `cpython-314` arm64 extension anyway).
+> Expect a `[warn] gen-stubs: …` line; ninja still exits 0 and the module is unaffected.
+> To actually get stubs: `/opt/homebrew/bin/python3.14 -m pip install mypy`.
+>
+> Before this was wired up, `find_program('stubgen')` resolved to that broken 3.10 stubgen and
+> the target failed — and because it is the *last* target, ninja exited 1 after all 253 real
+> targets had succeeded, so `build.sh` (running under `set -e`) died before creating the
+> `build/` symlink or running the arch/import verification.
 
 ### Why the arm64 meson and ninja matter
 
@@ -361,16 +374,40 @@ failure" in the ssm-report `style` step) was found and fixed this way on 2026-06
 ## Build system (standard path)
 
 **Preferred:** run **`./build.sh`** — a self-checking wrapper that encodes the working
-arm64/Apple-Clang/py3.14 recipe below (preflight checks, generated native file, `arch -arm64`
-meson/ninja, `CMAKE_POLICY_VERSION_MINIMUM=3.5`, CA-bundle → `SSL_CERT_FILE`, arch+import verify,
-`build/`→`build-py314/`). Then `source ae-env.sh` to set `AE_ROOT`/`PYTHONPATH`/data vars.
-`./build.sh check` runs preflight only. (Added on the `build-onboarding` branch.)
+arm64/Apple-Clang/py3.14 recipe below (preflight checks, generated native file, subprojects
+bootstrap, `arch -arm64` meson/ninja, `CMAKE_POLICY_VERSION_MINIMUM=3.5`, CA-bundle →
+`SSL_CERT_FILE`, arch+import verify, `build/`→`build-py314/`). Then `source ae-env.sh` to set
+`AE_ROOT`/`PYTHONPATH`/data vars. `./build.sh check` runs preflight only. (Added on the
+`build-onboarding` branch.)
 
-> **Fresh-checkout gotcha:** meson downloads the vendored subprojects (wraps) over HTTPS using the
-> build Python. Homebrew's **python@3.14 ships no CA bundle**, so on a clean `subprojects/` every
-> wrap download fails with `CERTIFICATE_VERIFY_FAILED`. Export `SSL_CERT_FILE` to a cert bundle
-> (`/etc/ssl/cert.pem` or `brew --prefix ca-certificates`/…/cacert.pem) — `build.sh` does this
-> automatically. The existing checkout hides the problem because its wraps are already cached.
+> **Fresh-checkout gotcha 1 — CA bundle.** meson downloads the vendored subprojects (wraps) over
+> HTTPS using the build Python. Homebrew's **python@3.14 ships no CA bundle**, so on a clean
+> `subprojects/` every wrap download fails with `CERTIFICATE_VERIFY_FAILED`. Export `SSL_CERT_FILE`
+> to a cert bundle (`/etc/ssl/cert.pem` or `brew --prefix ca-certificates`/…/cacert.pem) —
+> `build.sh` does this automatically. An existing checkout hides the problem because its wraps are
+> already cached.
+
+> **Fresh-checkout gotcha 2 — git-metadata writes in `subprojects/`.** Populating a clean
+> `subprojects/` needs two writes that **sandboxes protecting VCS metadata refuse anywhere inside
+> the project** (agent sandboxes do this):
+> - a **git repository** — `lexy` and `range-v3` are `[wrap-git]`, so meson runs `git clone`
+>   straight into `subprojects/`, and git writes `.git/config` and copies the template hooks into
+>   `.git/hooks/`: *"cannot copy '…/templates/hooks/commit-msg.sample' to
+>   '…/subprojects/lexy/.git/hooks/commit-msg.sample': Operation not permitted"* → `meson setup`
+>   dies with **"Git command failed"**;
+> - a **`.gitmodules` file** — several `[wrap-file]` release tarballs (e.g. xlnt) contain one, and
+>   meson's archive extraction dies with *"failed to unpack archive … Operation not permitted:
+>   '…/subprojects/xlnt-1.5.0/.gitmodules'"*.
+>
+> `build.sh` **handles this**: it probes whether `subprojects/` accepts those writes and, if not,
+> has meson resolve every wrap into a throwaway project under `$TMPDIR` (where the writes are
+> allowed) and copies the resulting directories in, minus their dot-entries — all wrap semantics
+> (hashes, `patch_directory` overlays, `patch_url`, git revisions) stay with meson. Downloads are
+> retried up to 3× (short reads show up as hash mismatches). In a normal, unsandboxed shell the
+> probe passes and this is a no-op. If the bootstrap cannot complete, `build.sh` **stops with an
+> actionable message** naming the manual fallback
+> (`rsync -a --exclude='.*' /path/to/other/ae/subprojects/ ./subprojects/`) rather than failing
+> obscurely inside meson.
 
 Legacy path (do **not** use):
 

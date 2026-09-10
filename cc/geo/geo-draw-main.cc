@@ -271,6 +271,24 @@ static int time_series(const std::filesystem::path& data_file, const std::string
     return 0;
 }
 
+// Usage text. Printed to stdout for an explicit --help (exit 0) and to stderr on a
+// usage error (exit 1). Without this, "--help" fell through to the positional
+// arguments and was used as the *output path* — geo-draw wrote a file literally
+// called "--help" into the current directory.
+static std::string usage(std::string_view prog)
+{
+    return fmt::format("Usage: {0} [--point lon,lat] [--location NAME] ... <output.pdf> [width]\n"
+                       "       {0} --data records.json --prefix <out-prefix> [--width N]\n"
+                       "\n"
+                       "  --point lon,lat   plot a dot at these coordinates (repeatable)\n"
+                       "  --location NAME   plot a dot at a locdb location, coloured by continent (repeatable)\n"
+                       "  --width N         image width in px (default 1000; 800 in --data mode)\n"
+                       "  --data FILE       time-series mode: one PDF per period from a JSON data file\n"
+                       "  --prefix P        output prefix for --data mode (writes <P><period>.pdf)\n"
+                       "  --help, -h        show this help\n",
+                       prog);
+}
+
 int main(int argc, char* const argv[])
 {
     int exit_code = 0;
@@ -301,6 +319,16 @@ int main(int argc, char* const argv[])
                 prefix = argv[++i];
             else if (arg == "--width" && (i + 1) < argc)
                 width = std::stod(argv[++i]);
+            else if (arg == "--help" || arg == "-h") {
+                fmt::print("{}", usage(argv[0]));
+                return 0;
+            }
+            else if (arg.size() > 1 && arg[0] == '-') {
+                // Never treat an option-looking argument as a path: an unknown (or
+                // value-less) flag used to become the output filename.
+                fmt::print(stderr, "ERROR: unrecognised or incomplete option: {}\n{}", arg, usage(argv[0]));
+                return 1;
+            }
             else
                 positional.push_back(arg);
         }
@@ -313,9 +341,7 @@ int main(int argc, char* const argv[])
 
         // single-map mode
         if (positional.empty()) {
-            fmt::print(stderr, "Usage: {} [--point lon,lat] [--location NAME] ... <output.pdf> [width]\n"
-                               "       {} --data records.json --prefix <out-prefix> [--width N]\n",
-                       argv[0], argv[0]);
+            fmt::print(stderr, "{}", usage(argv[0]));
             return 1;
         }
         const double image_width = width > 0.0 ? width : (positional.size() > 1 ? std::stod(std::string{positional[1]}) : 1000.0);

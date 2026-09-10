@@ -239,6 +239,17 @@ independent and can be handed to separate agents in parallel; dependencies noted
 | **J** | `ae.report` renderer seam + flag | A | S | `MapRenderer` interface, `NativeRenderer`, `AE_REPORT_MAP_RENDERER`; keep kateri default + fallback. Wire producer **and** consumer (a feature isn't done until end-to-end). |
 | **K** | Fidelity harness + figure-matrix sign-off | B–J | **M–L**, iterative | The long tail: per-family px-diff to <~1–2%, document irreducible AA diffs, flag any map that can't match and why. |
 
+> **K status (2026-09-10): partially signed off** — see
+> [`tools/p2-fidelity/FIGURE-MATRIX-RESULTS.md`](tools/p2-fidelity/FIGURE-MATRIX-RESULTS.md).
+> 219 maps (18 lab dirs × 3 subtypes) across the five reference-backed families —
+> by-clade, by-clade −6m/−12m, serology, time-series — ran clean: **214/219 (97.7 %) under
+> the 2 % fuzz30 target**, mean 0.93 %, and the residual is shown to be irreducible
+> anti-aliasing (the same-content rasteriser floor is 0.98 % fuzz30 / 6.11 % strict).
+> Viewport/recenter (§2.2, the milestone-A risk) is confirmed pixel-exact — best raster
+> shift is always (0,0). **Four families are NOT signed off** for want of a reference:
+> info maps, serum circles/coverage (F/G), multiple-serum-circles, signature-page section
+> maps. Tracked as **K′**.
+>
 > **F and G are implemented but still pixel-unverified.** The figure-matrix run could not
 > diff them: the `sc-*` / `-sci-*` / `-sco-*` styles were built on an in-memory chart at
 > serum-coverage time and never written to any `.ace`, so none of the ~1850 kateri goldens had

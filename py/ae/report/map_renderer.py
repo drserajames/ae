@@ -147,11 +147,12 @@ _BACKENDS = {
 }
 
 def selected_backend_name() -> str:
-    """The backend name from `AE_REPORT_MAP_RENDERER` (default `kateri` when unset/empty)."""
+    """The backend name from `AE_REPORT_MAP_RENDERER` (default `native` when unset/empty)."""
     return (os.environ.get(ENV_VAR) or DEFAULT_BACKEND).strip().lower() or DEFAULT_BACKEND
 
 def get_map_renderer() -> MapRenderer:
-    """Instantiate the `MapRenderer` selected by `AE_REPORT_MAP_RENDERER` (default kateri)."""
+    """Instantiate the `MapRenderer` selected by `AE_REPORT_MAP_RENDERER` (default native;
+    kateri is the opt-in fallback via `AE_REPORT_MAP_RENDERER=kateri`)."""
     name = selected_backend_name()
     try:
         backend = _BACKENDS[name]
