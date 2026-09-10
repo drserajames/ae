@@ -2,7 +2,9 @@
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -83,7 +85,15 @@ namespace ae::tal
 
 // ----------------------------------------------------------------------
 
-std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size, const TreeDrawParameters& params)
+namespace ae::tal
+{
+// Shared tree-render core: compute the page geometry, then draw the whole tree through a surface
+// obtained from make_surface(width, height). The two public entry points differ ONLY in the surface
+// they supply — a file-bound CairoPdf (export_tree_pdf) or a borrowed sub-rectangle of a shared page
+// context (export_tree_into) — so standalone tal-draw file output is unchanged. `output` is used only
+// for the (optional) mrca sidecar filename; the shared-surface path passes an empty path.
+static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size, const TreeDrawParameters& params,
+                                    const std::function<std::unique_ptr<ae::draw::CairoPdf>(double, double)>& make_surface)
 {
     using namespace ae::tree;
 
@@ -538,7 +548,8 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     const double tree_line_width = std::min(vstep * 0.5, 1.0) * params.edge_line_width_scale;
     const double font_size = std::clamp(vstep * 0.8, 3.0, 14.0);
 
-    ae::draw::CairoPdf pdf{output, width, height};
+    std::unique_ptr<ae::draw::CairoPdf> pdf_holder = make_surface(width, height);
+    ae::draw::CairoPdf& pdf = *pdf_holder;
     pdf.background(WHITE);
 
     // --- title (top-left, near the very top; acmacs-tal Title draws at offset [5,5]) ---
@@ -1579,7 +1590,18 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
     // offset that reproduces the box (box_top_left = anchor + offset*page). The editor drags a box and
     // writes the inverted offset back to the .tal (mrca -> per-node label.offset+pinned; nodetext ->
     // nodes apply.text.offset). Emitted even with no MRCA labels (so vaccine-only trees still drive it).
-    if (!params.mrca_label_sidecar.empty()) {
+    //
+    // Only the file-output path can produce a meaningful sidecar: it names the PDF it describes
+    // (`output`) and its geometry is that of the standalone tree page, which the label editor drags
+    // boxes on. The shared-surface path (export_tree_into, empty `output` — the signature-page
+    // compositor) has no such file and scales the tree into a sub-rect of someone else's page, so
+    // emitting one would write "pdf": "" plus coordinates that fit nothing. Skip it there and say so.
+    // Today only the label editor sets mrca_label_sidecar, and it always renders to a file, so this
+    // just guards a sig-page .tal that happens to carry the setting (settings.cc parses it from any).
+    if (!params.mrca_label_sidecar.empty() && output.empty()) {
+        fmt::print(stderr, ">>> mrca_label_sidecar '{}' not written: the tree is rendered into a shared surface, not to its own PDF\n", params.mrca_label_sidecar);
+    }
+    else if (!params.mrca_label_sidecar.empty()) {
         const auto jstr = [](const std::string& s) {
             std::string o; o.reserve(s.size() + 2);
             for (char c : s) {
@@ -1619,6 +1641,28 @@ std::size_t ae::tal::export_tree_pdf(ae::tree::Tree& tree, const std::filesystem
 
     return labels_hidden;
 
-} // ae::tal::export_tree_pdf
+} // render_tree_core
+
+// File-output entry point (unchanged behaviour): owned CairoPdf bound to `output`.
+std::size_t export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size, const TreeDrawParameters& params)
+{
+    return render_tree_core(tree, output, image_size, params,
+                            [&output](double width, double height) { return std::make_unique<ae::draw::CairoPdf>(output, width, height); });
+}
+
+// Shared-surface entry point (single-canvas compositor): render into a sub-rectangle of the caller's
+// Cairo context, letterboxed (aspect-preserving, centred). Same draw calls as export_tree_pdf.
+std::size_t export_tree_into(ae::tree::Tree& tree, _cairo* context, double dst_x, double dst_y, double dst_w, double dst_h,
+                             double image_size, const TreeDrawParameters& params)
+{
+    return render_tree_core(tree, std::filesystem::path{}, image_size, params, [=](double width, double height) {
+        const double scale = (width > 0.0 && height > 0.0) ? std::min(dst_w / width, dst_h / height) : 1.0;
+        const double w = width * scale, h = height * scale;
+        const double x = dst_x + (dst_w - w) / 2.0, y = dst_y + (dst_h - h) / 2.0; // centre in the rect
+        return std::make_unique<ae::draw::CairoPdf>(context, x, y, w, h, width, height);
+    });
+}
+
+} // namespace ae::tal
 
 // ======================================================================

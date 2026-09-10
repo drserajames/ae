@@ -23,6 +23,10 @@
 // See cc/tal/PORTING.md.
 // ======================================================================
 
+// Forward declaration of the opaque Cairo context (typedef struct _cairo cairo_t;) for the
+// shared-surface tree render entry point below — keeps the Cairo headers out of this interface.
+struct _cairo;
+
 namespace ae::tree
 {
     class Tree;
@@ -197,6 +201,15 @@ namespace ae::tal
     // layout computes cumulative edges. Returns the number of leaf labels suppressed by
     // collision avoidance (0 when disabled or none overlap).
     std::size_t export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size = 1000.0, const TreeDrawParameters& params = {});
+
+    // Shared-surface form of export_tree_pdf (single-canvas signature-page compositor): render the
+    // tree into a sub-rectangle of a caller-supplied Cairo context `context` instead of an owned
+    // output file. The page geometry is computed identically (height = image_size, width per
+    // width_to_height_ratio) and letterboxed (aspect-preserving, centred) into the device rectangle
+    // (dst_x, dst_y, dst_w, dst_h). The context/surface are not owned. Same draw calls as
+    // export_tree_pdf — standalone tal-draw file output is unaffected. Returns labels suppressed.
+    std::size_t export_tree_into(ae::tree::Tree& tree, _cairo* context, double dst_x, double dst_y, double dst_w, double dst_h,
+                                 double image_size = 1000.0, const TreeDrawParameters& params = {});
 
 } // namespace ae::tal
 

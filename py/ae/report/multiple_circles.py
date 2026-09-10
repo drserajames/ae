@@ -11,8 +11,10 @@ multiple-serum-circles addenda consume:
   * ``multiple-serum-circles-names.pdf`` — the circles map with a small top-left text list of
                                           the circled sera (overlaid via pdflatex).
 
-The map itself is rendered by **kateri** over its unix socket (one session per lab); the
-clade colouring is resolved natively from the chart's own ``clades-v10`` **semantic** style
+The map itself is rendered by the **native headless renderer**
+(``ae_backend.map_draw.export_styled_map`` / ``export_styled_maps``) — no kateri process, no
+socket, Linux-capable — mirroring ``ae.report.map_renderer.NativeRenderer``. The clade
+colouring is resolved natively from the chart's own ``clades-v10`` **semantic** style
 (``c["R"]``) — no dependency on a kateri-baked legacy plot spec — so the antigen colours match
 the report's main maps exactly. Serum circles use ae's
 ``projection().serum_circles(fold)`` theoretical radius — identical to the Rmd's
@@ -24,7 +26,6 @@ mirroring the addendum-serum-coverage by-clade config — not greps in this engi
 
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 import os
@@ -36,10 +37,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Sequence
 
+import ae_backend
 import ae_backend.chart_v3 as cv
 
 from ae import semantic
-from ae.utils import kateri as K
 
 # ----------------------------------------------------------------------
 # Style names built on the chart (background "-mc-*", front "mc-*").
@@ -80,10 +81,10 @@ class SerumPick:
 @dataclass
 class LabConfig:
     """Per-lab configuration for the multiple-serum-circles figures: the lab directory,
-    title, kateri viewport, the curated `SerumPick`s, the circle fold, and marker sizing."""
+    title, square viewport, the curated `SerumPick`s, the circle fold, and marker sizing."""
     labdir: str
     title: str
-    viewport: Sequence[float]          # [center_x, center_y, width] for kateri
+    viewport: Sequence[float]          # [center_x, center_y, width] — square map viewport
     sera: list[SerumPick]
     fold: float = 2.0
     serum_size: float = 26.0           # selected-serum point size (tuned vs Racmacs srSize 8)
@@ -162,7 +163,7 @@ def resolve_sera(chart: cv.Chart, picks: list[SerumPick], fills: dict[int, str],
 
 def build_styles(chart: cv.Chart, cfg: LabConfig, sera: list[SerumPick]) -> None:
     """Build the `-mc-mark` / `-mc-circles` background styles and the `mc-plain` / `mc-circles`
-    front styles on the chart, ready for kateri `set_style`."""
+    front styles on the chart, ready for the native renderer's style selection."""
     # Background: restyle the selected sera (black fill, clade outline, fat outline, enlarged).
     mark = chart.styles()[MARK_STYLE]
     mark.priority = 500
@@ -212,59 +213,34 @@ def names_lines(sera: list[SerumPick]) -> list[str]:
 
 
 # ----------------------------------------------------------------------
-# kateri rendering (one session per lab) — adapted from ae.tal.signature_page.
-
-def _kateri_app_bundle(exe: str) -> Optional[Path]:
-    resolved = Path(exe).resolve()
-    for parent in (resolved, *resolved.parents):
-        if parent.suffix == ".app":
-            return parent
-    return None
-
+# Native rendering (headless, in-process) — mirrors ae.report.map_renderer.NativeRenderer.
 
 def render_pdfs(chart: cv.Chart, style_names: Sequence[str], out_paths: Sequence[Path], *,
-                width: float = 800.0, connect_timeout: float = 90.0, map_timeout: float = 90.0) -> None:
-    """Render one PDF per style in a single kateri session (chart sent once)."""
-    exe = shutil.which("kateri")
-    if not exe:
-        raise RuntimeError("kateri not on PATH — install kateri (github.com/drserajames/kateri)")
-    app_bundle = _kateri_app_bundle(exe)
+                width: float = 800.0) -> None:
+    """Render one PDF per style with the native headless renderer — no kateri process,
+    no socket.
 
-    async def _run() -> None:
-        socket_dir = tempfile.mkdtemp(prefix="kateri-mc-")
-        socket_name = os.path.join(socket_dir, "kateri.sock")
-        K.communicator.reset()
-        server = await asyncio.start_unix_server(K.communicator.connected, socket_name)
-        direct = None
+    The in-memory styled chart is written to a single short-lived temp ``.ace``, then each
+    ``(style_name, output_path)`` pair is rendered from it in one
+    ``ae_backend.map_draw.export_styled_maps`` call (chart loaded once). Each style resolves
+    its own on-chart ``c["R"]`` named style + ``c["p"]`` base plot-spec — including the
+    per-lab square viewport set by ``build_styles`` — exactly as kateri's ``set_style`` +
+    ``get_pdf(square=True)`` did. The recent map-draw serum-circle fill fix means the
+    theoretical circles' translucent (``#AARRGGBB``) clade-colour fills now render natively."""
+    fd, tmp_name = tempfile.mkstemp(suffix=".ace", prefix="ae-mc-native-")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        chart.write(tmp_path)
+        jobs = [(name, str(Path(out))) for name, out in zip(style_names, out_paths)]
+        ae_backend.map_draw.export_styled_maps(tmp_path, jobs, width, 0)
+        for out in out_paths:
+            print(f">> multiple_circles: wrote {out}", file=sys.stderr)
+    finally:
         try:
-            if app_bundle is not None:
-                opener = await asyncio.create_subprocess_exec(
-                    "open", "-n", "-a", str(app_bundle), "--args", "--socket", socket_name, "--headless")
-                await opener.wait()
-            else:
-                direct = await asyncio.create_subprocess_exec(exe, "--socket", socket_name, "--headless")
-            waited = 0.0
-            while not K.communicator.is_connected():
-                if waited >= connect_timeout:
-                    raise RuntimeError(f"kateri did not connect within {connect_timeout:.0f}s")
-                await asyncio.sleep(0.1)
-                waited += 0.1
-            K.communicator.send_chart(chart)
-            for name, out in zip(style_names, out_paths):
-                pdf = await asyncio.wait_for(K.communicator.get_pdf(style=name, width=width, square=True),
-                                             timeout=map_timeout)
-                Path(out).write_bytes(pdf)
-                print(f">> multiple_circles: wrote {out}", file=sys.stderr)
-            K.communicator.quit()
-        finally:
-            server.close()
-            if direct is not None and direct.returncode is None:
-                direct.terminate()
-            elif app_bundle is not None:
-                subprocess.run(["pkill", "-f", socket_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            shutil.rmtree(socket_dir, ignore_errors=True)
-
-    asyncio.run(_run())
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 # ----------------------------------------------------------------------
@@ -289,7 +265,7 @@ def _pdf_page_size_pt(pdf: Path) -> tuple[float, float]:
 
 def overlay_names(circles_pdf: Path, out_pdf: Path, lines: list[str], *,
                   font_pt: float = 7.0, x_frac: float = 0.024, y_frac: float = 0.115) -> Path:
-    """Overlay `lines` (small, top-left, below the kateri-drawn title) onto `circles_pdf`.
+    """Overlay `lines` (small, top-left, below the map's rendered title) onto `circles_pdf`.
     Positions are fractions of the page (x_frac from left, y_frac from top), matching the
     Rmd's names block just under the title."""
     if not shutil.which("pdflatex"):
@@ -330,15 +306,15 @@ def overlay_names(circles_pdf: Path, out_pdf: Path, lines: list[str], *,
 
 def generate_lab(report_dir: Path, cfg: LabConfig, *, width: float = 800.0) -> dict[str, Path]:
     """Full per-lab pipeline: load styled.ace, resolve curated sera, build styles, render
-    plain + circles via kateri, overlay the -names list. Returns the written PDF paths."""
+    plain + circles natively, overlay the -names list. Returns the written PDF paths."""
     lab_path = Path(report_dir) / cfg.labdir
     ace = lab_path / "styled.ace"
     if not ace.exists():
         raise FileNotFoundError(f"{ace} not found")
 
     chart = cv.Chart(str(ace))
-    # kateri draws each circle from the serum's CIn semantic attribute (the radius); set it
-    # for folds 2.0/3.0 exactly as the serum-coverage path does before styling.
+    # The renderer draws each circle from the serum's CIn semantic attribute (the radius); set
+    # it for folds 2.0/3.0 exactly as the serum-coverage path does before styling.
     semantic.serum_circle.attributes(chart)
     fills = legacy_fills(ace)
     sera = resolve_sera(chart, cfg.sera, fills, cfg.fold)

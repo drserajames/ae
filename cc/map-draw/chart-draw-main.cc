@@ -24,6 +24,35 @@
 //     --serum-circles     draw 2-fold serum circles
 // ----------------------------------------------------------------------
 
+// Usage text. Printed to stdout for an explicit --help (exit 0) and to stderr on a
+// usage error (exit 1). Without this, an unrecognised or misspelt flag (or --help itself)
+// fell through to the positional arguments and was used as the *output path* — map-draw
+// wrote a file literally named after the flag instead of erroring.
+static std::string usage(std::string_view prog)
+{
+    return fmt::format("Usage: {0} [--size N] [--mapi FILE --coloring KEY] [--reorient-master FILE] [--no-reorient]\n"
+                       "       {0}   [--procrustes FILE] [--no-populate] [--vaccines FILE] [--no-vaccines]\n"
+                       "       {0}   [--no-marks] [--no-title] [--no-legend] [--labels] [--serum-circles]\n"
+                       "       {0}   <input.ace> <output.png|pdf>\n"
+                       "\n"
+                       "  --size N             canvas size in px (default 800)\n"
+                       "  --mapi FILE          clades.mapi coloring settings file\n"
+                       "  --coloring KEY       mapi coloring block, e.g. clades-A(H3N2)-v1\n"
+                       "  --reorient-master F  reorient against this chart instead of auto-detecting\n"
+                       "  --no-reorient        skip reorientation entirely\n"
+                       "  --procrustes FILE    draw with procrustes arrows to this secondary chart\n"
+                       "  --no-populate        skip seqdb population\n"
+                       "  --vaccines FILE      vaccine-strain data file (else auto-detected)\n"
+                       "  --no-vaccines        skip vaccine marking\n"
+                       "  --no-marks           skip recent-layer marks\n"
+                       "  --no-title           skip stress title\n"
+                       "  --no-legend          skip clade legend\n"
+                       "  --labels             label every point with its name (debug)\n"
+                       "  --serum-circles      draw 2-fold serum circles\n"
+                       "  --help, -h           show this help\n",
+                       prog);
+}
+
 int main(int argc, char* const argv[])
 {
     int exit_code = 0;
@@ -63,11 +92,21 @@ int main(int argc, char* const argv[])
                 settings.label_points = true;
             else if (arg == "--serum-circles")
                 settings.draw_serum_circles = true;
+            else if (arg == "--help" || arg == "-h") {
+                fmt::print("{}", usage(argv[0]));
+                return 0;
+            }
+            else if (arg.size() > 1 && arg[0] == '-') {
+                // Never treat an option-looking argument as a path: an unknown (or
+                // value-less) flag used to become the output filename.
+                fmt::print(stderr, "ERROR: unrecognised or incomplete option: {}\n{}", arg, usage(argv[0]));
+                return 1;
+            }
             else
                 positional.push_back(arg);
         }
         if (positional.size() < 2) {
-            fmt::print(stderr, "Usage: {} [--size N] [--mapi FILE --coloring KEY] [--no-marks] [--no-title] [--no-legend] [--labels] [--serum-circles] <input.ace> <output.png|pdf>\n", argv[0]);
+            fmt::print(stderr, "{}", usage(argv[0]));
             return 1;
         }
         // Resolve the vaccine-strain data file (acmacs-data/semantic_vaccines.py) at runtime,

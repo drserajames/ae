@@ -70,6 +70,141 @@ ca_bundle() {
 }
 
 # ----------------------------------------------------------------------
+# Subproject bootstrap (fresh checkout / fresh worktree).
+#
+# meson populates subprojects/ from the .wrap files during `meson setup`. That
+# needs two kinds of write that sandboxes protecting VCS metadata (agent
+# sandboxes do) refuse *anywhere inside the project*:
+#
+#   * a git repository — lexy and range-v3 are [wrap-git], so meson runs
+#     `git clone` directly into subprojects/, and git writes .git/config and
+#     copies the template hooks into .git/hooks/ as it goes:
+#         fatal: cannot copy '…/git-core/templates/hooks/commit-msg.sample' to
+#                '…/subprojects/lexy/.git/hooks/commit-msg.sample': Operation not permitted
+#     -> meson setup aborts with "Git command failed";
+#   * a .gitmodules file — several [wrap-file] release tarballs contain one, and
+#     meson's archive extraction dies on it:
+#         ERROR: failed to unpack archive with error: [Errno 1] Operation not
+#         permitted: '…/subprojects/xlnt-1.5.0/.gitmodules'
+#
+# Either way a fresh worktree cannot be configured at all; the manual workaround
+# has been `rsync -a --exclude='.*'` from an already-populated checkout.
+#
+# Handle it here instead of asking for the sandbox to be widened: probe whether
+# subprojects/ can take those writes and, if it cannot, let meson resolve every
+# wrap into a throwaway project *outside* the tree (where the writes are allowed)
+# and copy the resulting directories in, minus their dot-entries. All the wrap
+# semantics — hashes, patch_directory overlays, patch_url, git revisions — stay
+# with meson; we only relocate where the work happens.
+#
+# When the probe succeeds (normal, unsandboxed use) this is a no-op and meson's
+# own wrap machinery does the work during `meson setup`, exactly as before.
+
+# First uncommented "key = value" from a .wrap file.
+wrap_value() {
+    sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" | head -1
+}
+
+# Copy the contents of one directory over another (tar, not rsync: tar is always
+# present, rsync is not guaranteed on a stock macOS).
+copy_tree() {
+    ( cd "$1" && tar cf - . ) | ( cd "$2" && tar xf - )
+}
+
+meson_bin() {
+    local m; m="$("$BREW" --prefix meson 2>/dev/null)/bin/meson"
+    [[ -x "$m" ]] && printf '%s\n' "$m" || printf 'meson\n'
+}
+
+in_tree_subprojects_writable() {
+    local probe="subprojects/.ae-write-probe.$$" ok=0
+    rm -rf "$probe"
+    mkdir -p "$probe"
+    git init -q "$probe" >/dev/null 2>&1 || ok=1
+    # 2>/dev/null first: a failing redirection is reported before later
+    # redirections are applied, so the usual trailing form would still leak.
+    ( : 2>/dev/null > "$probe/.gitmodules" ) || ok=1
+    rm -rf "$probe"
+    return $ok
+}
+
+subprojects_help() {
+    printf '%s\n' \
+        "     Populate subprojects/ by hand from an already-built checkout, e.g." \
+        "       rsync -a --exclude='.*' /path/to/other/ae/subprojects/ $AE_ROOT/subprojects/" \
+        "     then re-run ./build.sh."
+}
+
+# Names of the wrap directories that are not yet present, one per line.
+missing_subprojects() {
+    local wrap dir
+    for wrap in subprojects/*.wrap; do
+        [[ -f "$wrap" ]] || continue
+        dir="$(wrap_value "$wrap" directory)"
+        [[ -n "$dir" && ! -d "subprojects/$dir" ]] && printf '%s\n' "$dir"
+    done
+    return 0
+}
+
+bootstrap_subprojects() {
+    local -a missing=()
+    while IFS= read -r dir; do missing+=("$dir"); done < <(missing_subprojects)
+    (( ${#missing[@]} )) || return 0
+    in_tree_subprojects_writable && return 0   # normal case — meson setup handles it
+
+    warn "This environment denies git-metadata writes (.git/config, .git/hooks, .gitmodules)"
+    warn "under the project, so meson could not populate subprojects/ in place."
+    say "Resolving wraps out-of-tree instead: ${missing[*]}"
+
+    local scratch; scratch="$(mktemp -d "${TMPDIR:-/tmp}/ae-wrap-XXXXXX")"
+    mkdir -p "$scratch/subprojects"
+    printf "project('ae-wrap-bootstrap', 'cpp')\n" > "$scratch/meson.build"
+    cp subprojects/*.wrap "$scratch/subprojects/"
+    local d
+    for d in packagefiles packagecache; do
+        [[ -d "subprojects/$d" ]] && cp -R "subprojects/$d" "$scratch/subprojects/"
+    done
+
+    # Downloads here are occasionally truncated (a short read yields a hash
+    # mismatch); meson only re-fetches what is still missing, so just retry.
+    local attempt still
+    for attempt in 1 2 3; do
+        SSL_CERT_FILE="$(ca_bundle)" run_native "$(meson_bin)" subprojects download \
+            --sourcedir "$scratch" --num-processes 1 || true
+        still=0
+        for dir in "${missing[@]}"; do [[ -d "$scratch/subprojects/$dir" ]] || still=1; done
+        (( still )) || break
+        warn "wrap download incomplete (attempt $attempt/3) — retrying"
+    done
+
+    for dir in "${missing[@]}"; do
+        if [[ ! -d "$scratch/subprojects/$dir" ]]; then
+            rm -rf "$scratch"
+            die "could not download subproject '$dir' (no network, or a persistently bad download).
+$(subprojects_help)"
+        fi
+        # Drop every dot-entry before copying in: the sandboxes that make this
+        # bootstrap necessary are precisely the ones refusing .gitmodules /
+        # .vscode / … writes, and no vendored subproject needs its dotfiles to
+        # build. (The manual `rsync -a --exclude='.*'` workaround did the same.)
+        find "$scratch/subprojects/$dir" -depth -name '.*' -exec rm -rf {} +
+        rm -rf "subprojects/$dir"; mkdir -p "subprojects/$dir"
+        if ! copy_tree "$scratch/subprojects/$dir" "subprojects/$dir"; then
+            rm -rf "$scratch" "subprojects/$dir"
+            die "could not populate subprojects/$dir.
+$(subprojects_help)"
+        fi
+        say "  subprojects/$dir"
+    done
+    # Keep the downloaded tarballs so a later reconfigure needs no network.
+    [[ -d "$scratch/subprojects/packagecache" ]] && {
+        mkdir -p subprojects/packagecache
+        copy_tree "$scratch/subprojects/packagecache" subprojects/packagecache || true
+    }
+    rm -rf "$scratch"
+}
+
+# ----------------------------------------------------------------------
 preflight() {
     say "Preflight checks"
 
@@ -137,6 +272,7 @@ EOF
 # ----------------------------------------------------------------------
 configure() {
     write_native_file
+    bootstrap_subprojects
     local ssl; ssl="$(ca_bundle)"
     if [[ -n "$ssl" ]]; then
         say "Using CA bundle for wrap downloads: $ssl"
@@ -149,12 +285,17 @@ configure() {
     # cmake_minimum_required(<3.5) declared by vendored lexy's doctest.
     # PKG_CONFIG_PATH: brotli is keg-only-ish; make its .pc visible to pkg-config.
     # SSL_CERT_FILE: Homebrew python@3.14 has no CA bundle; meson downloads wraps over HTTPS.
-    CMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    PKG_CONFIG_PATH="$("$BREW" --prefix brotli)/lib/pkgconfig" \
-    SSL_CERT_FILE="$ssl" \
-        run_native "$("$BREW" --prefix meson)/bin/meson" setup "$BUILD_DIR" \
-            --native-file "$NATIVE_FILE" \
-            -Doptimization=3 -Ddebug=true
+    if ! CMAKE_POLICY_VERSION_MINIMUM=3.5 \
+         PKG_CONFIG_PATH="$("$BREW" --prefix brotli)/lib/pkgconfig" \
+         SSL_CERT_FILE="$ssl" \
+             run_native "$("$BREW" --prefix meson)/bin/meson" setup "$BUILD_DIR" \
+                 --native-file "$NATIVE_FILE" \
+                 -Doptimization=3 -Ddebug=true
+    then
+        die "meson setup failed — see $BUILD_DIR/meson-logs/meson-log.txt
+     If it failed fetching a subproject (a 'Git command failed' or a download error):
+$(subprojects_help)"
+    fi
 }
 
 compile() {
@@ -196,7 +337,7 @@ link_default() {
 # ----------------------------------------------------------------------
 do_build() {
     preflight
-    if [[ -f "$BUILD_DIR/meson-private/coredata.dat" ]]; then
+    if [[ -f "$BUILD_DIR/meson-private/coredata.dat" && -f "$BUILD_DIR/build.ninja" ]]; then
         say "$BUILD_DIR already configured — recompiling only (use './build.sh reconfigure' to wipe)."
     else
         configure

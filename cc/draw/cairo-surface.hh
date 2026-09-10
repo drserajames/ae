@@ -26,6 +26,15 @@ namespace ae::draw
     {
       public:
         CairoPdf(const std::filesystem::path& filename, double width, double height);
+        // Borrowed-context constructor (single-canvas compositor): draw into a sub-rectangle of a
+        // caller-supplied cairo_t (a shared page surface) instead of creating an owned surface. The
+        // drawing coordinate space is [0, logical_w] x [0, logical_h]; it is mapped (device-space
+        // translate + scale) onto the device rectangle (dst_x, dst_y, dst_w, dst_h) of `context` and
+        // clipped to it, so every existing draw primitive lands inside that rect. The context and its
+        // surface are NOT owned: the destructor restores the saved graphics state and leaves them
+        // intact (the caller finalises/writes the page). All other methods are unchanged. Used by the
+        // fully-vector signature-page compositor to place the tree + each section map onto one page.
+        CairoPdf(_cairo* context, double dst_x, double dst_y, double dst_w, double dst_h, double logical_w, double logical_h);
         ~CairoPdf();
         CairoPdf(const CairoPdf&) = delete;
         CairoPdf(CairoPdf&&) = delete;
@@ -93,6 +102,7 @@ namespace ae::draw
         _cairo_surface* surface_{nullptr};
         _cairo* context_{nullptr};
         std::string png_filename_{}; // non-empty => PNG backend; written on destruction
+        bool borrowed_{false};       // true => context_ is caller-owned (sub-rect draw); dtor only restores, never destroys
     };
 
 } // namespace ae::draw

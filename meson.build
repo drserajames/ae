@@ -130,6 +130,18 @@ sources_py = [
   'cc/map-draw/styled-draw.cc', # --- map-draw P2 milestone A (styled/semantic render) ---
   'cc/map-draw/label-placement.cc', # --- map-draw P2 milestone I (label auto-placement) ---
   'cc/draw/cairo-surface.cc', # --- map-draw (subsystem #1, revived) ---
+  # --- sigp-vector: fully-vector single-canvas signature-page compositor. Draws the tree +
+  #     section maps as vectors onto one Cairo page, so it needs the tal tree renderer
+  #     (draw-tree/settings/continent-map + geo continent colours) linked into ae_backend
+  #     alongside cairo (they were previously only in the tal-draw binary). Cairo is already an
+  #     ae_backend dependency for map-draw; these link the same shared cc/draw/cairo-surface. ---
+  'cc/py/sig-page.cc',
+  'cc/tal/sig-page.cc',
+  'cc/tal/draw-tree.cc',
+  'cc/tal/settings.cc',
+  'cc/tal/continent-map.cc',
+  'cc/geo/geographic-map.cc',
+  'cc/geo/geographic-path.cc',
 ]
 
 # --- tal (subsystem #3) — headless tree layout; see cc/tal/PORTING.md ---
@@ -412,14 +424,20 @@ ae_backend = python3.extension_module(
   install : true)
 
 if host_machine.system() == 'darwin'
-    # stubs for mypy
-    stubgen = find_program('stubgen')
+    # --- build-env: .pyi stubs for mypy — best-effort, never fatal ---
+    # find_program('stubgen') resolved to whichever interpreter last installed
+    # mypy (here a Python 3.10 one that is architecture-broken), so the target
+    # failed and, being the very last one, took the whole build down with it —
+    # ninja exited 1 after all 253 real targets had succeeded. Stubs are a
+    # developer nicety, so tools/gen-stubs.sh runs stubgen from the *build*
+    # interpreter when it has mypy, falls back to PATH, and warns + exits 0 when
+    # neither works.
     ae_backend_stubs = custom_target(
       'ae_backend_stubs',
       build_by_default: true,
       input : [ae_backend],
       output: ['stubs'],
-      command: [stubgen, '--package', 'ae_backend', '--output', '@OUTPUT@']
+      command: [find_program('tools/gen-stubs.sh'), python3.full_path(), meson.current_build_dir(), '@OUTPUT@']
                )
 endif
 

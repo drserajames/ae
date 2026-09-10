@@ -2,7 +2,9 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -399,7 +401,15 @@ namespace ae::map_draw
 
     // ----------------------------------------------------------------------
 
-    void export_styled_map(const Chart& chart, projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output, std::optional<LabelMode> label_mode)
+    // Shared render core: compute the styled map exactly as before, then draw it through a surface
+    // obtained from `make_surface(image_w, image_h)`. The two public entry points differ ONLY in the
+    // surface they supply — a file-bound CairoPdf (export_styled_map) or a borrowed sub-rectangle of a
+    // shared page context (export_styled_map_into) — so the file-output path is unchanged. `label_mode`
+    // (milestone I) is threaded through both entry points; when unset, `label_mode_used` below falls
+    // back to `label_mode_from_env()` exactly as it did before this function was extracted.
+    static void render_styled_map(const Chart& chart, projection_index projection_no, std::string_view style_name, double width,
+                                  const std::function<std::unique_ptr<ae::draw::CairoPdf>(double image_w, double image_h)>& make_surface,
+                                  std::optional<LabelMode> label_mode)
     {
         if (chart.projections().empty())
             throw std::runtime_error{"cannot draw styled map: chart has no projections"};
@@ -478,6 +488,13 @@ namespace ae::map_draw
         }
 
         // ---- resolve the front style (§1.2) ----
+        // Unlike a nested "{R:<name>}" reference (tolerated by resolve() for depth > 0), the
+        // caller-supplied front style name must exist: silently falling through here used to
+        // render the byte-identical unstyled base map for a typo'd/invented style name, which
+        // is a silent-corruption footgun in batch runs.
+        if (chart.styles().find_if_exists(style_name) == nullptr)
+            throw std::runtime_error{fmt::format("cannot draw styled map: unknown style \"{}\"", style_name)};
+
         Resolved resolved;
         resolve(chart.styles(), std::string{style_name}, resolved, 0);
 
@@ -744,7 +761,8 @@ namespace ae::map_draw
         const auto dev_x = [=](double x) { return (x - vp_x) / vp_w * image_w; };
         const auto dev_y = [=](double y) { return (y - vp_y) / vp_h * image_h; }; // NO Y-flip
 
-        ae::draw::CairoPdf surface{output, image_w, image_h};
+        std::unique_ptr<ae::draw::CairoPdf> surface_holder = make_surface(image_w, image_h);
+        ae::draw::CairoPdf& surface = *surface_holder;
         surface.background(WHITE);
 
         // ---- grid (kateri grid: colour #CCCCCC as rendered in the golden, 1px, step 1 map unit
@@ -753,10 +771,20 @@ namespace ae::map_draw
             const ::Color grid{0xCCCCCC};
             const double step_x = image_w / vp_w;
             const double step_y = image_h / vp_h;
-            for (double gx = 0.0; gx <= image_w + 0.5; gx += step_x)
-                surface.line(gx, 0.0, gx, image_h, grid, 1.0);
-            for (double gy = 0.0; gy <= image_h + 0.5; gy += step_y)
-                surface.line(0.0, gy, image_w, gy, grid, 1.0);
+            // Clamp each grid line's coordinate half a line width inside the surface. Without
+            // this, a boundary line that lands exactly on the device edge (e.g. gx == image_w)
+            // is a perfect tie for poppler-splash's pixel-snapping and rounds off-page, so the
+            // frame's right/bottom edge silently vanishes (see p2-figure-matrix §10.5/10.6).
+            // Interior lines (0.5 <= gx <= image_w - 0.5) are unaffected. Same reasoning as the
+            // AD renderer's border comment at cc/map-draw/draw.cc:712-716.
+            for (double gx = 0.0; gx <= image_w + 0.5; gx += step_x) {
+                const double x = std::clamp(gx, 0.5, image_w - 0.5);
+                surface.line(x, 0.0, x, image_h, grid, 1.0);
+            }
+            for (double gy = 0.0; gy <= image_h + 0.5; gy += step_y) {
+                const double y = std::clamp(gy, 0.5, image_h - 0.5);
+                surface.line(0.0, y, image_w, y, grid, 1.0);
+            }
         }
 
         // The point-label mode is resolved HERE rather than down in the label block because one
@@ -1111,6 +1139,32 @@ namespace ae::map_draw
                 rest.remove_prefix(nl + 1);
             }
         }
+    }
+
+    // File-output entry point (unchanged behaviour): create an owned CairoPdf bound to `output`
+    // (extension picks the backend) and render into it. `label_mode` selects one of milestone I's
+    // five label-placement modes; unset falls back to AE_MAP_DRAW_LABEL_AUTOPLACE (see
+    // render_styled_map / label_mode_from_env).
+    void export_styled_map(const Chart& chart, projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output, std::optional<LabelMode> label_mode)
+    {
+        render_styled_map(chart, projection_no, style_name, width,
+                          [&output](double image_w, double image_h) { return std::make_unique<ae::draw::CairoPdf>(output, image_w, image_h); },
+                          label_mode);
+    }
+
+    // Shared-surface entry point (single-canvas compositor): render into a sub-rectangle of the
+    // caller's Cairo context, letterboxed (aspect-preserving, centred) so a non-square map is not
+    // stretched. Same drawing calls as export_styled_map — only the surface differs. Same
+    // `label_mode` behaviour as export_styled_map.
+    void export_styled_map_into(const Chart& chart, projection_index projection_no, std::string_view style_name, double width,
+                                _cairo* context, double dst_x, double dst_y, double dst_w, double dst_h, std::optional<LabelMode> label_mode)
+    {
+        render_styled_map(chart, projection_no, style_name, width, [=](double image_w, double image_h) {
+            const double scale = (image_w > 0.0 && image_h > 0.0) ? std::min(dst_w / image_w, dst_h / image_h) : 1.0;
+            const double w = image_w * scale, h = image_h * scale;
+            const double x = dst_x + (dst_w - w) / 2.0, y = dst_y + (dst_h - h) / 2.0; // centre in the cell
+            return std::make_unique<ae::draw::CairoPdf>(context, x, y, w, h, image_w, image_h);
+        }, label_mode);
     }
 
 } // namespace ae::map_draw
