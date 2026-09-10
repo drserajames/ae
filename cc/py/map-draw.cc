@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +21,17 @@ void ae::py::map_draw(pybind11::module_& mdl)
     using namespace ae::chart::v3;
 
     auto sub = mdl.def_submodule("map_draw", "headless antigenic-map renderer (fidelity port of AD ChartDraw; see cc/map-draw/TODO.md)");
+
+    // Point-label placement mode for the styled path (milestone I). Passed as a name so the
+    // report / batch scripts can plumb a plain string through; empty means "use
+    // AE_MAP_DRAW_LABEL_AUTOPLACE", which itself defaults to "auto".
+    const auto label_mode_arg = [](const std::string& name) -> std::optional<ae::map_draw::LabelMode> {
+        if (name.empty())
+            return std::nullopt;
+        if (const auto mode = ae::map_draw::label_mode_from_name(name); mode.has_value())
+            return mode;
+        throw std::invalid_argument{"unrecognized label placement mode \"" + name + "\" (expected auto, auto-lines, inside or off)"};
+    };
 
     sub.def(
         "export_map",
@@ -60,13 +72,17 @@ void ae::py::map_draw(pybind11::module_& mdl)
     // --- P2 milestone A: styled (semantic c["R"] + c["p"]) render, kateri-compatible drop-in ---
     sub.def(
         "export_styled_map",
-        [](const std::filesystem::path& ace, const std::filesystem::path& output, const std::string& style, double width, size_t projection_no) {
+        [label_mode_arg](const std::filesystem::path& ace, const std::filesystem::path& output, const std::string& style, double width, size_t projection_no, const std::string& labels) {
             const Chart chart{ace};
-            ae::map_draw::export_styled_map(chart, projection_index{projection_no}, style, width, output);
+            ae::map_draw::export_styled_map(chart, projection_index{projection_no}, style, width, output, label_mode_arg(labels));
         },
-        "ace"_a, "output"_a, "style"_a, "width"_a = 800.0, "projection_no"_a = 0,
+        "ace"_a, "output"_a, "style"_a, "width"_a = 800.0, "projection_no"_a = 0, "labels"_a = "",
         pybind11::doc("Render a chart's on-chart semantic style (c[\"R\"] named style + c[\"p\"] base plot-spec) to output "
-                      "(.png raster, else PDF), mirroring kateri set_style + get_pdf. P2 milestone A."));
+                      "(.png raster, else PDF), mirroring kateri set_style + get_pdf. P2 milestone A.\n"
+                      "labels: placement mode for labels with no authored offset — \"auto\" (default: overlap-avoided, "
+                      "no leader lines), \"auto-lines\" (same, with leader lines), \"inside\" (centred in the point, "
+                      "shrunk, passage suffix stripped), \"off\" (keep every offset as authored). Empty = take it from "
+                      "AE_MAP_DRAW_LABEL_AUTOPLACE."));
 
     // --- P2 batch: load the chart ONCE, render many (style -> output) pairs ---
     // A report renders ~16 named styles from the SAME ~12 MB chart. `export_styled_map`
@@ -76,12 +92,13 @@ void ae::py::map_draw(pybind11::module_& mdl)
     // byte-identical PDFs while paying the load exactly once.
     sub.def(
         "export_styled_maps",
-        [](const std::filesystem::path& ace, const std::vector<std::pair<std::string, std::filesystem::path>>& jobs, double width, size_t projection_no) {
+        [label_mode_arg](const std::filesystem::path& ace, const std::vector<std::pair<std::string, std::filesystem::path>>& jobs, double width, size_t projection_no, const std::string& labels) {
+            const auto mode = label_mode_arg(labels);
             const Chart chart{ace}; // loaded ONCE, reused for every style
             for (const auto& [style, output] : jobs)
-                ae::map_draw::export_styled_map(chart, projection_index{projection_no}, style, width, output);
+                ae::map_draw::export_styled_map(chart, projection_index{projection_no}, style, width, output, mode);
         },
-        "ace"_a, "jobs"_a, "width"_a = 800.0, "projection_no"_a = 0,
+        "ace"_a, "jobs"_a, "width"_a = 800.0, "projection_no"_a = 0, "labels"_a = "",
         pybind11::doc("Batch of export_styled_map: load the chart from `ace` once and render each (style_name, output_path) "
                       "pair in `jobs`. Byte-identical to calling export_styled_map per pair, but hoists the chart load out of "
                       "the loop (P2 batch optimisation for the report's ~16-style-per-lab render)."));

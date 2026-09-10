@@ -398,7 +398,7 @@ namespace ae::map_draw
 
     // ----------------------------------------------------------------------
 
-    void export_styled_map(const Chart& chart, projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output)
+    void export_styled_map(const Chart& chart, projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output, std::optional<LabelMode> label_mode)
     {
         if (chart.projections().empty())
             throw std::runtime_error{"cannot draw styled map: chart has no projections"};
@@ -924,17 +924,21 @@ namespace ae::map_draw
 
         // ---- point labels (on top of points) ----
         // Milestone I: labels the operator has NOT hand-placed (no `l.p` on the chart) are
-        // auto-placed into free space, with an AD-style tether when they end up far from their
-        // point; authored offsets are honoured verbatim. See cc/map-draw/label-placement.hh.
+        // placed by cc/map-draw/label-placement.{hh,cc} in one of three modes — `auto`
+        // (default: overlap-avoided, no leader lines), `auto-lines` (the same search plus an
+        // AD-style tether when the label lands far from its point), `inside` (drawn centred in
+        // the point at a shrunk font, passage suffix stripped) — or not placed at all
+        // (`off`/`0`). Authored offsets are honoured verbatim in every mode.
         //
         // This is the one place the native renderer deliberately draws something neither AD nor
-        // kateri would (both simply honour the offset hint), so it is switchable: setting
-        // AE_MAP_DRAW_LABEL_AUTOPLACE=0 pins every label to its offset, which is what the
-        // fidelity harness needs when it measures parity against a kateri golden.
+        // kateri would (both simply honour the offset hint), so it is switchable: the caller
+        // passes a mode, or AE_MAP_DRAW_LABEL_AUTOPLACE picks one for a whole batch run.
+        // `=0` pins every label to its offset, which is what the fidelity harness needs when it
+        // measures parity against a kateri golden.
         {
-            const char* const autoplace_env = std::getenv("AE_MAP_DRAW_LABEL_AUTOPLACE");
-            const bool autoplace = autoplace_env == nullptr || std::string_view{autoplace_env} != "0";
-            std::vector<size_t> label_points; // parallel to `requests`
+            const LabelMode mode = label_mode.value_or(label_mode_from_env());
+            // Text + font size as DRAWN, parallel to `requests` (`inside` mode strips and shrinks).
+            std::vector<std::pair<std::string, double>> label_draw;
             std::vector<LabelRequest> requests;
             std::vector<LabelObstacle> obstacles;
             obstacles.reserve(order.size() + 2);
@@ -948,16 +952,27 @@ namespace ae::map_draw
                 obstacles.push_back(LabelObstacle{cx - r, cy - r, cx + r, cy + r}); // every drawn point is ink
                 if (!p.has_label)
                     continue;
-                const auto [tw, th] = surface.text_size(p.label_text, p.label_size, true);
-                requests.push_back(LabelRequest{cx, cy, r, tw, th, p.label_dx, p.label_dy, p.label_offset_authored || !autoplace});
-                label_points.push_back(i);
+                const bool pinned = p.label_offset_authored || mode == LabelMode::pinned;
+                std::string text{p.label_text};
+                double size = p.label_size;
+                if (mode == LabelMode::inside && !pinned) {
+                    // Shrink the (suffix-stripped) text to the point's inscribed box, then
+                    // re-measure at the size we will actually draw — the scaling above assumes
+                    // metrics are linear in font size, which is only approximately true.
+                    text = std::string{strip_passage_suffix(text)};
+                    const auto [w0, h0] = surface.text_size(text, size, true);
+                    size = inside_font_size(size, w0, h0, r);
+                }
+                const auto [tw, th] = surface.text_size(text, size, true);
+                requests.push_back(LabelRequest{cx, cy, r, tw, th, p.label_dx, p.label_dy, pinned});
+                label_draw.emplace_back(std::move(text), size);
             }
-            if (legend_shown)
-                obstacles.push_back(LabelObstacle{legend_box_x, legend_box_y, legend_box_x + legend_box_w, legend_box_y + legend_box_h});
+            if (legend_shown) // furniture made of text: a label sliding under it is unreadable
+                obstacles.push_back(LabelObstacle{legend_box_x, legend_box_y, legend_box_x + legend_box_w, legend_box_y + legend_box_h, true});
             if (title_shown)
-                obstacles.push_back(LabelObstacle{title_off_x, title_off_y, title_off_x + title_w, title_off_y + title_h});
+                obstacles.push_back(LabelObstacle{title_off_x, title_off_y, title_off_x + title_w, title_off_y + title_h, true});
 
-            const auto placed = place_labels(requests, obstacles, image_w, image_h);
+            const auto placed = place_labels(requests, obstacles, image_w, image_h, mode);
 
             // Tethers first, so each label's white halo masks the line where it meets the text.
             // AD map_elements LabelTether convention (also used by cc/tal/draw-tree.cc for
@@ -971,9 +986,9 @@ namespace ae::map_draw
             // points they sit on.
             constexpr double kPointLabelHaloWidthFactor = 0.04;
             for (size_t k = 0; k < placed.size(); ++k) {
-                const PR& p = pr[label_points[k]];
+                const auto& [text, size] = label_draw[k];
                 // The box is [x0, y0]..[x1, y1] with the baseline-left anchor at (x0, y1).
-                surface.text_font(placed[k].x0, placed[k].y1, p.label_text, p.label_size, BLACK, false, false, p.label_size * kPointLabelHaloWidthFactor);
+                surface.text_font(placed[k].x0, placed[k].y1, text, size, BLACK, false, false, size * kPointLabelHaloWidthFactor);
             }
         }
 

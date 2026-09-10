@@ -110,13 +110,52 @@ corresponding **cached AD PNG**, verified **at high zoom, side-by-side**.
 `cc/map-draw/label-placement.{hh,cc}`, used by `styled-draw.cc` (`export_styled_map`).
 
 **What it does.** A label whose style modifier carries no `l.p` — the operator has not
-hand-adjusted it — is searched into free space instead of always being dropped straight below
-its point, and gets an AD-style tether (`LabelTether{BLACK, 0.3px}`) when it ends up far enough
-away that the association would otherwise be lost. Labels with an authored `l.p` are honoured
-verbatim and become obstacles for the rest. Candidates are enumerated in kateri's *offset
-space*, so a placed label renders through the same `label_offset()` mapping as an authored one,
-and kateri's `[0, 1]` default is the first candidate (with a small bonus) — an unobstructed
-label does not move.
+hand-adjusted it — is placed by this module instead of always being dropped straight below its
+point. Labels with an authored `l.p` are honoured verbatim **in every mode** and become
+obstacles for the rest: a hand-adjusted offset is the operator's explicit instruction about
+that label. Candidates are enumerated in kateri's *offset space*, so a placed label renders
+through the same `label_offset()` mapping as an authored one, and kateri's `[0, 1]` default is
+the first candidate (with a small bonus) — an unobstructed label does not move.
+
+### The four modes
+
+| Mode | What un-authored labels do |
+|------|----------------------------|
+| **`auto`** (default) | Searched into free space, **no leader lines ever**. |
+| `auto-lines` | The same search, plus an AD-style tether (`LabelTether{BLACK, 0.3px}`) once the label lands far enough away that the association would be lost. |
+| `inside` | Drawn **centred in the point** at a font shrunk to fit it, with a trailing `-cell`/`-egg` passage suffix stripped. No tethers, no search. |
+| `off` (aliases `pinned`, `0`) | No auto-placement at all — every label exactly at its offset. What the fidelity harness needs when it measures parity against a kateri golden. |
+
+**Selecting one.** `ae::map_draw::export_styled_map(..., std::optional<LabelMode>)` in C++;
+`labels="auto"|"auto-lines"|"inside"|"off"` on `ae_backend.map_draw.export_styled_map` /
+`export_styled_maps` (and `NativeRenderer(label_mode=...)` in `py/ae/report/map_renderer.py`);
+or, for a batch run with no code change, the env var **`AE_MAP_DRAW_LABEL_AUTOPLACE`** taking
+the same names (`=0` still means "pin everything"). An explicit argument beats the env var;
+neither set means `auto`. An unrecognised env value falls back to `auto` — a render must not
+fail on a typo — whereas an unrecognised API name raises.
+
+**Why `auto` is tuned differently from `auto-lines`.** A leader line *tells* the reader which
+point a label belongs to, so under `auto-lines` distance is merely untidy and covering a point
+is the greater sin. With no line, proximity **is** the association, so the balance inverts.
+`auto` therefore charges ~3.5x the linear and ~4x the quadratic distance cost with a hinge past
+half a text-height, and in exchange lets a label cover the point cloud at 1/5 the cost **and
+saturates that cost at 4 em²**. The saturation matters most: obstacles are summed rather than
+unioned, so without a cap a candidate inside a cluster of overlapping points is charged several
+times over for the same ink and every label flees the cluster wholesale. (Text obstacles —
+legend, title, pinned labels — stay expensive and uncapped in `auto`: text over a point still
+reads through the label's white halo, text over text never does.) On the report H3 serology map
+this pulls the three un-authored labels from gaps of 5.0 / 1.6 / 0.4 text-heights down to
+0 / 0 / 0.4 — each one touching or all but touching its own point.
+
+**`inside`: what happens when the label does not fit.** The font is scaled so the text box is
+inscribed in the point (`inside_font_size`), but never below
+`max(5 px, 0.35 x authored size)` — and a label that cannot reach that floor is **drawn at the
+floor and allowed to overflow its point**, not moved outside. Overflowing still reads as
+belonging to that point (it is centred on it), whereas silently reverting some labels to
+outside placement would produce a mixed rendering that looks like a bug rather than a choice;
+the operator asked for inside labels, and an overflow is visible feedback that the point is too
+small for that name. The suffix strip is a whole trailing `-cell`/`-egg` only (case-insensitive)
+and never consumes the entire label.
 
 **There is no AD algorithm to port.** AD's `acmacs-draw` `Points::draw_labels` (and the obsolete
 `map_elements::Labels::draw`) just evaluate `PointLabel::text_offset()` for the authored offset

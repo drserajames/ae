@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <utility>
 
 #include "map-draw/label-placement.hh"
@@ -28,24 +30,58 @@ namespace ae::map_draw
         }};
         constexpr std::array<double, 9> kScales{{1.0, 1.35, 1.8, 2.4, 3.2, 4.3, 5.8, 7.8, 10.5}};
 
-        // Cost weights. Ink/off-canvas overlap must dominate everything else: a label that
-        // covers a point is always worse than a label that merely sits further away. The
-        // distance terms are deliberately strong (and superlinear) — a label that wanders to
-        // the far side of the map is technically collision-free but reads as belonging to
-        // nothing, which is worse than grazing a point or two.
-        constexpr double kWeightInk = 25.0;           // per unit of (overlap area / em^2) with map ink
+        // Mode-independent cost weights. Running off the page or over another auto label is
+        // never acceptable whatever the mode, so these dominate; the ink-vs-distance trade
+        // that DOES depend on the mode lives in Tuning below. All areas are in em^2 and all
+        // lengths in em (em = the label's own text height), so a big label's collisions
+        // weigh the same as a small one's.
         constexpr double kWeightOffCanvas = 400.0;    // per unit of (area / em^2) outside the image
         constexpr double kWeightLabel = 90.0;         // per unit of (overlap area / em^2) with another label
-        constexpr double kWeightGap = 4.0;            // per em of clear distance from the point
-        constexpr double kWeightGapSquared = 1.2;     // per em^2 — keeps labels from drifting away
         constexpr double kWeightDirection = 1.5;      // deviating from "below the point"
         constexpr double kWeightLeader = 1.5;         // a tether is a cost, not free
         constexpr double kWeightLeaderOverInk = 12.0; // per em of tether crossing points/pinned labels
         constexpr double kWeightLeaderCross = 6.0;    // two tethers crossing
         constexpr double kWeightLeaderOverText = 8.0; // per em of tether running through another label
 
+        // Distance vs ink is the ONLY thing that differs between the two auto modes, and it
+        // differs a lot. With a tether the reader is TOLD which point a label belongs to, so
+        // distance is merely untidy and stepping on a point is the greater sin. Without one,
+        // proximity IS the association, so the balance inverts: a displaced label must stay
+        // within reading distance of its own point even at the price of covering some ink —
+        // which the labels' white halo (and the operator's own authored offsets, several of
+        // which sit squarely on the point cloud) show to be perfectly legible.
+        constexpr double kNoInkSaturation = 1.0e9; // ink_saturation value meaning "never saturates"
+
+        struct Tuning
+        {
+            double weight_ink{0.0};         // per unit of (overlap area / em^2) with the point cloud
+            double ink_saturation{0.0};     // em^2 of point-cloud overlap past which it stops counting
+            double weight_text{0.0};        // ditto for TEXT ink: legend, title, pinned labels
+            double weight_gap{0.0};         // per em of clear distance from the point
+            double weight_gap_squared{0.0}; // per em^2 — keeps labels from drifting away
+            double gap_soft_limit{0.0};     // em of clear distance past which...
+            double weight_gap_excess{0.0};  // ...every further em^2 costs this (hinge; 0 = no hinge)
+            bool leaders{false};
+        };
+
+        // `automatic_lines`: the milestone-I tuning, unchanged (renders must stay identical) —
+        // it scored every obstacle, text or not, with the one uncapped ink weight.
+        constexpr Tuning kTuningLines{25.0, kNoInkSaturation, 25.0, 4.0, 1.2, 0.0, 0.0, true};
+        // `automatic` (default): the point cloud costs 1/5 as much AND saturates at 4 em^2,
+        // TEXT obstacles cost as much as another auto label (kWeightLabel), and distance costs
+        // ~3.5x the linear and ~4x the quadratic plus a hinge past half a text-height. The
+        // saturation is what actually keeps these labels home: obstacles are summed rather than
+        // unioned, so without a cap a spot inside a cluster of overlapping points is charged
+        // several times over for the same ink and every label flees the cluster entirely.
+        constexpr Tuning kTuningNoLines{5.0, 4.0, 90.0, 14.0, 5.0, 0.5, 30.0, false};
+
         // Clearance kept between a label box and the ink it must avoid, in em.
         constexpr double kBoxPadEm = 0.12;
+        // `inside` mode: fraction of the point's inscribed box the text may use, and the font
+        // size below which shrinking stops (whichever of the two floors is larger).
+        constexpr double kInsideFitMargin = 0.95;
+        constexpr double kInsideMinFontSize = 5.0;    // device px / PDF points
+        constexpr double kInsideMinFontFactor = 0.35; // of the authored label size
         // Hysteresis toward kateri's [0, 1] default, so a label with no real reason to move
         // does not drift off it and the render stays as close to the pre-auto-placement one
         // as the collisions allow.
@@ -54,6 +90,14 @@ namespace ae::map_draw
         struct Rect
         {
             double x0{0.0}, y0{0.0}, x1{0.0}, y1{0.0};
+        };
+
+        // A rectangle the placer must avoid, plus which of the two ink weights it is scored
+        // with (see LabelObstacle::text).
+        struct Ink
+        {
+            Rect box{};
+            bool text{false};
         };
 
         double overlap_area(const Rect& a, const Rect& b)
@@ -133,7 +177,9 @@ namespace ae::map_draw
 
         // Resolve an offset pair to a device text box + its tether, exactly as the renderer
         // will. The box is [anchor, anchor + width] x [baseline - height, baseline].
-        Candidate make_candidate(const LabelRequest& lab, double off_x, double off_y)
+        // `leaders` is the mode's tether permission — the modes that draw no lines must not
+        // score any of the tether terms either.
+        Candidate make_candidate(const LabelRequest& lab, double off_x, double off_y, bool leaders)
         {
             Candidate c{};
             c.offset_x = off_x;
@@ -151,7 +197,7 @@ namespace ae::map_draw
             // is deliberately low: an untethered label a whole text-height from its point is
             // more confusing than a short connector is ugly.
             const double leader_threshold = std::max(lab.point_radius * 0.6, lab.text_h * 0.75);
-            if (gap > leader_threshold && dist > 1.0e-6 && lab.text_w > 0.0 && lab.text_h > 0.0) {
+            if (leaders && gap > leader_threshold && dist > 1.0e-6 && lab.text_w > 0.0 && lab.text_h > 0.0) {
                 c.leader = true;
                 const double ux = (nx - lab.point_x) / dist, uy = (ny - lab.point_y) / dist;
                 c.lx0 = lab.point_x + ux * lab.point_radius;
@@ -168,28 +214,87 @@ namespace ae::map_draw
 
     // ----------------------------------------------------------------------
 
-    std::vector<LabelPlacement> place_labels(const std::vector<LabelRequest>& labels, const std::vector<LabelObstacle>& obstacles, double canvas_w, double canvas_h)
+    std::optional<LabelMode> label_mode_from_name(std::string_view name)
     {
+        if (name == "auto" || name == "1")
+            return LabelMode::automatic;
+        if (name == "auto-lines" || name == "lines")
+            return LabelMode::automatic_lines;
+        if (name == "inside")
+            return LabelMode::inside;
+        if (name == "off" || name == "pinned" || name == "0")
+            return LabelMode::pinned;
+        return std::nullopt;
+    }
+
+    LabelMode label_mode_from_env()
+    {
+        const char* const env = std::getenv("AE_MAP_DRAW_LABEL_AUTOPLACE");
+        if (env == nullptr || *env == '\0')
+            return LabelMode::automatic;
+        return label_mode_from_name(env).value_or(LabelMode::automatic);
+    }
+
+    // ----------------------------------------------------------------------
+
+    std::string_view strip_passage_suffix(std::string_view label)
+    {
+        const auto ends_with_ci = [label](std::string_view suffix) {
+            if (label.size() <= suffix.size()) // "<= " : never strip the whole label away
+                return false;
+            for (size_t i = 0; i < suffix.size(); ++i) {
+                const auto c = static_cast<unsigned char>(label[label.size() - suffix.size() + i]);
+                if (std::tolower(c) != static_cast<unsigned char>(suffix[i]))
+                    return false;
+            }
+            return true;
+        };
+        for (const std::string_view suffix : {std::string_view{"-cell"}, std::string_view{"-egg"}}) {
+            if (ends_with_ci(suffix))
+                return label.substr(0, label.size() - suffix.size());
+        }
+        return label;
+    }
+
+    double inside_font_size(double font_size, double text_w, double text_h, double point_radius)
+    {
+        const double diagonal = std::hypot(text_w, text_h);
+        // The largest text box of this aspect ratio inscribed in the point has diagonal 2r.
+        const double fitting = diagonal > 0.0 ? font_size * (2.0 * point_radius * kInsideFitMargin / diagonal) : font_size;
+        const double floor_size = std::max(kInsideMinFontSize, font_size * kInsideMinFontFactor);
+        return std::clamp(fitting, std::min(floor_size, font_size), font_size);
+    }
+
+    // ----------------------------------------------------------------------
+
+    std::vector<LabelPlacement> place_labels(const std::vector<LabelRequest>& labels, const std::vector<LabelObstacle>& obstacles, double canvas_w, double canvas_h, LabelMode mode)
+    {
+        const Tuning tuning = mode == LabelMode::automatic_lines ? kTuningLines : kTuningNoLines;
         std::vector<LabelPlacement> result(labels.size());
 
         // Pinned labels keep their authored offset verbatim and become obstacles for the rest
         // (an operator-placed label is a fact of the drawing, like a point).
-        std::vector<Rect> ink;
+        std::vector<Ink> ink;
         ink.reserve(obstacles.size() + labels.size());
         for (const auto& o : obstacles)
-            ink.push_back(Rect{o.x0, o.y0, o.x1, o.y1});
+            ink.push_back(Ink{Rect{o.x0, o.y0, o.x1, o.y1}, o.text});
 
         std::vector<std::size_t> autos; // indexes into `labels` that we actually place
         for (std::size_t i = 0; i < labels.size(); ++i) {
-            const Candidate c = make_candidate(labels[i], labels[i].offset_x, labels[i].offset_y);
+            // `inside` mode drops each auto label onto offset [0, 0] — kateri's "blended
+            // across the point" branch of label_offset(), i.e. the text box centred on the
+            // point centre. Nothing to search: the whole point of the mode is that the label
+            // sits ON the thing it names.
+            const bool centre_in_point = mode == LabelMode::inside && !labels[i].pinned;
+            const Candidate c = centre_in_point ? make_candidate(labels[i], 0.0, 0.0, false) : make_candidate(labels[i], labels[i].offset_x, labels[i].offset_y, false);
             result[i] = LabelPlacement{c.offset_x, c.offset_y, c.box.x0, c.box.y0, c.box.x1, c.box.y1, false, 0.0, 0.0, 0.0, 0.0};
             // A zero-size label (the report's `-no-label` style variants set `l.s` to 0, which
             // draws nothing) is left exactly where it is: it is neither an obstacle nor worth
             // placing, and tethering to an invisible box would draw a line to nowhere.
             if (labels[i].text_w <= 0.0 || labels[i].text_h <= 0.0)
                 continue;
-            if (labels[i].pinned)
-                ink.push_back(c.box);
+            if (labels[i].pinned || centre_in_point)
+                ink.push_back(Ink{c.box, true});
             else
                 autos.push_back(i);
         }
@@ -211,19 +316,33 @@ namespace ae::map_draw
                 const double len = std::hypot(dx, dy);
                 const double dir_pen = len > 0.0 ? (1.0 - dy / len) / 2.0 : 1.0;
                 for (const double s : kScales) {
-                    Candidate c = make_candidate(lab, dx * s, dy * s);
+                    Candidate c = make_candidate(lab, dx * s, dy * s, tuning.leaders);
                     const double pad = em * kBoxPadEm;
                     const Rect padded{c.box.x0 - pad, c.box.y0 - pad, c.box.x1 + pad, c.box.y1 + pad};
                     double cost = 0.0;
-                    for (const Rect& r : ink) {
-                        cost += kWeightInk * overlap_area(padded, r) / em2;
+                    // Obstacles are summed, not unioned, so a spot deep in a cluster of
+                    // overlapping points is charged for each of them. That is what makes a
+                    // label flee a dense cloud entirely; `ink_saturation` caps it, because past
+                    // a certain amount of covered ink a label is no less readable for covering
+                    // more, and proximity to its own point should take over. Text obstacles are
+                    // never capped — text over text is unreadable however little of it there is.
+                    double ink_area = 0.0;
+                    for (const Ink& r : ink) {
+                        const double area = overlap_area(padded, r.box) / em2;
+                        if (r.text)
+                            cost += tuning.weight_text * area;
+                        else
+                            ink_area += area;
                         if (c.leader)
-                            cost += kWeightLeaderOverInk * segment_in_rect(c.lx0, c.ly0, c.lx1, c.ly1, r) / em;
+                            cost += kWeightLeaderOverInk * segment_in_rect(c.lx0, c.ly0, c.lx1, c.ly1, r.box) / em;
                     }
+                    cost += tuning.weight_ink * std::min(ink_area, tuning.ink_saturation);
                     cost += kWeightOffCanvas * off_canvas_area(c.box, canvas_w, canvas_h) / em2;
                     const auto [nx, ny] = closest_on_rect(c.box, lab.point_x, lab.point_y);
                     const double gap = std::max(0.0, std::hypot(nx - lab.point_x, ny - lab.point_y) - lab.point_radius) / em;
-                    cost += kWeightGap * gap + kWeightGapSquared * gap * gap;
+                    cost += tuning.weight_gap * gap + tuning.weight_gap_squared * gap * gap;
+                    if (const double excess = gap - tuning.gap_soft_limit; tuning.weight_gap_excess > 0.0 && excess > 0.0)
+                        cost += tuning.weight_gap_excess * excess * excess;
                     cost += kWeightDirection * dir_pen;
                     if (c.leader)
                         cost += kWeightLeader;

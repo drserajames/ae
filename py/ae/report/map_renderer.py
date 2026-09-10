@@ -20,6 +20,10 @@ The backend is chosen by the env var `AE_REPORT_MAP_RENDERER`:
 Native is the default report figure renderer (headless, in-process, Linux-capable) after P2
 sign-off. This only affects the report's batch map-PDF step; kateri remains the interactive
 viewer (drag/Relax/GUI) and the fallback here via `AE_REPORT_MAP_RENDERER=kateri`.
+
+Point-label placement is a native-only knob (kateri always honours the offset hint):
+`NativeRenderer(label_mode=...)` or, for a whole batch run, `AE_MAP_DRAW_LABEL_AUTOPLACE` —
+`auto` (default), `auto-lines`, `inside`, `off`. See cc/map-draw/label-placement.hh.
 """
 import os
 import sys
@@ -82,9 +86,18 @@ class NativeRenderer(MapRenderer):
     (`ae_backend.map_draw.export_styled_map`), which resolves the same `c["R"]` named style +
     `c["p"]` base plot-spec kateri consumes. No kateri process, no socket. `export_styled_map`
     reads a chart from an `.ace` file, so the report's in-memory styled chart is written to a
-    short-lived temp `.ace` for each render."""
+    short-lived temp `.ace` for each render.
+
+    `label_mode` picks how point labels with no authored offset are placed: `"auto"` (the
+    native default: overlap-avoided, no leader lines), `"auto-lines"` (same, with leader
+    lines), `"inside"` (centred in the point, shrunk, passage suffix stripped) or `"off"`
+    (every label exactly at its offset). `""` defers to `AE_MAP_DRAW_LABEL_AUTOPLACE`, which
+    is how a batch run selects a mode without touching code. Authored offsets always win."""
 
     backend_name = "native"
+
+    def __init__(self, label_mode: str = ""):
+        self.label_mode = label_mode
 
     async def export_pdf(self, chart: ae_backend.chart_v3.Chart, style_name: str, output_filename: Path, width: float = 800.0):
         """Write the styled chart to a temp `.ace` and render `style_name` natively to
@@ -100,7 +113,7 @@ class NativeRenderer(MapRenderer):
         try:
             chart.write(tmp_path)
             print(f">>> [map_renderer.native] rendering style {style_name!r} -> {output_filename}", file=sys.stderr)
-            ae_backend.map_draw.export_styled_map(tmp_path, Path(output_filename), style_name, width, 0)
+            ae_backend.map_draw.export_styled_map(tmp_path, Path(output_filename), style_name, width, 0, self.label_mode)
         finally:
             try:
                 tmp_path.unlink()
@@ -128,7 +141,7 @@ class NativeRenderer(MapRenderer):
             native_jobs = [(style_name, str(Path(output_filename))) for style_name, output_filename in jobs]
             for style_name, output_filename in jobs:
                 print(f">>> [map_renderer.native] (batch) rendering style {style_name!r} -> {output_filename}", file=sys.stderr)
-            ae_backend.map_draw.export_styled_maps(tmp_path, native_jobs, width, 0)
+            ae_backend.map_draw.export_styled_maps(tmp_path, native_jobs, width, 0, self.label_mode)
         finally:
             try:
                 tmp_path.unlink()

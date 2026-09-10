@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "chart/v3/index.hh"
+#include "map-draw/label-placement.hh"
 
 // ----------------------------------------------------------------------
 
@@ -61,7 +62,11 @@ namespace ae::map_draw
     // fixed AD-chains pipeline). `style_name` selects a front style in chart.styles();
     // `width` is the output width in device px / PDF points. Output extension picks backend
     // (.png raster, else PDF). See cc/map-draw/STYLED-DRAW.md and P2-RENDER-DESIGN.md §1.2/§2.2.
-    void export_styled_map(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output);
+    // `label_mode` selects how point labels WITHOUT an authored `l.p` offset are placed
+    // (milestone I; see label-placement.hh): auto / auto-lines / inside / pinned. Unset means
+    // "whatever AE_MAP_DRAW_LABEL_AUTOPLACE says", which defaults to LabelMode::automatic.
+    void export_styled_map(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output,
+                           std::optional<LabelMode> label_mode = {});
 
     // Procrustes render: draw `secondary` framed like `primary`, with arrows for common
     // points (threshold 0.3) and an "RMS: {rms:.4f}" title. See make_pc in chains chart.py.
