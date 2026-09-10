@@ -1,7 +1,12 @@
 # ae — Porting Roadmap (from AD / Acmacs-D)
 
-**Last updated: 2026-09-10** (second pass — records the milestone I / K outcomes, the
-`sigp-vector` review, and the newly-found open defects; the first pass predated all of them).
+**Last updated: 2026-09-10** (third pass — folds in three previously-undocumented branches
+(`renderer-correctness`, `build-env-fixes`, `serum-circle-style-persist`) that close or
+partially-close several of the second pass's open defects and remove milestone K's
+serum-coverage persistence blocker, and corrects milestone I's mode count from three to five
+by reading the actual `map-draw-label-placement` source; the first two passes predated all of
+this. Second pass recorded the milestone I / K outcomes, the `sigp-vector` review, and the
+newly-found open defects; the first pass predated all of them).
 
 **What this file is.** The record of the AD → ae port: the subsystem table, the
 per-subsystem milestones and their verification evidence, and the **coordination rules**
@@ -82,7 +87,7 @@ live tracker; the summary here is a signpost, not a substitute.**
 | **F** serum circles · **G** serum coverage | 🟢 | `67e9b0c`; fill/alpha bugs fixed in `73a8439`/`dc32bd0` |
 | **H** time-series / continent / serology / pale families | 🟢 (folded into E's composed-family work; serology legend paling + multi-line title in `da7c37e`) | |
 | **J** `ae.report` renderer seam + flag | 🟢 | `5abb295` (seam) + **`a7f51c7` (native made the default)**; batch path `8bdd16e`; the last `c["p"]`/kateri dependency dropped by the native semantic→legacy bake (`fc920c4`, PR #32) |
-| **I** **label auto-placement** | 🟡 **implemented, unmerged** | branch `map-draw-label-placement`; mode work in flight — see below |
+| **I** **label auto-placement** | 🟡 **implemented, unmerged** | branch `map-draw-label-placement` (7 commits); **five** selectable modes, `automatic` the default — see below |
 | **K** **figure-matrix sign-off** | 🟡 **partial — "K′"** | branch `p2-figure-matrix`; **5 of 9 families** signed off — see below |
 
 ### Open item — milestone I: label auto-placement
@@ -128,10 +133,44 @@ would *lower* chains fidelity.
 **This diverges from the kateri golden by design** for serology maps, which milestone K must account
 for (hence the disable switch).
 
-**In flight (2026-09-10):** three selectable labelling modes — **(a)** auto-placed with **no leader
-lines** (the new default; the placer is being retuned so a label with no tether still reads as
-belonging to its point), **(b)** auto-placed *with* leader lines (the behaviour described above), and
-**(c)** small labels drawn **inside** the antigen with the trailing `-cell`/`-egg` stripped.
+**Five selectable labelling modes (corrected 2026-09-10 — supersedes an earlier three-mode
+framing that predated `inside_layered` and the exact default-tuning rationale below)**, all on
+the unmerged `map-draw-label-placement` branch (7 commits ahead of `main`, tip `863c8c3`). Read
+straight from the "FIVE MODES" doc comment at the top of
+[`cc/map-draw/label-placement.hh`](cc/map-draw/label-placement.hh) (`enum class LabelMode {
+automatic, automatic_lines, inside, inside_layered, pinned }`), summarised here:
+
+- **`automatic`** (the default) — auto-placed, never tethered. Because an untethered label has
+  nothing but proximity to say which point it names, this mode is tuned to stay tight to its own
+  point: a much heavier distance penalty than `automatic_lines`, a hinge past half a text-height
+  of clear space, and a saturating point-cloud penalty so a candidate inside a dense cluster isn't
+  charged repeatedly for the same ink.
+- **`automatic_lines`** — the same search, tuned loosely, plus an AD-style tether
+  (`LabelTether{BLACK, 0.3px}`, the same convention `cc/tal/draw-tree.cc` already uses for
+  auto-placed MRCA labels) once a label ends up far enough away that the association would
+  otherwise be lost. Distance is cheap here because the leader line carries the association.
+- **`inside`** — every label drawn **centred in its point** (offset `[0, 0]`), split across lines
+  and shrunk to fit the point's circle, trailing passage suffix (`-cell`/`-egg`) stripped. Nothing
+  to avoid, tether, or search for.
+- **`inside_layered`** — the *same* layout as `inside`; only the paint order differs. The caller
+  interleaves each label with its own point in z-order (point, its label, then the next point)
+  instead of painting every point and only then every label, so where two antigens overlap, the
+  upper point's disk covers the lower one's label the same way it already covers the lower one's
+  ink — `inside` smears overlapping labels together, `inside_layered` reads cleanly.
+- **`pinned`** — no auto-placement at all: every label keeps its offset. This is the
+  pre-milestone-I behaviour and what the fidelity harness uses to measure parity against a kateri
+  golden.
+
+Authored `l.p` offsets are honoured verbatim in `automatic`, `automatic_lines` and `pinned` (and
+are obstacles for the rest); the `inside` pair is the deliberate exception — an authored offset is
+an instruction about where *outside* the point the label goes, which inside-placement has no use
+for, so it is ignored there. Selection: `AE_MAP_DRAW_LABEL_AUTOPLACE` via `label_mode_from_env()`
+(names `auto`/`auto-lines`/`inside`/`inside-layered`/`off`; aliases `1`=auto,
+`layered`=inside-layered, `0`/`pinned`=off; an unrecognised value falls back to `automatic` rather
+than failing the render) or an explicit `LabelMode` passed to `export_styled_map`. Consumed in
+`cc/map-draw/styled-draw.cc` around the label-drawing block (`label_mode_used`,
+`labels_inside_points(mode)`, `place_labels(...)`, verified by reading that branch's
+`styled-draw.cc` directly).
 
 ### Open item — milestone K: figure-matrix sign-off — **partial ("K′")**
 
@@ -170,7 +209,7 @@ renderer failure):
 
 | family | blocker | what would close it |
 |--------|---------|---------------------|
-| **serum circles / coverage** ⚠ | `sc-*`/`-sci-*`/`-sco-*` styles are built in-memory at addendum time and **never persisted** (verified: zero such styles across 69 charts in 3 runs), though 1852 goldens exist | persist the addendum styles into `styled.ace`, **or** re-run `addendum-serum-coverage.py` under `AE_REPORT_MAP_RENDERER=kateri` writing goldens + a chart that carries the styles |
+| **serum circles / coverage** ⚠ | `sc-*`/`-sci-*`/`-sco-*` styles are built in-memory at addendum time and **were never persisted** (verified: zero such styles across 69 charts in 3 runs), though 1852 goldens exist. **Blocker removed, unmerged (2026-09-10):** the `serum-circle-style-persist` branch (2 commits, `5fc2c6a`+`3b31a78`) adds `map_renderer.write_render_chart()`, wired in opt-in (`AE_REPORT_PERSIST_RENDER_CHART` / `persist_chart=`, off by default) to `serum_coverage_export` (→ `serum-coverage/styled-serum-coverage.ace`) and `multiple_circles.generate_lab` (→ `<lab>/styled-multiple-circles.ace`), so the chart these maps are drawn from can now be saved verbatim instead of discarded. Round trip verified exact by the branch author (20/20 `sc-*` maps pixel-identical on `test/chart1.ace`; 284/284 at production scale, 6925 antigens × 142 sera). Also ships a runnable recipe for the reference pass itself: `tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md` (on that branch). | The persistence blocker is gone (unmerged) — **but the reference pass has not been run.** What still closes it: a real kateri golden pass (macOS) per that recipe, then the pixel comparison. **F and G remain pixel-unverified; this update does not change that.** |
 | info maps | no `out.1.info-*.pdf` in any of 6 report runs; 171/171 render clean, nothing to diff | one kateri `export_info` pass, then re-run the harness |
 | multiple-serum-circles | committed references are `%PDF-1.4 /Producer (R 4.2.0)` — R/Racmacs output, ~11 months older than the charts | a kateri reference pass for `mc-plain`/`mc-circles` |
 | signature-page section maps | never persisted standalone; also bypass the `MapRenderer` seam entirely | route `signature_page.py` through `MapRenderer`, then emit per-section reference PDFs |
@@ -178,6 +217,10 @@ renderer failure):
 ⚠ **Serum circles/coverage is the significant gap: milestones F and G remain pixel-unverified**, and
 they are the most geometry-heavy part of the renderer. The reference pass was **not** faked by
 reconstructing the styles — a reconstruction would measure the reconstruction, not the renderer.
+**Update 2026-09-10:** the *structural* blocker (no chart on disk carries the styles) is now fixed,
+unmerged, on `serum-circle-style-persist` — see the table row above. The reference pass itself
+still needs a real kateri process on macOS and has not been run in this pass; F/G's
+pixel-unverified status is unchanged.
 
 **K cannot be closed outright.** It is signed off for the five reference-backed families — the batch
 report path native actually serves today — and explicitly not for the other four.
@@ -193,19 +236,22 @@ way. This was the "downstream, out of P2 scope" item in `P2-RENDER-DESIGN.md` §
 
 ---
 
-## Open defects and environment issues (found 2026-09-10, none fixed)
+## Open defects and environment issues (found 2026-09-10; #2, #4–#7 fixed unmerged, #3 partially, as of the third pass)
 
-These surfaced while doing the P2 work above. All are **found and characterised but not fixed**.
+These surfaced while doing the P2 work above. **Update (third pass, 2026-09-10):** five of the
+seven are now fixed on unmerged branches (`renderer-correctness`, `build-env-fixes`) — see the
+per-row detail and [Branch status](#branch-status--unmerged-branches). None of these fixes are on
+`main`.
 
 | # | Item | Where | Detail |
 |---|------|-------|--------|
-| 1 | **WHO-data gate is weaker than it looks** | `tools/who-data-gate-baseline.txt`, `tools/who-data-gate.py` | The baseline **grandfathers** matches past the scanner. That is how a **real strain name + serum ID sat in this very file** in plain text, in violation of the file's own rule, without ever being flagged (now replaced with placeholders). **The baseline may be hiding more.** Separately, no private strain list (`$WHO_STRAIN_LIST` / `.who-strain-list`) is configured, so the gate runs on **regex rules only**. Worth a dedicated audit. |
-| 2 | **`export_styled_map` silently accepts an unknown style name** | `cc/map-draw/styled-draw.cc` | `sc-000-f2.0-e`, `mc-plain`, `sigsec-00` and an invented `totally-bogus-style-xyz` all produce **byte-identical** PDFs — the unstyled base render — differing from a real style's output. A typo'd style therefore yields a **plausible-but-wrong map with no error**: a silent-corruption path in batch runs. |
-| 3 | **Unexplained sub-pixel frame/axis difference** | `cc/map-draw/`, milestone K | In the K diff panels the **central axis lines, the legend box edge and the bottom frame line** show up markedly darker than the surrounding glyph-edge noise. Consistent with a sub-pixel stroke position or width difference on frame/axis lines. Below the perceptual threshold and no threat to the `<2 %` target, but it is **not** glyph anti-aliasing, so it is not covered by the measured irreducible-diff analysis. |
-| 4 | **`./build.sh` aborts at the final `stubs` target** | `build.sh` | `stubgen` resolves to the Python 3.10 `mypy`, whose `.so` is x86_64. Because `set -e` kills the script there, the **`build/` → `build-py314/` symlink and the verify step never run** — so a from-scratch `build.sh` leaves no usable `build/` symlink. Pre-existing and environmental. Incremental `arch -arm64 ninja -C build-py314` is unaffected. |
-| 5 | **A fresh worktree cannot bootstrap `subprojects/`** | `build.sh` | `git clone` of the vendored wraps fails when hook templates can't be written, so `build.sh` cannot populate a clean `subprojects/`. Workaround: `rsync -a --exclude='.*'` the cached `subprojects/` from an existing checkout. |
-| 6 | **`geo-draw --help` is not a recognised flag** | `cc/geo/` | It treats the argument as an **output path** and writes a file literally named `--help` into the cwd. |
-| 7 | **Stale docstrings in the renderer seam** | `py/ae/report/map_renderer.py` | `selected_backend_name()` and `get_map_renderer()` both still say the default is `kateri`, while `DEFAULT_BACKEND = "native"` and the module docstring say native. Documentation-only, but directly contradicts the code beside it. |
+| 1 | **WHO-data gate is weaker than it looks** | `tools/who-data-gate-baseline.txt`, `tools/who-data-gate.py` | The baseline **grandfathers** matches past the scanner. That is how a **real strain name + serum ID sat in this very file** in plain text, in violation of the file's own rule, without ever being flagged (now replaced with placeholders). **The baseline may be hiding more.** Separately, no private strain list (`$WHO_STRAIN_LIST` / `.who-strain-list`) is configured, so the gate runs on **regex rules only**. Worth a dedicated audit. (A `who-data-gate-audit` branch exists, owned by another agent — not detailed here.) |
+| 2 | ~~`export_styled_map` silently accepts an unknown style name~~ — **FIXED, unmerged** | `cc/map-draw/styled-draw.cc` | Was: `sc-000-f2.0-e`, `mc-plain`, `sigsec-00` and an invented `totally-bogus-style-xyz` all produced **byte-identical** PDFs — the unstyled base render — a **plausible-but-wrong map with no error**. **Closed by `a18ff29`** on the unmerged `renderer-correctness` branch: `export_styled_map` now checks `chart.styles().find_if_exists(style_name)` before resolving and throws `std::runtime_error("cannot draw styled map: unknown style \"<name>\"")` for an unresolvable top-level style name. Verified by the branch author: a known style still renders; `"totally-bogus-style-xyz"` now raises and leaves no output file. Still open on `main`. |
+| 3 | **Unexplained sub-pixel frame/axis difference — PARTIALLY addressed, unmerged** | `cc/map-draw/`, milestone K | Was: in the K diff panels the **central axis lines, the legend box edge and the bottom frame line** show up markedly darker than the surrounding glyph-edge noise. **The right/bottom frame-line component is fixed by `0541db1`** on the unmerged `renderer-correctness` branch: native drew the right/bottom grid/frame line in 0/219 fidelity maps because a boundary grid line landing exactly on the device edge is a pixel-snapping tie that rounds off-page; the fix clamps every grid-line coordinate to `[0.5, extent − 0.5]` (verified via a synthetic 800×800 chart: 7/800 stray-AA pixels → 801/800 solid grid-colour pixels on the edge row/column). **Caveat found reading the diff (genuinely unverified either way):** the clamp applies to *every* grid line, including `gx==0`/`gy==0` — i.e. the left/top edges shift ~0.5px inward too, not just the far edge that the bug report described as broken. Neither the branch author nor this pass checked whether that changes anything that previously rendered correctly on the left/top. Likely negligible (well under the ~1% AA noise floor already tolerated against the 2% K threshold) but not confirmed. **Not addressed by this branch:** reading `cc/map-draw/styled-draw.cc` on `renderer-correctness` shows the **central axis lines** are drawn by the *same* grid loop but at *interior* coordinates the clamp never touches (`std::clamp` only moves values outside `[0.5, extent-0.5]`), and the **legend box edge** is a wholly separate `surface.rectangle(box_x, box_y, box_w, box_h, BLACK, 1.0, WHITE)` call in the legend block — neither is touched by `0541db1`. So: **right/bottom frame line closed; central-axis-line and legend-box-edge darkness remain open and unexplained.** Do not mark this defect closed until the full fidelity harness is re-run against `renderer-correctness` (not done — see milestone K above) and the axis/legend components are specifically checked. |
+| 4 | ~~`./build.sh` aborts at the final `stubs` target~~ — **FIXED, unmerged** | `build.sh`, `meson.build`, `tools/gen-stubs.sh` | Was: `stubgen` resolves to the Python 3.10 `mypy`, whose `.so` is x86_64; `set -e` killed the script there, so **`build/` → `build-py314/` and the verify step never ran**. **Fixed by `0f40116`** on the unmerged `build-env-fixes` branch: the `ae_backend_stubs` meson target now runs the new `tools/gen-stubs.sh` instead of `find_program('stubgen')` directly. It prefers the *build* interpreter's own `mypy.stubgen` (also fixing the long-standing "Failed to import, skipping" warning, by putting the build dir on `PYTHONPATH`), falls back to `stubgen` on `PATH`, and — deliberately no `set -e` — warns and exits 0 when neither works, so `ninja` and `build.sh` continue past it. `CLAUDE.md` on that branch documents the new behaviour. Still open on `main`. |
+| 5 | ~~A fresh worktree cannot bootstrap `subprojects/`~~ — **FIXED, unmerged** | `build.sh` | Was: `git clone` of the vendored wraps fails when hook templates can't be written, so `build.sh` cannot populate a clean `subprojects/`; workaround was a manual `rsync -a --exclude='.*'`. **Fixed by `5b66700`** on the unmerged `build-env-fixes` branch: a new `bootstrap_subprojects()` step probes whether `subprojects/` can take those writes and, when denied, resolves every missing wrap in a throwaway project outside the tree (`meson subprojects download`, retried up to 3× against truncated downloads) and copies each result in with dot-entries stripped — automating the `rsync` workaround. No-op when the in-tree write succeeds (the normal case). Still open on `main`. |
+| 6 | ~~`geo-draw --help` is not a recognised flag~~ — **FIXED, unmerged** | `cc/geo/geo-draw-main.cc` | Was: it treats the argument as an **output path** and writes a file literally named `--help` into the cwd. **Fixed by `60a96df`** on the unmerged `build-env-fixes` branch: `--help`/`-h` now print a `usage()` block and exit 0, and any other unrecognised `-`-prefixed argument errors (exit 1) instead of falling through to `positional`. The identical pattern was then applied to `map-draw` (`chart-draw-main.cc`) and `tal-draw` (`tal-draw-main.cc`) by `b1bdeea` on the unmerged `renderer-correctness` branch — see Branch status below. Still open on `main`. |
+| 7 | ~~Stale docstrings in the renderer seam~~ — **FIXED, unmerged** | `py/ae/report/map_renderer.py` | Was: `selected_backend_name()` and `get_map_renderer()` both still said the default is `kateri`, contradicting `DEFAULT_BACKEND = "native"` beside them. **Closed by `d3314b9`** on the unmerged `renderer-correctness` branch: both docstrings now say `native` is the default and `kateri` the opt-in fallback. Still open on `main`. |
 
 ---
 
@@ -226,9 +272,14 @@ next reader doesn't rediscover it as a surprise.
 
 ## Branch status — unmerged branches
 
-**Ten** branches are ahead of `main` and **none is behind it** (verified 2026-09-10) — i.e. each
-contains all of `main`, so each is a **fast-forward on its own**; merging several in sequence can
-still conflict where they touch the same code. All are P2 / report follow-ups.
+**Thirteen** documented branches are ahead of `main` and **none is behind it** (re-verified
+2026-09-10, third pass, via `git merge-base --is-ancestor main <branch>` for every branch below,
+including the three newly-documented ones) — i.e. each contains all of `main`, so each is a
+**fast-forward on its own**; merging several in sequence can still conflict where they touch the
+same code. All are P2 / report follow-ups. A fourteenth branch, **`who-data-gate-audit`** (3
+commits ahead, also confirmed a clean fast-forward), exists and is explicitly owned by another
+agent — noted here for completeness only; its content and disposition are not described or
+verified in this pass.
 
 > **`main` is untouched at `5f5db9d`.** None of the work below has been merged. Anything read from
 > `main` — including this file — is the pre-P2 state.
@@ -242,8 +293,11 @@ still conflict where they touch the same code. All are P2 / report follow-ups.
 | `sigp` | 2 | first single-canvas sig-page compositor + its design doc | **Superseded.** *Not* an ancestor of `sigp-vector`, so compared by content: touches a strict subset (7 of 15 files); its only unique code is the `SigTile`/`compose_sig_page` PNG-tile prototype that `sigp-vector` deliberately replaced, with **zero remaining references**. Safe to delete. (Its design-doc §1 is a fuller LaTeX-baseline write-up but is **wrong** where it matters — it claims `compose_grid` fills column-major; it does not.) |
 | `sigp-vector` | 6 | fully-**vector** single-canvas sig-page compositor; page/text size matched to the `compose_grid` LaTeX baseline | The live candidate. Merges as a **fast-forward**; file sets disjoint from the two `fix-*` branches, so landing order does not matter. **Land together with `sigp-vector-fixes`.** |
 | `sigp-vector-fixes` | 2 | the two blocking defects found reviewing `sigp-vector` (see below) | **Ready.** Rendered output unchanged (max pixel diff **0** at 150 dpi). |
-| `map-draw-label-placement` | 4+ | milestone I — label auto-placement | In flight (three labelling modes). |
+| `map-draw-label-placement` | 7 | milestone I — label auto-placement, **five** selectable modes (`automatic` default, `automatic_lines`, `inside`, `inside_layered`, `pinned`) — see [Open item — milestone I](#open-item--milestone-i-label-auto-placement) | Implemented, unmerged; verified no-regression on authored-offset maps (0 differing pixels vs pre-milestone) — not yet run through the full K fidelity harness. |
 | `p2-figure-matrix` | 1 | milestone K′ figure-matrix results + method | **Ready** (documentation only). |
+| `renderer-correctness` | 4 | four correctness fixes: styled-render grid-line edge clamp (`0541db1`, closes the right/bottom-frame-line part of open defect #3, caveat re left/top edges — see Open defects), `export_styled_map` unknown-style hard error (`a18ff29`, closes #2), `map-draw`/`tal-draw` `-`-prefixed CLI-arg rejection (`b1bdeea`, extends `build-env-fixes`'s `geo-draw` fix to the other two CLIs), stale kateri-default docstring fix (`d3314b9`, closes #7) | **Individually verified, not harness-verified.** Each fix verified by its author (synthetic pixel counts / binary runs / grep) — see Open defects above for per-fix detail and caveats. The full 219-map fidelity harness has **not** been re-run against this branch; milestone K's signed-off numbers (on `p2-figure-matrix`) predate it. |
+| `build-env-fixes` | 3 | three build/env fixes closing open defects #4/#5/#6: `build.sh` `subprojects/` bootstrap for sandboxes that forbid git-metadata writes (`5b66700`), best-effort (non-fatal) `ae_backend` stub generation via the new `tools/gen-stubs.sh` (`0f40116`), `geo-draw --help`/bad-flag handling instead of writing a file called `--help` (`60a96df`) | **Ready.** Each fix verified by its author (`build.sh`/`CLAUDE.md` doc updated to match reality; `gen-stubs.sh` observed to warn+exit 0 on this machine's broken stubgen; `geo-draw --help`/bad-flag behaviour run directly against the built binary). |
+| `serum-circle-style-persist` | 2 | removes milestone K's serum-circles/coverage persistence blocker: `map_renderer.write_render_chart()` (`5fc2c6a`) persists the in-memory chart `serum_coverage_export`/`multiple_circles.generate_lab` render from (opt-in, off by default) + ships `tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md`; a `serum_circle.style` deep-copy fix for per-serum radius-line colour (`3b31a78`) | **Ready, but does not itself close F/G.** Persistence round-trip verified exact by the author (20/20 maps on `test/chart1.ace`, 284/284 at production scale). The actual kateri reference pass + pixel comparison has not been run — needs a real kateri process on macOS; see "Open item — milestone K" above. |
 | `docs-todo-refresh` | 2 | this file, brought back in line with reality | **Ready** (documentation only). |
 
 ### `sigp-vector` — two blockers found and fixed (on `sigp-vector-fixes`)
