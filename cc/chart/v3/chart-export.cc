@@ -553,7 +553,7 @@ std::string ae::chart::v3::Chart::export_to_json() const
     //  "R" | str              | reassortant, e.g. "NYMC-51C"
     //  "L" | str              | lineage: "Y[AMAGATA]" or "V[ICTORIA]"
     //  "P" | str              | passage, e.g. "MDCK2/SIAT1 (2016-05-12)"
-    //  "I" | str              | serum id, e.g "CDC 2016-045"
+    //  "I" | str              | serum id, e.g "LAB 0000-000"
     //  "s" | str              | serum species, e.g "FERRET"
     //  "A" | str              | aligned amino-acid sequence
     //  "B" | str              | aligned nucleotide sequence

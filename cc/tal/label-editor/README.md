@@ -115,7 +115,7 @@ Surgical text edits (relaxed-JSON formatting/comments preserved):
   "Reset to auto" sets `"pinned": false` (offset ignored, label re-flows).
 - **NodeText** → the matching `nodes` entry's `apply.text.offset` (keyed by `seq_id`):
   ```json
-  {"N": "nodes", "select": {"seq_id": "…"}, "apply": {"text": {"text": "A/DC/27/2023", "offset": [-0.1, 0], …}}}
+  {"N": "nodes", "select": {"seq_id": "…"}, "apply": {"text": {"text": "A/EXAMPLEA/27/2023", "offset": [-0.1, 0], …}}}
   ```
 
 ---
