@@ -46,6 +46,10 @@ namespace ae::map_draw
 
         // Clearance kept between a label box and the ink it must avoid, in em.
         constexpr double kBoxPadEm = 0.12;
+        // Hysteresis toward kateri's [0, 1] default, so a label with no real reason to move
+        // does not drift off it and the render stays as close to the pre-auto-placement one
+        // as the collisions allow.
+        constexpr double kBonusDefault = 1.5;
 
         struct Rect
         {
@@ -141,9 +145,11 @@ namespace ae::map_draw
             const auto [nx, ny] = closest_on_rect(c.box, lab.point_x, lab.point_y);
             const double dist = std::hypot(nx - lab.point_x, ny - lab.point_y);
             const double gap = std::max(0.0, dist - lab.point_radius);
-            // A tether appears only once the label has been pushed clear enough of its point
-            // that the reader would otherwise have to guess which point it belongs to. Below
-            // that it stays a plain adjacent label, as AD/kateri always draw it.
+            // A tether appears once the label is pushed clear enough of its point that the
+            // reader would otherwise have to guess which point it belongs to. Below that it
+            // stays a plain adjacent label, exactly as AD/kateri always draw it. The threshold
+            // is deliberately low: an untethered label a whole text-height from its point is
+            // more confusing than a short connector is ugly.
             const double leader_threshold = std::max(lab.point_radius * 0.6, lab.text_h * 0.75);
             if (gap > leader_threshold && dist > 1.0e-6) {
                 c.leader = true;
@@ -216,6 +222,8 @@ namespace ae::map_draw
                     cost += kWeightDirection * dir_pen;
                     if (c.leader)
                         cost += kWeightLeader;
+                    if (dx == 0.0 && dy == 1.0 && s == kScales[0])
+                        cost -= kBonusDefault; // stay put unless there is a reason to move
                     c.static_cost = cost;
                     cc.push_back(std::move(c));
                 }
