@@ -45,7 +45,13 @@ void ae::py::sig_page(pybind11::module_& mdl)
                           "`jobs` is a list of (style_name, x, y, w, h, frame); `frame`=True strokes a 1px black border."))
         .def("render_tree", &ae::tal::SigPageCanvas::render_tree, "tree"_a, "settings"_a, "image_size"_a, "x"_a, "y"_a, "w"_a, "h"_a,
              pybind11::doc("Render `tree` (tal-draw settings file `settings`, height `image_size`) into the device rect (x, y, w, h) as a vector."))
-        .def("finish", &ae::tal::SigPageCanvas::finish, pybind11::doc("Finalise (cairo_show_page) and write the PDF. Idempotent; also called on destruction."));
+        .def("draw_caption", &ae::tal::SigPageCanvas::draw_caption, "text"_a, "x"_a, "y"_a, "w"_a, "h"_a, "font_size"_a = 8.0,
+             pybind11::doc("Draw the tree caption centred (both axes) in the device rect (x, y, w, h), in Helvetica at `font_size` "
+                           "points — compose_grid's `tree_caption` (\\footnotesize, \\centering, helvet) under the tree panel."))
+        .def("finish", &ae::tal::SigPageCanvas::finish,
+             pybind11::doc("Finalise (cairo_show_page) and write the PDF: the file is complete when this returns, it does not "
+                           "wait for the canvas to be destroyed. Closes the surface, so nothing can be drawn afterwards. "
+                           "Idempotent; also called on destruction. Raises RuntimeError on a cairo failure."));
 }
 
 // ----------------------------------------------------------------------

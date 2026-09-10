@@ -1590,7 +1590,18 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // offset that reproduces the box (box_top_left = anchor + offset*page). The editor drags a box and
     // writes the inverted offset back to the .tal (mrca -> per-node label.offset+pinned; nodetext ->
     // nodes apply.text.offset). Emitted even with no MRCA labels (so vaccine-only trees still drive it).
-    if (!params.mrca_label_sidecar.empty()) {
+    //
+    // Only the file-output path can produce a meaningful sidecar: it names the PDF it describes
+    // (`output`) and its geometry is that of the standalone tree page, which the label editor drags
+    // boxes on. The shared-surface path (export_tree_into, empty `output` — the signature-page
+    // compositor) has no such file and scales the tree into a sub-rect of someone else's page, so
+    // emitting one would write "pdf": "" plus coordinates that fit nothing. Skip it there and say so.
+    // Today only the label editor sets mrca_label_sidecar, and it always renders to a file, so this
+    // just guards a sig-page .tal that happens to carry the setting (settings.cc parses it from any).
+    if (!params.mrca_label_sidecar.empty() && output.empty()) {
+        fmt::print(stderr, ">>> mrca_label_sidecar '{}' not written: the tree is rendered into a shared surface, not to its own PDF\n", params.mrca_label_sidecar);
+    }
+    else if (!params.mrca_label_sidecar.empty()) {
         const auto jstr = [](const std::string& s) {
             std::string o; o.reserve(s.size() + 2);
             for (char c : s) {

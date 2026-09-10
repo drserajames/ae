@@ -562,7 +562,7 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
     if native:
         return make_section_signature_page_native(
             tree, chart, tal, output, size=size, map_width=map_width, viewport=viewport,
-            page_title=page_title, defines=defines, serum_circles=serum_circles,
+            page_title=page_title, tree_caption=tree_caption, defines=defines, serum_circles=serum_circles,
             serum_circle_fold=serum_circle_fold, keep_temp=keep_temp)
     import sys as _sys
 
@@ -703,16 +703,18 @@ def make_signature_page(tree, output, *, maps: Sequence[os.PathLike] = (), chart
 # See cc/tal/SIG-PAGE-COMPOSITOR.md.
 
 _MM2PT = 72.0 / 25.4  # PDF points per millimetre (the compositor works in PDF points)
+_CAPTION_FONT_PT = 8.0  # tree caption: \footnotesize of compose_grid's 10pt article class
 
 
 def _sig_page_layout(n_maps: int, tree_aspect: float, *, margin_mm: float = 2.0,
                      paper_h_mm: float = 210.0) -> tuple[float, float, tuple, list]:
     """Auto-width signature-page geometry (a device-space port of `compose_grid`'s
     ``auto_width`` branch). Returns ``(page_w_mm, page_h_mm, tree_rect_mm, cell_rects_mm)``
-    with every rect ``(x, y, w, h)`` in mm from the page top-left. The maps fill an
-    ``rows x cols`` grid column-major (``cols = ceil(n / 3)``, AD lays the maps 3 rows
-    high), sized so the grid (and the tree) are ``grid_h`` tall and the page width grows
-    with the column count."""
+    with every rect ``(x, y, w, h)`` in mm from the page top-left. The maps fill a
+    ``rows x cols`` grid **row-major** — left to right, then down (``cols = ceil(n / 3)``,
+    AD lays the maps 3 rows high) — which is `compose_grid`'s fill order: its auto_width
+    branch builds row *r* from ``range(r * cols, (r + 1) * cols)``. Cells are sized so the
+    grid (and the tree) are ``grid_h`` tall and the page width grows with the column count."""
     cols = max(1, math.ceil(n_maps / 3))            # AD lays the maps 3 rows high
     rows = math.ceil(n_maps / cols) if n_maps else 1
     avail_h = paper_h_mm - 2.0 * margin_mm - 10.0
@@ -733,7 +735,7 @@ def _sig_page_layout(n_maps: int, tree_aspect: float, *, margin_mm: float = 2.0,
     grid_left = margin_mm + tree_w + panel_gap
     cells = []
     for i in range(n_maps):
-        r, c = divmod(i, cols)                       # row-major, matching compose_grid's auto_width pdfjam baseline
+        r, c = divmod(i, cols)                       # row-major = compose_grid's row r = range(r*cols, (r+1)*cols)
         cells.append((grid_left + c * (cell + col_gap), margin_mm + r * (cell + row_gap), cell, cell))
     return page_w, page_h, tree_rect, cells
 
@@ -741,7 +743,8 @@ def _sig_page_layout(n_maps: int, tree_aspect: float, *, margin_mm: float = 2.0,
 def make_section_signature_page_native(tree, chart, tal, output, *, size: Optional[int] = None,
                                        map_width: float = 800.0,
                                        viewport: Optional[Sequence[float]] = None,
-                                       page_title: Optional[str] = None, defines: Optional[dict] = None,
+                                       page_title: Optional[str] = None, tree_caption: Optional[str] = None,
+                                       defines: Optional[dict] = None,
                                        serum_circles: bool = False, serum_circle_fold: float = 2.0,
                                        keep_temp: bool = False) -> Path:
     """Fully-vector single-canvas form of :func:`make_section_signature_page`: identical
@@ -749,7 +752,8 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
     Cairo PDF page (``ae_backend.tal.SigPageCanvas``) — the maps via ae's native styled
     renderer (no kateri) and the tree via the native tree renderer (no separate tal-draw
     PDF, no pdfjam/pdflatex). Produces the same page layout (tree left, ``ceil(n/3)``-column
-    map grid right, per-map frame). Needs ae_backend on PYTHONPATH and the ``tal-draw`` binary."""
+    map grid right, per-map frame, optional ``tree_caption`` under the tree). Needs ae_backend
+    on PYTHONPATH and the ``tal-draw`` binary."""
     import sys as _sys
 
     _sys.path.insert(0, str(REPO_ROOT / "build"))
@@ -811,7 +815,8 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         tx, ty, tw, th = (v * _MM2PT for v in tree_rect)
 
         canvas = ae_backend.tal.SigPageCanvas(str(output), page_w_pt, page_h_pt)
-        # Section maps: one job per style, framed, in device points (column-major top-to-bottom).
+        # Section maps: one job per style, framed, in device points; `cells` are already in
+        # compose_grid's row-major fill order (left to right, then down) — see _sig_page_layout.
         jobs = [(styled[i]["name"], cells[i][0] * _MM2PT, cells[i][1] * _MM2PT,
                  cells[i][2] * _MM2PT, cells[i][3] * _MM2PT, True) for i in range(len(styled))]
         canvas.render_maps(str(styled_ace), 0, float(map_width), jobs)
@@ -828,6 +833,14 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         # tree page aspect == width_to_height_ratio == the panel aspect (tw = tree_aspect*grid_h),
         # the fit scale is th/image_size in both axes → the tree still fills the panel exactly.
         canvas.render_tree(str(tree), tree_settings, float(size or tal_size or 1000), tx, ty, tw, th)
+        if tree_caption:
+            # compose_grid puts the caption directly under the tree image, \centering and
+            # \footnotesize (8pt in the 10pt article class), in Helvetica (sans=True). The native
+            # page has the same vertical structure — the tree fills the panel and everything below
+            # it is compose_grid's spill guard (~6mm, the band the LaTeX caption line occupies) —
+            # so centre the caption in that band. It needs no layout change: as in compose_grid the
+            # tree is height-bounded to grid_h whether or not a caption is present.
+            canvas.draw_caption(tree_caption, tx, ty + th, tw, page_h_pt - (ty + th), _CAPTION_FONT_PT)
         canvas.finish()
         return Path(output)
     finally:

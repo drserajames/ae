@@ -1,5 +1,6 @@
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include <cairo.h>
 #include <cairo-pdf.h>
@@ -43,11 +44,28 @@ namespace ae::tal
 
     SigPageCanvas::~SigPageCanvas()
     {
-        finish();
+        try {
+            finish(); // no-op when the caller already finished; a destructor must not throw
+        }
+        catch (const std::exception& err) {
+            fmt::print(stderr, "  [sig-page] WARNING: {}\n", err.what());
+        }
         if (context_ != nullptr)
             cairo_destroy(context_);
         if (surface_ != nullptr)
             cairo_surface_destroy(surface_);
+    }
+
+    // Cairo latches the first failure into the context/surface and then silently no-ops EVERY
+    // subsequent operation, so one bad draw would blank the rest of the page and still leave a
+    // plausible-looking PDF. Nothing watches the output on the headless whocc-chains batch path,
+    // so turn the latched status into a real error at each step instead.
+    void SigPageCanvas::check_status(std::string_view stage) const
+    {
+        if (const auto status = cairo_status(context_); status != CAIRO_STATUS_SUCCESS)
+            throw std::runtime_error{fmt::format("SigPageCanvas: cairo error {}: {}", stage, cairo_status_to_string(status))};
+        if (const auto status = cairo_surface_status(surface_); status != CAIRO_STATUS_SUCCESS)
+            throw std::runtime_error{fmt::format("SigPageCanvas: cairo surface error {}: {}", stage, cairo_status_to_string(status))};
     }
 
     void SigPageCanvas::render_maps(const std::filesystem::path& ace, unsigned projection_no, double width, const std::vector<SigMapJob>& jobs)
@@ -71,6 +89,9 @@ namespace ae::tal
                 cairo_stroke(context_);
                 cairo_restore(context_);
             }
+            // Outside the try: a C++ failure in one style is tolerated (above), but a cairo error is
+            // not — it would silently swallow every map after this one.
+            check_status(fmt::format("rendering map style '{}'", job.style));
         }
     }
 
@@ -83,15 +104,42 @@ namespace ae::tal
         const double use_size = image_size > 0.0 ? image_size : settings_size;
         const auto loaded = ae::tree::load(tree);
         ae::tal::export_tree_into(*loaded, context_, x, y, w, h, use_size, params);
+        check_status("rendering tree");
+    }
+
+    void SigPageCanvas::draw_caption(std::string_view utf8, double x, double y, double w, double h, double font_size)
+    {
+        if (utf8.empty() || font_size <= 0.0)
+            return;
+        const std::string str{utf8};
+        cairo_save(context_);
+        // Helvetica: compose_grid typesets the signature page with sans=True (\usepackage{helvet}).
+        cairo_select_font_face(context_, "Helvetica", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        cairo_text_extents_t extents;
+        cairo_text_extents(context_, str.c_str(), &extents);
+        // cairo_show_text draws from the baseline-left pen origin; shift so the ink box is centred
+        // in the rect (LaTeX's \centering under the tree image).
+        cairo_move_to(context_, x + (w - extents.width) / 2.0 - extents.x_bearing, y + (h - extents.height) / 2.0 - extents.y_bearing);
+        cairo_set_source_rgb(context_, 0.0, 0.0, 0.0);
+        cairo_show_text(context_, str.c_str());
+        cairo_restore(context_);
+        check_status("drawing the tree caption");
     }
 
     void SigPageCanvas::finish()
     {
         if (finished_ || context_ == nullptr)
             return;
+        finished_ = true; // set first: on a throw below the page is still done, do not retry from ~SigPageCanvas
         cairo_show_page(context_);
         cairo_surface_flush(surface_);
-        finished_ = true;
+        // cairo_surface_finish (not just flush) emits the PDF trailer, so the file is complete when
+        // we return rather than only when the surface is destroyed — a caller that keeps the canvas
+        // alive (a retained traceback frame, a reference cycle) used to get a truncated PDF. It is
+        // idempotent, so the destructor's cairo_surface_destroy remains correct.
+        cairo_surface_finish(surface_);
+        check_status("finishing the page");
     }
 
 } // namespace ae::tal

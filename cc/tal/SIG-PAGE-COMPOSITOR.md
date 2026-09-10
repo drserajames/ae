@@ -66,6 +66,10 @@ exposes:
   job's named style into its device rect via `export_styled_map_into` (+ optional 1px frame).
 - `render_tree(tree, settings, image_size, x, y, w, h)` — loads the tal-draw settings + tree and
   draws via `export_tree_into` into the tree rect.
+- `draw_caption(text, x, y, w, h, font_size)` — the tree caption, centred in a device rect in
+  Helvetica (`compose_grid`'s `tree_caption`: `\footnotesize`, `\centering`, `helvet`). The driver
+  passes the band between the tree panel and the page bottom — the same ~6 mm spill guard the
+  LaTeX caption line occupies, so a caption needs no layout change.
 - `finish()` — `cairo_show_page` + finalise the PDF.
 
 Exposed to Python as `ae_backend.tal.SigPageCanvas`. The tree renderer + geographic-continent
