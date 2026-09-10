@@ -1,6 +1,7 @@
 # ae — Porting Roadmap (from AD / Acmacs-D)
 
-**Last updated: 2026-09-10.**
+**Last updated: 2026-09-10** (second pass — records the milestone I / K outcomes, the
+`sigp-vector` review, and the newly-found open defects; the first pass predated all of them).
 
 **What this file is.** The record of the AD → ae port: the subsystem table, the
 per-subsystem milestones and their verification evidence, and the **coordination rules**
@@ -81,27 +82,105 @@ live tracker; the summary here is a signpost, not a substitute.**
 | **F** serum circles · **G** serum coverage | 🟢 | `67e9b0c`; fill/alpha bugs fixed in `73a8439`/`dc32bd0` |
 | **H** time-series / continent / serology / pale families | 🟢 (folded into E's composed-family work; serology legend paling + multi-line title in `da7c37e`) | |
 | **J** `ae.report` renderer seam + flag | 🟢 | `5abb295` (seam) + **`a7f51c7` (native made the default)**; batch path `8bdd16e`; the last `c["p"]`/kateri dependency dropped by the native semantic→legacy bake (`fc920c4`, PR #32) |
-| **I** **label auto-placement** | 🔴 **OPEN** | see below |
-| **K** **figure-matrix sign-off** | 🟡 **OPEN** | harness exists; the full run does not |
+| **I** **label auto-placement** | 🟡 **implemented, unmerged** | branch `map-draw-label-placement`; mode work in flight — see below |
+| **K** **figure-matrix sign-off** | 🟡 **partial — "K′"** | branch `p2-figure-matrix`; **5 of 9 families** signed off — see below |
 
 ### Open item — milestone I: label auto-placement
 
-Point labels currently render at the **explicit offsets carried by the style** (`l.p` →
-`label_dx/label_dy` in `styled-draw.cc`), drawn with **kateri's white halo**
-(`pointLabelHaloWidthFactor`). That reproduces kateri, which is what the report's vaccine /
-serology labels need today. **AD's overlap-avoidance and leader lines are absent** — nothing in
-the styled path moves a label off a collision or draws a connector. This is the "genuinely hard,
-iterative part" the design doc flags (`P2-RENDER-DESIGN.md` §4, row I).
+**Implemented on the unmerged `map-draw-label-placement` branch** (`cc/map-draw/label-placement.{hh,cc}`
++ `styled-draw.cc`). `main` still renders labels only at the explicit offsets carried by the style
+(`l.p` → `label_dx/label_dy`), drawn with kateri's white halo (`pointLabelHaloWidthFactor`).
 
-### Open item — milestone K: figure-matrix sign-off
+> **Correction to a long-standing assumption (2026-09-10).** The design doc and earlier revisions of
+> this file describe milestone I as *porting AD's* overlap-avoidance and leader lines. **AD has no
+> label auto-placement to port.** `acmacs-map-draw/cc/labels.cc` is marked *obsolete*; the live path
+> is `acmacs-draw/cc/draw-points.cc` `Points::draw_labels`, which simply evaluates
+> `PointLabel::text_offset()` and draws. No overlap, collision, intersection or leader-line logic
+> exists anywhere in AD's map renderer, and kateri's `addPointLabel` behaves the same. The reason is
+> structural: the report **authors** a per-chart `lox`/`loy` offset table
+> (`py/ae/semantic/{vaccine,serology}.py`) — **the human is the placement algorithm.** So milestone I
+> is *new work*, not a port, and it has **no AD golden to be verified against**.
 
-The **harness exists and is reusable** — [`tools/p2-fidelity/fidelity.py`](tools/p2-fidelity/fidelity.py)
-renders natively, rasterises with `pdftoppm`, pixel-compares against the kateri golden (and an AD
-reference where one is isolable) with `magick compare -metric AE` at strict and `-fuzz 30%`, and
-writes `scoreboard.csv`/`.md` + optional montages. **The full per-family run over the figure
-matrix (subtypes × labs × style families) has not been done**, so there is no signed-off
-scoreboard and no documented list of irreducible anti-aliasing diffs. Only the synthetic
-`manifest.example.json` is committed — real manifests reference charts by path, outside the repo.
+The implementation takes its shape from the one auto-placer already in this tree,
+`cc/tal/draw-tree.cc`'s MRCA-label solver:
+
+- **Scope.** `chart-export` emits `l.p` only when it differs from kateri's `[0, 1]` default, so
+  "offset ≠ default" is exactly "the chart carries an authored offset". Those labels are **pinned
+  verbatim and become obstacles**; only unadjusted labels are placed.
+- **Candidates in kateri's offset space** (12 directions × 9 scales), not device coordinates — a
+  placed label renders through the same `label_offset()` mapping as an authored one, so the placer
+  can only choose an offset the operator could have typed. `[0, 1]` at scale 1 is the first
+  candidate and carries a bonus, so an unobstructed label does not move.
+- **Scoring**: continuous penetration penalties (box-vs-ink overlap area, off-canvas area, tether
+  length inside ink, superlinear distance from the point, angular deviation from "below"), plus
+  pairwise label-box overlap, tether crossing, and tether-through-text.
+- **Solver**: static costs precomputed once, then iterated best response to a fixpoint.
+  Deterministic; 79 styles render in 0.4 s.
+
+**Verified no-regression (hard numbers):** `clades-v1` and `ts-2025-08` (all labels authored) render
+**0 differing pixels**; the chains CLI path renders **0 differing pixels**; and with auto-placement
+disabled every serology map is **0 differing pixels** vs pre-milestone.
+
+**Deliberate scope limit — the chains path (`draw.cc`) is untouched.** Its acceptance criterion is a
+pixel match to frozen AD PNGs, and AD draws vaccine labels at a fixed offset, so auto-placing there
+would *lower* chains fidelity.
+
+**This diverges from the kateri golden by design** for serology maps, which milestone K must account
+for (hence the disable switch).
+
+**In flight (2026-09-10):** three selectable labelling modes — **(a)** auto-placed with **no leader
+lines** (the new default; the placer is being retuned so a label with no tether still reads as
+belonging to its point), **(b)** auto-placed *with* leader lines (the behaviour described above), and
+**(c)** small labels drawn **inside** the antigen with the trailing `-cell`/`-egg` stripped.
+
+### Open item — milestone K: figure-matrix sign-off — **partial ("K′")**
+
+The **harness** — [`tools/p2-fidelity/fidelity.py`](tools/p2-fidelity/fidelity.py) — renders
+natively, rasterises with `pdftoppm`, and pixel-compares against the kateri golden with
+`magick compare -metric AE` at strict and `-fuzz 30%`. **The full run has now been done for the
+families that have a reference**; results are in
+[`tools/p2-fidelity/FIGURE-MATRIX-RESULTS.md`](tools/p2-fidelity/FIGURE-MATRIX-RESULTS.md) on the
+unmerged `p2-figure-matrix` branch.
+
+**Run scope: 219 maps, 18 lab dirs, 3 subtypes, 0 failures.** Goldens were admitted only if
+**kateri-produced** (detected from the PDF signature — native has been the report default since
+2026-07-10, so a naive run would have been **circular**), still-current, and not stale: 219 of 796
+candidates qualified.
+
+| family | n | fuzz30 mean | max | `<2 %` | verdict |
+|--------|--:|------------:|----:|-------:|---------|
+| by-clade | 31 | 0.87 % | 1.51 % | 31/31 | PASS |
+| by-clade −6m | 31 | 0.96 % | 1.57 % | 31/31 | PASS |
+| by-clade −12m | 31 | 0.96 % | 1.57 % | 31/31 | PASS |
+| serology | 18 | 1.57 % | 2.51 % | 13/18 | PASS (marginal) |
+| time-series | 108 | 0.82 % | 1.38 % | 108/108 | PASS |
+| **ALL** | **219** | **0.93 %** | 2.51 % | **214/219 (97.7 %)** | |
+
+**The irreducible-AA floor was measured, not asserted.** Rasterising the **same PDF** with two
+rasterisers (poppler-splash vs poppler-cairo) — provably zero content difference — costs
+**6.11 % strict / 0.98 % fuzz30**. Consequences: the **strict metric is unusable here** (the observed
+native-vs-kateri strict mean of 4.24 % is *below* the same-content floor), and the observed fuzz30
+mean of 0.93 % is **at the AA-class scale**. The 5 maps over 2 % are all serology, each within
+0.5–0.9 pp of *its own* measured floor. Best-of-9 integer-shift alignment is **always (0, 0)**, which
+closes the milestone-A viewport/recenter risk. **No true content differences** (points, palette,
+frame, legend rows) were detected in any of the 219 maps.
+
+**Not signed off — 4 of 9 families have no usable reference** (a missing-reference problem, not a
+renderer failure):
+
+| family | blocker | what would close it |
+|--------|---------|---------------------|
+| **serum circles / coverage** ⚠ | `sc-*`/`-sci-*`/`-sco-*` styles are built in-memory at addendum time and **never persisted** (verified: zero such styles across 69 charts in 3 runs), though 1852 goldens exist | persist the addendum styles into `styled.ace`, **or** re-run `addendum-serum-coverage.py` under `AE_REPORT_MAP_RENDERER=kateri` writing goldens + a chart that carries the styles |
+| info maps | no `out.1.info-*.pdf` in any of 6 report runs; 171/171 render clean, nothing to diff | one kateri `export_info` pass, then re-run the harness |
+| multiple-serum-circles | committed references are `%PDF-1.4 /Producer (R 4.2.0)` — R/Racmacs output, ~11 months older than the charts | a kateri reference pass for `mc-plain`/`mc-circles` |
+| signature-page section maps | never persisted standalone; also bypass the `MapRenderer` seam entirely | route `signature_page.py` through `MapRenderer`, then emit per-section reference PDFs |
+
+⚠ **Serum circles/coverage is the significant gap: milestones F and G remain pixel-unverified**, and
+they are the most geometry-heavy part of the renderer. The reference pass was **not** faked by
+reconstructing the styles — a reconstruction would measure the reconstruction, not the renderer.
+
+**K cannot be closed outright.** It is signed off for the five reference-backed families — the batch
+report path native actually serves today — and explicitly not for the other four.
 
 ### Open item — single-canvas signature pages
 
@@ -111,6 +190,22 @@ Prototyped on the **unmerged `sigp-vector`** branch: the `tal-draw` tree and the
 in `cc/tal/SIG-PAGE-COMPOSITOR.md` — **which exists only on that branch**
 (`git show sigp-vector:cc/tal/SIG-PAGE-COMPOSITOR.md`). `main` still composes sig pages the old
 way. This was the "downstream, out of P2 scope" item in `P2-RENDER-DESIGN.md` §4.
+
+---
+
+## Open defects and environment issues (found 2026-09-10, none fixed)
+
+These surfaced while doing the P2 work above. All are **found and characterised but not fixed**.
+
+| # | Item | Where | Detail |
+|---|------|-------|--------|
+| 1 | **WHO-data gate is weaker than it looks** | `tools/who-data-gate-baseline.txt`, `tools/who-data-gate.py` | The baseline **grandfathers** matches past the scanner. That is how a **real strain name + serum ID sat in this very file** in plain text, in violation of the file's own rule, without ever being flagged (now replaced with placeholders). **The baseline may be hiding more.** Separately, no private strain list (`$WHO_STRAIN_LIST` / `.who-strain-list`) is configured, so the gate runs on **regex rules only**. Worth a dedicated audit. |
+| 2 | **`export_styled_map` silently accepts an unknown style name** | `cc/map-draw/styled-draw.cc` | `sc-000-f2.0-e`, `mc-plain`, `sigsec-00` and an invented `totally-bogus-style-xyz` all produce **byte-identical** PDFs — the unstyled base render — differing from a real style's output. A typo'd style therefore yields a **plausible-but-wrong map with no error**: a silent-corruption path in batch runs. |
+| 3 | **Unexplained sub-pixel frame/axis difference** | `cc/map-draw/`, milestone K | In the K diff panels the **central axis lines, the legend box edge and the bottom frame line** show up markedly darker than the surrounding glyph-edge noise. Consistent with a sub-pixel stroke position or width difference on frame/axis lines. Below the perceptual threshold and no threat to the `<2 %` target, but it is **not** glyph anti-aliasing, so it is not covered by the measured irreducible-diff analysis. |
+| 4 | **`./build.sh` aborts at the final `stubs` target** | `build.sh` | `stubgen` resolves to the Python 3.10 `mypy`, whose `.so` is x86_64. Because `set -e` kills the script there, the **`build/` → `build-py314/` symlink and the verify step never run** — so a from-scratch `build.sh` leaves no usable `build/` symlink. Pre-existing and environmental. Incremental `arch -arm64 ninja -C build-py314` is unaffected. |
+| 5 | **A fresh worktree cannot bootstrap `subprojects/`** | `build.sh` | `git clone` of the vendored wraps fails when hook templates can't be written, so `build.sh` cannot populate a clean `subprojects/`. Workaround: `rsync -a --exclude='.*'` the cached `subprojects/` from an existing checkout. |
+| 6 | **`geo-draw --help` is not a recognised flag** | `cc/geo/` | It treats the argument as an **output path** and writes a file literally named `--help` into the cwd. |
+| 7 | **Stale docstrings in the renderer seam** | `py/ae/report/map_renderer.py` | `selected_backend_name()` and `get_map_renderer()` both still say the default is `kateri`, while `DEFAULT_BACKEND = "native"` and the module docstring say native. Documentation-only, but directly contradicts the code beside it. |
 
 ---
 
@@ -131,19 +226,51 @@ next reader doesn't rediscover it as a surprise.
 
 ## Branch status — unmerged branches
 
-Six branches are ahead of `main` and **none is behind it** (verified 2026-09-10 with
-`git branch --no-merged main -v` + `git rev-list --count <branch>..main` = 0 for each) — i.e.
-each contains all of `main`, so each is a **fast-forward on its own**; merging several in
-sequence can still conflict where they touch the same code. All are P2 / report follow-ups.
+**Ten** branches are ahead of `main` and **none is behind it** (verified 2026-09-10) — i.e. each
+contains all of `main`, so each is a **fast-forward on its own**; merging several in sequence can
+still conflict where they touch the same code. All are P2 / report follow-ups.
+
+> **`main` is untouched at `5f5db9d`.** None of the work below has been merged. Anything read from
+> `main` — including this file — is the pre-P2 state.
 
 | Branch | Ahead | What it is | Disposition |
 |---|--:|---|---|
-| `fix-main-loop-native-guard` | 1 | `report/main_loop`: don't launch kateri when the native renderer is selected | Small fix; complements the native default. |
-| `fix-serum-coverage-sigtrap` | 2 | serum-coverage webpage SIGTRAP from stale output maps; clean the output dir to the current run | Small fix. |
-| `mc-native` | 1 | `report/multiple_circles`: render maps natively, drop kateri | **Already folded into `sigp-vector`** (`58c4756`) — likely **deletable once `sigp-vector` lands**. |
-| `serology-polish` | 1 | `map-draw`: match kateri's miter halo join on point labels | **Already folded into `sigp-vector`** (`97dd2fd`) — likely **deletable once `sigp-vector` lands**. |
-| `sigp` | 2 | first single-canvas sig-page compositor (native maps, no kateri/pdfjam) + its design doc | **Superseded by `sigp-vector`** (which is *not* a descendant of `sigp` — it re-did the compositor fully-vector). |
-| `sigp-vector` | 6 | fully-**vector** single-canvas sig-page compositor; page/text size matched to the `compose_grid` LaTeX baseline | The live candidate. Carries `cc/tal/SIG-PAGE-COMPOSITOR.md`, `mc-native` and `serology-polish`. |
+| `fix-main-loop-native-guard` | 2 | `report/main_loop`: skip kateri only for `@headless` batch commands in native mode | **Ready.** The original single commit was a **regression** — it suppressed kateri for *every* command because native is the default, silently breaking the interactive `style` / `serum_coverage` commands and the drag-adjust GUI (`CommanderBasic.style()` is guarded by `is_connected()`, so the chart was simply never sent, with no error). Narrowed to `not (headless and native_selected())` and verified by running the real `MainLoop`. |
+| `fix-serum-coverage-sigtrap` | 2 | unchecked `sera()[serum_index{n}]` in the pybind accessors (traps under `build-py314` FAST hardening, silently OOB on `build-arm64`) + clean the output dir to the current run | **Ready.** Reviewed; real bug of exactly the class `CLAUDE.md` warns about. |
+| `mc-native` | 1 | `report/multiple_circles`: render maps natively, drop kateri | **Redundant — verified by content**, not by commit message: a true ancestor of `sigp-vector` (merge `58c4756`) and `git diff mc-native sigp-vector -- …/multiple_circles.py` is **empty**. Safe to delete. |
+| `serology-polish` | 1 | `map-draw`: match kateri's miter halo join on point labels | **Redundant — verified by content**: true ancestor (merge `97dd2fd`); the one-line payload is present verbatim at `cc/draw/cairo-surface.cc:335`. Safe to delete. |
+| `sigp` | 2 | first single-canvas sig-page compositor + its design doc | **Superseded.** *Not* an ancestor of `sigp-vector`, so compared by content: touches a strict subset (7 of 15 files); its only unique code is the `SigTile`/`compose_sig_page` PNG-tile prototype that `sigp-vector` deliberately replaced, with **zero remaining references**. Safe to delete. (Its design-doc §1 is a fuller LaTeX-baseline write-up but is **wrong** where it matters — it claims `compose_grid` fills column-major; it does not.) |
+| `sigp-vector` | 6 | fully-**vector** single-canvas sig-page compositor; page/text size matched to the `compose_grid` LaTeX baseline | The live candidate. Merges as a **fast-forward**; file sets disjoint from the two `fix-*` branches, so landing order does not matter. **Land together with `sigp-vector-fixes`.** |
+| `sigp-vector-fixes` | 2 | the two blocking defects found reviewing `sigp-vector` (see below) | **Ready.** Rendered output unchanged (max pixel diff **0** at 150 dpi). |
+| `map-draw-label-placement` | 4+ | milestone I — label auto-placement | In flight (three labelling modes). |
+| `p2-figure-matrix` | 1 | milestone K′ figure-matrix results + method | **Ready** (documentation only). |
+| `docs-todo-refresh` | 2 | this file, brought back in line with reality | **Ready** (documentation only). |
+
+### `sigp-vector` — two blockers found and fixed (on `sigp-vector-fixes`)
+
+1. **`finish()` did not write the PDF.** It called `cairo_show_page` + `cairo_surface_flush` but not
+   `cairo_surface_finish`, which is what emits the trailer. Proven empirically: immediately after
+   `finish()` the file was **0 bytes**, gaining `%%EOF` only on destruction. It worked only because
+   CPython refcounting dropped the local canvas at return — a retained traceback frame or a reference
+   cycle yields a **silently truncated PDF**. Both the header comment and the pybind docstring
+   already claimed it wrote the file, so the contract was right and the implementation wrong.
+2. **No cairo error-status check.** A poisoned `cairo_t` makes cairo **silently no-op every
+   subsequent operation**, so one bad map blanks the rest of the page and `finish()` still writes a
+   superficially successful PDF with no diagnostic — precisely the failure mode that matters on the
+   headless Linux batch path. Now checked via `cairo_status()` / `cairo_surface_status()`, reported
+   as `std::runtime_error` (the mechanism already used in that file), **outside** the per-style
+   `try`/`catch`: a C++ failure in one style is survivable, a poisoned context is not.
+
+**Still open on `sigp-vector`** (deliberately out of scope for the fix branch): `tree_caption` is
+silently dropped on the native path (`bin/tal-signature-page:78` passes it; the report path does not,
+so the assembled report is unaffected); the stale "column-major" comments in `_sig_page_layout`
+contradict the correct row-major code and are actively misleading; and `export_tree_into` passes an
+empty `output` to `render_tree_core`, which could emit a sidecar with `"pdf": ""` (cannot fire today).
+
+Also worth knowing, not defects: the "native" sig-page path still shells out to `build/tal-draw` once
+for draw-order leaf names — it drops kateri/pdfjam/pdflatex, not all subprocesses — and flipping
+`native=True` to the default changes output for every existing caller by the known native↔kateri
+delta, without a flag day.
 
 ---
 
