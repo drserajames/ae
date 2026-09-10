@@ -22,6 +22,14 @@ Example::
     adj.move(outliers, to=[1, 1])      # re-seed the outliers
     adj.relax()                         # let the map settle
     adj.save("adjusted.ace")
+
+**Coordinate frames.** `figure()`, `move()`, `set_coordinates()`, `move_by()` and
+`flip_over_line()` read their coordinates in AD's `"viewport-origin"` frame by default —
+an offset from the origin of the map viewport, in transformed (drawn) space — so polygons
+and destinations copied out of an AD `adjust/0do` script mean here exactly what they meant
+there. The viewport is recomputed from the chart, as AD does (`Adjust.viewport()`); it is
+not the report's per-map viewport setting. Pass `frame="map-not-transformed"` to author in
+raw layout coordinates instead, or `frame="map-transformed"` for absolute drawn ones.
 """
 
 import sys
@@ -38,12 +46,21 @@ if TYPE_CHECKING:
 # ----------------------------------------------------------------------
 
 class Figure:
-    """A closed polygon in chart (projection) coordinates. `contains()` is a
-    ray-casting point-in-polygon test, used by `Point.inside()`."""
+    """A closed polygon in raw (untransformed) layout coordinates — the frame the
+    chart stores and `Point.coords` reports. `contains()` is a ray-casting
+    point-in-polygon test, used by `Point.inside()`.
 
-    def __init__(self, vertices):
-        """Store the polygon vertices (first two coordinates of each)."""
+    Build one with `Adjust.figure()`, which converts the vertices from whichever
+    frame they are authored in (by default AD's `viewport-origin`) into this one.
+    Constructing `Figure` directly takes the vertices as already-untransformed."""
+
+    def __init__(self, vertices, source_frame: str = "map-not-transformed", source_vertices=None):
+        """Store the polygon vertices (first two coordinates of each). *source_frame*
+        and *source_vertices* are diagnostics only — what the caller authored, before
+        `Adjust.figure()` converted it."""
         self.vertices = [list(v)[:2] for v in vertices]
+        self.source_frame = source_frame
+        self.source_vertices = [list(v)[:2] for v in (source_vertices or vertices)]
 
     def contains(self, point) -> bool:
         """Ray-casting point-in-polygon test; False for a None point."""
@@ -133,11 +150,129 @@ class Adjust:
         c = self.layout[point_no]
         return list(c) if c is not None else None
 
+    # -- coordinate frames ----------------------------------------------
+    #
+    # AD's adjust scripts author every polygon and every move destination in the
+    # *viewport-origin* frame (acmacs_py.zero_do_5.path/move default,
+    # acmacs-map-draw/cc/coordinates.cc `Coordinates::viewport`): the literal is an
+    # offset from the origin of the map viewport, in *transformed* map space. The
+    # chart itself stores untransformed coordinates. Reading such a literal as a raw
+    # layout coordinate selects the wrong points — silently, with no error — so the
+    # conversion below is what makes an AD `adjust/0do` script portable verbatim.
+
+    FRAMES = ("viewport-origin", "map-transformed", "map-not-transformed")
+
+    @property
+    def transformation(self) -> tuple:
+        """The projection's 2D transformation as `(a, b, c, d)`; a transformed point is
+        `[x*a + y*c, x*b + y*d]` (`cc/chart/v3/transformation.hh::transform`, which
+        carries no translation in 2D)."""
+        tr = self.projection.transformation()
+        if (as_vector := getattr(tr, "as_vector", None)) is not None:
+            values = [float(v) for v in as_vector()]
+        else:
+            # ae_backend.chart_v3.Transformation currently binds only __str__, which
+            # formats Transformation::as_vector() at full precision, e.g. "[1, 0, 0, 1]".
+            values = [float(v) for v in str(tr).strip("[] ").split(",")]
+        if len(values) != 4:
+            raise ValueError(f"expected a 2D transformation (4 values), got {values!r}")
+        return tuple(values)
+
+    def transform(self, point) -> list:
+        """Map *point* from raw layout coordinates into transformed (drawn) ones."""
+        a, b, c, d = self.transformation
+        x, y = float(point[0]), float(point[1])
+        return [x * a + y * c, x * b + y * d]
+
+    def inverse_transform(self, point) -> list:
+        """Map *point* from transformed (drawn) coordinates back into raw layout ones."""
+        a, b, c, d = self.transformation
+        det = a * d - b * c
+        if det == 0.0:
+            raise ValueError(f"projection transformation {self.transformation} is singular")
+        x, y = float(point[0]), float(point[1])
+        return [(x * d - y * c) / det, (y * a - x * b) / det]
+
+    def transformed_layout(self) -> list:
+        """The layout with the projection transformation applied — the frame AD draws
+        in, and the frame `viewport()` is computed from. `None` for disconnected points."""
+        a, b, c, d = self.transformation
+        out = []
+        for point_no in range(len(self.layout)):
+            co = self.coordinates(point_no)
+            out.append(None if co is None else [co[0] * a + co[1] * c, co[0] * b + co[1] * d])
+        return out
+
+    def viewport(self) -> tuple:
+        """AD's map viewport as `(origin_x, origin_y, size)`.
+
+        Recomputed from the chart, never stored — this is `ChartDraw::calculate_viewport()`
+        (acmacs-map-draw/cc/draw.cc): the minimum bounding ball of the *transformed*
+        layout (acmacs-chart-2/cc/bounding-ball.cc), then `whole_width()` — round the
+        diameter up to a whole number about the same centre. Disconnected points are
+        ignored, as in AD's `Layout::area()`.
+
+        Note this is *not* the report's per-map `viewport()` setting, and not the
+        recentered frame `cc/map-draw/styled-draw.cc` uses for report figures."""
+        points = [p for p in self.transformed_layout() if p is not None]
+        if not points:
+            raise ValueError("chart has no points with coordinates: cannot compute a viewport")
+        min_x = min(p[0] for p in points)
+        max_x = max(p[0] for p in points)
+        min_y = min(p[1] for p in points)
+        max_y = max(p[1] for p in points)
+        # BoundingBall(area.min, area.max): the circle through the two opposite corners.
+        cx, cy = (min_x + max_x) / 2.0, (min_y + max_y) / 2.0
+        diameter = math.hypot(min_x - max_x, min_y - max_y)
+        for px, py in points:                                   # BoundingBall::extend
+            dx, dy = px - cx, py - cy
+            d2 = dx * dx + dy * dy
+            if d2 > diameter * diameter * 0.25:
+                dist = math.sqrt(d2)
+                diameter = diameter * 0.5 + dist
+                difference = dist - diameter * 0.5
+                cx = (diameter * 0.5 * cx + difference * px) / dist
+                cy = (diameter * 0.5 * cy + difference * py) / dist
+        size = float(math.ceil(diameter))                       # Viewport::whole_width
+        return (cx - size / 2.0, cy - size / 2.0, size)
+
+    def to_layout_coordinates(self, point, frame: str = "viewport-origin") -> list:
+        """Convert *point* from *frame* into raw layout coordinates (what the chart
+        stores and `set_coordinates` writes). Frames: `"viewport-origin"` (AD's
+        default — an offset from the viewport origin, in transformed space),
+        `"map-transformed"`, `"map-not-transformed"` (no conversion)."""
+        if frame == "map-not-transformed":
+            return [float(point[0]), float(point[1])]
+        if frame == "viewport-origin":
+            origin_x, origin_y, _ = self.viewport()
+            point = [origin_x + float(point[0]), origin_y + float(point[1])]
+        elif frame != "map-transformed":
+            raise ValueError(f"unrecognized frame: {frame!r} (expected one of {self.FRAMES})")
+        return self.inverse_transform(point)
+
+    def to_layout_offset(self, offset, frame: str = "viewport-origin") -> list:
+        """Convert a *displacement* (not a position) from *frame* into raw layout
+        coordinates. A displacement is invariant to the viewport origin, so
+        `"viewport-origin"` and `"map-transformed"` agree here."""
+        if frame == "map-not-transformed":
+            return [float(offset[0]), float(offset[1])]
+        if frame not in self.FRAMES:
+            raise ValueError(f"unrecognized frame: {frame!r} (expected one of {self.FRAMES})")
+        return self.inverse_transform(offset)
+
     # -- selection ------------------------------------------------------
 
-    def figure(self, vertices) -> Figure:
-        """Build a `Figure` (closed polygon) from `vertices`."""
-        return Figure(vertices)
+    def figure(self, vertices, frame: str = "viewport-origin") -> Figure:
+        """Build a `Figure` (closed polygon) from `vertices`, authored in *frame*
+        (default AD's `"viewport-origin"`, so a polygon copied out of an `adjust/0do`
+        script means here what it meant there).
+
+        The vertices are converted into raw layout coordinates, which is where
+        `Point.inside()` tests them. That is equivalent to AD's transformed-space test:
+        the transformation is an invertible linear map, so it preserves which points
+        lie inside the polygon."""
+        return Figure([self.to_layout_coordinates(v, frame) for v in vertices],
+                      source_frame=frame, source_vertices=vertices)
 
     def select_antigens(self, predicate=None) -> list[int]:
         """Return the point indices of antigens for which *predicate(Point)* is
@@ -168,39 +303,46 @@ class Adjust:
 
     # -- moves ----------------------------------------------------------
 
-    def set_coordinates(self, points, to):
-        """Set every point in *points* to coordinate *to* (no relax)."""
+    def set_coordinates(self, points, to, frame: str = "viewport-origin"):
+        """Set every point in *points* to coordinate *to*, authored in *frame*
+        (no relax). See `to_layout_coordinates` for the frames."""
+        target = self.to_layout_coordinates(to, frame)
         proj = self.projection
         for pno in points:
-            proj.set_coordinates(pno, [float(to[0]), float(to[1])])
+            proj.set_coordinates(pno, target)
 
-    def move(self, points, to, pin: bool = False, relax: bool = False):
-        """Move every selected point to *to*. With *pin*, mark them unmovable so a
-        later relax keeps them there. With *relax*, relax immediately. The common
-        "re-seed outliers" pattern is `move(sel, to=[x,y])` then a separate
-        `relax()` (default: no pin, no auto-relax)."""
-        self.set_coordinates(points, to)
+    def move(self, points, to, frame: str = "viewport-origin", pin: bool = False, relax: bool = False):
+        """Move every selected point to *to*, authored in *frame* (default AD's
+        `"viewport-origin"`, matching `slot.move(sel, to=[x, y])`). With *pin*, mark
+        them unmovable so a later relax keeps them there. With *relax*, relax
+        immediately. The common "re-seed outliers" pattern is `move(sel, to=[x,y])`
+        then a separate `relax()` (default: no pin, no auto-relax — as in AD)."""
+        self.set_coordinates(points, to, frame)
         if pin:
             self.pin(points)
         if relax:
             self.relax()
 
-    def move_by(self, points, offset):
-        """Translate every selected point by *offset* = [dx, dy]."""
+    def move_by(self, points, offset, frame: str = "viewport-origin"):
+        """Translate every selected point by *offset* = [dx, dy], authored in *frame*.
+        *offset* is a displacement, so the viewport origin does not enter (see
+        `to_layout_offset`)."""
         proj = self.projection
         lay = self.layout
-        dx, dy = float(offset[0]), float(offset[1])
+        dx, dy = self.to_layout_offset(offset, frame)
         for pno in points:
             c = lay[pno]
             if c is not None:
                 proj.set_coordinates(pno, [c[0] + dx, c[1] + dy])
 
-    def flip_over_line(self, points, p1, p2):
-        """Reflect every selected point across the line through *p1* and *p2*."""
+    def flip_over_line(self, points, p1, p2, frame: str = "viewport-origin"):
+        """Reflect every selected point across the line through *p1* and *p2*, both
+        authored in *frame* (AD passes this line through `slot.path(..., close=False)`,
+        i.e. also viewport-origin-relative)."""
         proj = self.projection
         lay = self.layout
-        ax, ay = float(p1[0]), float(p1[1])
-        bx, by = float(p2[0]), float(p2[1])
+        ax, ay = self.to_layout_coordinates(p1, frame)
+        bx, by = self.to_layout_coordinates(p2, frame)
         dx, dy = bx - ax, by - ay
         dd = dx * dx + dy * dy
         if dd == 0.0:
