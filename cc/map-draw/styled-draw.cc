@@ -476,6 +476,13 @@ namespace ae::map_draw
         }
 
         // ---- resolve the front style (§1.2) ----
+        // Unlike a nested "{R:<name>}" reference (tolerated by resolve() for depth > 0), the
+        // caller-supplied front style name must exist: silently falling through here used to
+        // render the byte-identical unstyled base map for a typo'd/invented style name, which
+        // is a silent-corruption footgun in batch runs.
+        if (chart.styles().find_if_exists(style_name) == nullptr)
+            throw std::runtime_error{fmt::format("cannot draw styled map: unknown style \"{}\"", style_name)};
+
         Resolved resolved;
         resolve(chart.styles(), std::string{style_name}, resolved, 0);
 
@@ -751,10 +758,20 @@ namespace ae::map_draw
             const ::Color grid{0xCCCCCC};
             const double step_x = image_w / vp_w;
             const double step_y = image_h / vp_h;
-            for (double gx = 0.0; gx <= image_w + 0.5; gx += step_x)
-                surface.line(gx, 0.0, gx, image_h, grid, 1.0);
-            for (double gy = 0.0; gy <= image_h + 0.5; gy += step_y)
-                surface.line(0.0, gy, image_w, gy, grid, 1.0);
+            // Clamp each grid line's coordinate half a line width inside the surface. Without
+            // this, a boundary line that lands exactly on the device edge (e.g. gx == image_w)
+            // is a perfect tie for poppler-splash's pixel-snapping and rounds off-page, so the
+            // frame's right/bottom edge silently vanishes (see p2-figure-matrix §10.5/10.6).
+            // Interior lines (0.5 <= gx <= image_w - 0.5) are unaffected. Same reasoning as the
+            // AD renderer's border comment at cc/map-draw/draw.cc:712-716.
+            for (double gx = 0.0; gx <= image_w + 0.5; gx += step_x) {
+                const double x = std::clamp(gx, 0.5, image_w - 0.5);
+                surface.line(x, 0.0, x, image_h, grid, 1.0);
+            }
+            for (double gy = 0.0; gy <= image_h + 0.5; gy += step_y) {
+                const double y = std::clamp(gy, 0.5, image_h - 0.5);
+                surface.line(0.0, y, image_w, y, grid, 1.0);
+            }
         }
 
         // ---- points (draw order: first = bottom) ----
