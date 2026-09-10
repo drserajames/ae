@@ -45,7 +45,10 @@ void ae::py::sig_page(pybind11::module_& mdl)
                           "`jobs` is a list of (style_name, x, y, w, h, frame); `frame`=True strokes a 1px black border."))
         .def("render_tree", &ae::tal::SigPageCanvas::render_tree, "tree"_a, "settings"_a, "image_size"_a, "x"_a, "y"_a, "w"_a, "h"_a,
              pybind11::doc("Render `tree` (tal-draw settings file `settings`, height `image_size`) into the device rect (x, y, w, h) as a vector."))
-        .def("finish", &ae::tal::SigPageCanvas::finish, pybind11::doc("Finalise (cairo_show_page) and write the PDF. Idempotent; also called on destruction."));
+        .def("finish", &ae::tal::SigPageCanvas::finish,
+             pybind11::doc("Finalise (cairo_show_page) and write the PDF: the file is complete when this returns, it does not "
+                           "wait for the canvas to be destroyed. Closes the surface, so nothing can be drawn afterwards. "
+                           "Idempotent; also called on destruction."));
 }
 
 // ----------------------------------------------------------------------

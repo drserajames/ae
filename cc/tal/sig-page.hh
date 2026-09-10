@@ -58,8 +58,10 @@ namespace ae::tal
         // rectangle (x, y, w, h). Loads the settings + tree and draws via ae::tal::export_tree_into.
         void render_tree(const std::filesystem::path& tree, const std::filesystem::path& settings, double image_size, double x, double y, double w, double h);
 
-        // Finalise the page (cairo_show_page) and write the PDF. Called by the destructor if not
-        // already invoked; idempotent.
+        // Finalise the page (cairo_show_page) and write the PDF: cairo_surface_finish emits the
+        // trailer, so the file is COMPLETE when this returns and does not depend on the object
+        // being destroyed. The surface is closed, so nothing can be drawn afterwards. Called by
+        // the destructor if not already invoked; idempotent.
         void finish();
 
       private:

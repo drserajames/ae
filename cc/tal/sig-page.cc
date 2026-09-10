@@ -91,6 +91,11 @@ namespace ae::tal
             return;
         cairo_show_page(context_);
         cairo_surface_flush(surface_);
+        // cairo_surface_finish (not just flush) emits the PDF trailer, so the file is complete when
+        // we return rather than only when the surface is destroyed — a caller that keeps the canvas
+        // alive (a retained traceback frame, a reference cycle) used to get a truncated PDF. It is
+        // idempotent, so the destructor's cairo_surface_destroy remains correct.
+        cairo_surface_finish(surface_);
         finished_ = true;
     }
 
