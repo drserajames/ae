@@ -163,6 +163,19 @@ class VcmDirs (ae.report.modules.Modules):
         return Path("styled.ace")
 
     @classmethod
+    def serum_coverage_styled_filename(cls, output_dir: Path = Path("serum-coverage")) -> Path:
+        """Filename of the serum-coverage styled chart (`serum-coverage/styled-serum-coverage.ace`).
+
+        This is NOT a pipeline stage like the four above — it is the chart the serum-coverage
+        maps were drawn from, saved beside them so they can be re-rendered later. It is written
+        only when serum-coverage persistence is switched on (see
+        `map_renderer.write_render_chart`); a normal report run does not produce it. It is a
+        distinct chart from `styled.ace`: `serum_coverage` styles the adjusted chart with
+        `populate_for_prestyle` + pale + the `sc-*` serum-circle/coverage styles, whereas
+        `styled.ace` comes from `export`'s `populate_for_style`."""
+        return Path(output_dir, "styled-serum-coverage.ace")
+
+    @classmethod
     def filenames_for_populating_with_seqdb(cls) -> list[Path]:
         """The chart files whose sequences should be (re)populated from seqdb: the
         downloaded, prestyled and adjusted charts."""

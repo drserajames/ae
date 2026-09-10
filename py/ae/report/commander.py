@@ -171,8 +171,20 @@ class CommanderBasic:
     @command
     @no_loop
     @headless
-    async def serum_coverage_export(self, serum_selector: Callable | None = None, fold: float = 2.0):
-        "serum_selector: lambda sr: sr.no < 5"
+    async def serum_coverage_export(self, serum_selector: Callable | None = None, fold: float = 2.0, persist_chart: bool | None = None):
+        """`serum_coverage_export` command: render every selected serum's coverage map
+        (`serum-coverage/sc-<nnn>-f<fold>-{e,t}[zoom].pdf`) and write the index web page.
+
+        serum_selector: lambda sr: sr.no < 5
+
+        `persist_chart` also saves the chart these maps were drawn from, as
+        `serum-coverage/styled-serum-coverage.ace`. The `sc-*` / `-sci-*` / `-sco-*` styles
+        live only on this in-memory chart — they are not in `styled.ace`, which `export`
+        writes from a differently-styled chart — so without this there is no chart on disk
+        that reproduces these maps. None (the default) takes it from
+        `AE_REPORT_PERSIST_RENDER_CHART`, which is off unless set: an ordinary report run
+        writes exactly the files it wrote before. See `map_renderer.write_render_chart` and
+        `tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md`."""
         chart_modifier = self.serum_coverage(serum_selector=serum_selector, fold=fold)
         print(f">>>> chart_modifier {chart_modifier}", file=sys.stderr)
         # Batch-render the serum-coverage style set from the one chart (native loads it once);
@@ -201,6 +213,10 @@ class CommanderBasic:
         if stale:
             print(f">>> serum_coverage_export: cleaned {len(stale)} stale serum-coverage map(s) from {output_dir}", file=sys.stderr)
         await self.export_pdfs(jobs=jobs, chart=chart_modifier.chart)
+        if map_renderer.persist_render_chart_selected() if persist_chart is None else persist_chart:
+            map_renderer.write_render_chart(
+                chart_modifier.chart,
+                ae.report.dirs.VcmDirs.serum_coverage_styled_filename(self.serum_coverage_output_dir()))
         self.serum_coverage_webpage(chart_modifier=chart_modifier)
 
     @command
@@ -212,10 +228,10 @@ class CommanderBasic:
     @command
     @no_loop
     @headless
-    async def serum_coverage_export_h3_2a2(self):
+    async def serum_coverage_export_h3_2a2(self, persist_chart: bool | None = None):
         """`serum_coverage_export_h3_2a2` command: export serum-coverage maps for H3 clade
-        3C.2a1b.2a.2 sera."""
-        return await self.serum_coverage_export(serum_selector=lambda sr: sr.has_clade("3C.2a1b.2a.2"), fold=2.0)
+        3C.2a1b.2a.2 sera. `persist_chart` as in `serum_coverage_export`."""
+        return await self.serum_coverage_export(serum_selector=lambda sr: sr.has_clade("3C.2a1b.2a.2"), fold=2.0, persist_chart=persist_chart)
 
     # ----------------------------------------------------------------------
 

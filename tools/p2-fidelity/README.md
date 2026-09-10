@@ -71,8 +71,21 @@ JSON. Either a top-level object with config + a `maps` list, or a bare list of e
   page-embedded and rely on the kateri golden.
 - A map whose **fuzz30 %** is high is a **content** miss (wrong points/frame/palette) that a
   renderer milestone should target; a map with low fuzz30 but high strict is a framing/AA tail.
+
+> **Never compare renderer output by byte hash.** Cairo writes a `/CreationDate` into every
+> PDF, so two renders of the *same* chart seconds apart differ in bytes while rasterising
+> identically. The harness compares rasters for exactly this reason.
 - **Strict AE is not a fidelity metric at this scale.** Rasterising the *same* PDF with two
   rasterisers already costs ~6 % strict (see the AA-floor analysis below) — read fuzz30.
+
+## Families with no usable reference
+
+Some report map families have no golden that can be diffed against. The serum-circle /
+serum-coverage family (milestones **F**/**G**) was one of them — its styles were built in
+memory and never written to any `.ace`, so nothing on disk reproduced its ~1850 goldens. That
+structural blocker is fixed (opt-in `AE_REPORT_PERSIST_RENDER_CHART`); the kateri reference
+pass still has to be run. Recipe:
+[`SERUM-COVERAGE-REFERENCE-PASS.md`](SERUM-COVERAGE-REFERENCE-PASS.md).
 
 ## Results
 

@@ -249,6 +249,15 @@ independent and can be handed to separate agents in parallel; dependencies noted
 > shift is always (0,0). **Four families are NOT signed off** for want of a reference:
 > info maps, serum circles/coverage (F/G), multiple-serum-circles, signature-page section
 > maps. Tracked as **K′**.
+>
+> **F and G are implemented but still pixel-unverified.** The figure-matrix run could not
+> diff them: the `sc-*` / `-sci-*` / `-sco-*` styles were built on an in-memory chart at
+> serum-coverage time and never written to any `.ace`, so none of the ~1850 kateri goldens had
+> a chart that reproduced it. That structural blocker is now fixed — `serum_coverage_export`
+> (and `multiple_circles.generate_lab`) can save the chart they rendered from, opt-in via
+> `AE_REPORT_PERSIST_RENDER_CHART`, with the write → read → render round trip verified exact.
+> A kateri golden pass (macOS) is still needed to close F/G; the exact recipe is
+> [`tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md`](tools/p2-fidelity/SERUM-COVERAGE-REFERENCE-PASS.md).
 
 **Stays on kateri (do not port):** interactive drag-adjust + live relax animation
 (`RLAX`/`LAYT`/`get_moved_points`/`handle_relax`) and the operator GUI. The native renderer

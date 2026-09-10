@@ -41,6 +41,7 @@ import ae_backend
 import ae_backend.chart_v3 as cv
 
 from ae import semantic
+from . import map_renderer
 
 # ----------------------------------------------------------------------
 # Style names built on the chart (background "-mc-*", front "mc-*").
@@ -304,9 +305,17 @@ def overlay_names(circles_pdf: Path, out_pdf: Path, lines: list[str], *,
 
 # ----------------------------------------------------------------------
 
-def generate_lab(report_dir: Path, cfg: LabConfig, *, width: float = 800.0) -> dict[str, Path]:
+def generate_lab(report_dir: Path, cfg: LabConfig, *, width: float = 800.0,
+                 persist_chart: Optional[bool] = None) -> dict[str, Path]:
     """Full per-lab pipeline: load styled.ace, resolve curated sera, build styles, render
-    plain + circles natively, overlay the -names list. Returns the written PDF paths."""
+    plain + circles natively, overlay the -names list. Returns the written PDF paths.
+
+    `persist_chart` also saves the styled-plus-`mc-*` chart these maps were drawn from, as
+    `<lab>/styled-multiple-circles.ace`. Like the serum-coverage `sc-*` styles, `mc-plain` /
+    `mc-circles` and the `CI<fold>` attributes are added to an in-memory copy of `styled.ace`
+    and never written back, so nothing on disk reproduces these maps. None (the default)
+    takes it from `AE_REPORT_PERSIST_RENDER_CHART`, off unless set — an ordinary run writes
+    exactly the files it wrote before. See `map_renderer.write_render_chart`."""
     lab_path = Path(report_dir) / cfg.labdir
     ace = lab_path / "styled.ace"
     if not ace.exists():
@@ -321,6 +330,9 @@ def generate_lab(report_dir: Path, cfg: LabConfig, *, width: float = 800.0) -> d
     if not sera:
         raise RuntimeError(f"{cfg.labdir}: no curated sera resolved")
     build_styles(chart, cfg, sera)
+
+    if map_renderer.persist_render_chart_selected() if persist_chart is None else persist_chart:
+        map_renderer.write_render_chart(chart, lab_path / "styled-multiple-circles.ace")
 
     plain_pdf = lab_path / "plain.pdf"
     circles_pdf = lab_path / "multiple-serum-circles.pdf"
