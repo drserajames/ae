@@ -63,9 +63,11 @@ namespace ae::map_draw
     // `width` is the output width in device px / PDF points. Output extension picks backend
     // (.png raster, else PDF). See cc/map-draw/STYLED-DRAW.md and P2-RENDER-DESIGN.md §1.2/§2.2.
     // `label_mode` selects how point labels WITHOUT an authored `l.p` offset are placed
-    // (milestone I; see label-placement.hh): auto / auto-lines / pinned — or `inside`, which
-    // takes over EVERY label, authored offset included. Unset means "whatever
-    // AE_MAP_DRAW_LABEL_AUTOPLACE says", which defaults to LabelMode::automatic.
+    // (milestone I; see label-placement.hh): auto / auto-lines / pinned — or the `inside` pair,
+    // which takes over EVERY label, authored offset included: `inside` draws all the labels on
+    // top of the finished cloud, `inside-layered` paints each one with its own point so an
+    // overlapping point covers it. Unset means "whatever AE_MAP_DRAW_LABEL_AUTOPLACE says",
+    // which defaults to LabelMode::automatic.
     void export_styled_map(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output,
                            std::optional<LabelMode> label_mode = {});
 

@@ -30,7 +30,7 @@ void ae::py::map_draw(pybind11::module_& mdl)
             return std::nullopt;
         if (const auto mode = ae::map_draw::label_mode_from_name(name); mode.has_value())
             return mode;
-        throw std::invalid_argument{"unrecognized label placement mode \"" + name + "\" (expected auto, auto-lines, inside or off)"};
+        throw std::invalid_argument{"unrecognized label placement mode \"" + name + "\" (expected auto, auto-lines, inside, inside-layered or off)"};
     };
 
     sub.def(
@@ -82,8 +82,10 @@ void ae::py::map_draw(pybind11::module_& mdl)
                       "labels: placement mode for labels with no authored offset — \"auto\" (default: overlap-avoided, "
                       "no leader lines), \"auto-lines\" (same, with leader lines), \"off\" (keep every offset as "
                       "authored); or \"inside\", which puts EVERY label inside the point it names (authored offsets "
-                      "overridden, name split across lines, font shrunk to fit, passage suffix stripped). Empty = take "
-                      "it from AE_MAP_DRAW_LABEL_AUTOPLACE."));
+                      "overridden, name split across lines, font shrunk to fit, passage suffix stripped), or "
+                      "\"inside-layered\", the same layout drawn point-by-point so an overlapping point covers the "
+                      "label beneath it instead of the two overprinting. Empty = take it from "
+                      "AE_MAP_DRAW_LABEL_AUTOPLACE."));
 
     // --- P2 batch: load the chart ONCE, render many (style -> output) pairs ---
     // A report renders ~16 named styles from the SAME ~12 MB chart. `export_styled_map`

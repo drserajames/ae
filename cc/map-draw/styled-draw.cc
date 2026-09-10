@@ -759,6 +759,12 @@ namespace ae::map_draw
                 surface.line(0.0, gy, image_w, gy, grid, 1.0);
         }
 
+        // The point-label mode is resolved HERE rather than down in the label block because one
+        // of the modes changes *when* the points are drawn: `inside-layered` interleaves each
+        // label with its own point instead of painting the whole cloud first (milestone I).
+        const LabelMode label_mode_used = label_mode.value_or(label_mode_from_env());
+        const bool layered_labels = label_mode_used == LabelMode::inside_layered;
+
         // ---- points (draw order: first = bottom) ----
         const auto draw_point = [&](size_t i) {
             const auto c = layout[point_index{i}];
@@ -787,12 +793,19 @@ namespace ae::map_draw
                     break;
             }
         };
-        for (const size_t i : order)
-            draw_point(i);
+        // In `inside-layered` the cloud is drawn by the label block below, which walks THIS SAME
+        // order and emits each point followed by its own label; the points keep their relative
+        // stacking exactly, only the labels move in the paint sequence.
+        if (!layered_labels) {
+            for (const size_t i : order)
+                draw_point(i);
+        }
 
         // ---- serum circles (milestone F): drawn on top of the points (kateri drawDelayed) ----
         // The stored radius is in map units; convert to device with the (uniform) viewport scale.
-        {
+        // A lambda so `inside-layered` can run it after ITS point pass (which happens below with
+        // the labels) and keep the circles above the whole cloud, as everywhere else.
+        const auto draw_serum_circles = [&]() {
             const double scale = image_w / vp_w; // == image_h / vp_h (uniform)
             for (const SerumCircleR& s : serum_circle_list) {
                 const auto c = layout[point_index{s.point}];
@@ -843,7 +856,9 @@ namespace ae::map_draw
                     }
                 }
             }
-        }
+        };
+        if (!layered_labels)
+            draw_serum_circles();
 
         // ---- legend geometry (kateri _Defaults.legend: bottom-left "Bl", offset (10,-10), white
         //      box, black 1px border, padding v5/h10; point size + row text/interline from -clades)
@@ -923,15 +938,16 @@ namespace ae::map_draw
             }
         }
 
-        // ---- point labels (on top of points) ----
+        // ---- point labels (on top of points, except in `inside-layered`) ----
         // Milestone I: labels the operator has NOT hand-placed (no `l.p` on the chart) are
-        // placed by cc/map-draw/label-placement.{hh,cc} in one of three modes — `auto`
+        // placed by cc/map-draw/label-placement.{hh,cc} in one of four modes — `auto`
         // (default: overlap-avoided, no leader lines), `auto-lines` (the same search plus an
         // AD-style tether when the label lands far from its point), `inside` (every label
         // drawn centred in its point, split across lines and shrunk to fit, passage suffix
-        // stripped) — or not placed at all (`off`/`0`). Authored offsets are honoured verbatim
-        // in every mode except `inside`, which is about the one place an outside-placement hint
-        // cannot mean anything and so overrides it.
+        // stripped), `inside-layered` (the same layout, but each label painted with its own
+        // point so an overlapping point covers it) — or not placed at all (`off`/`0`). Authored
+        // offsets are honoured verbatim in every mode except the `inside` pair, which is about
+        // the one place an outside-placement hint cannot mean anything and so overrides it.
         //
         // This is the one place the native renderer deliberately draws something neither AD nor
         // kateri would (both simply honour the offset hint), so it is switchable: the caller
@@ -939,12 +955,13 @@ namespace ae::map_draw
         // `=0` pins every label to its offset, which is what the fidelity harness needs when it
         // measures parity against a kateri golden.
         {
-            const LabelMode mode = label_mode.value_or(label_mode_from_env());
-            const bool inside_mode = mode == LabelMode::inside;
-            // Text + font size as DRAWN, parallel to `requests`; in `inside` mode the text has
-            // been broken into lines and shrunk instead, and `label_blocks` carries it.
+            const LabelMode mode = label_mode_used;
+            const bool inside_mode = labels_inside_points(mode);
+            // Text + font size as DRAWN, parallel to `requests`; in the `inside` modes the text
+            // has been broken into lines and shrunk instead, and `label_blocks` carries it.
             std::vector<std::pair<std::string, double>> label_draw;
             std::vector<InsideBlock> label_blocks;
+            std::vector<size_t> label_point; // the point each request labels, in draw order
             // inside_block owns the arrangement search but not the metrics — hand it the
             // Helvetica ones the labels are drawn with.
             const InsideMeasure measure = [&surface](std::string_view text, double font_size) {
@@ -967,6 +984,7 @@ namespace ae::map_draw
                 if (!p.has_label)
                     continue;
                 const bool pinned = inside_mode || p.label_offset_authored || mode == LabelMode::pinned;
+                label_point.push_back(i);
                 if (inside_mode) {
                     // The block comes back already broken into lines, shrunk to the point and
                     // centred on it; the placer only has to resolve the [0, 0] offset, for which
@@ -988,18 +1006,11 @@ namespace ae::map_draw
 
             const auto placed = place_labels(requests, obstacles, image_w, image_h, mode);
 
-            // Tethers first, so each label's white halo masks the line where it meets the text.
-            // AD map_elements LabelTether convention (also used by cc/tal/draw-tree.cc for
-            // auto-placed labels): a hairline black stroke, which renders as mid-grey.
-            for (const auto& pl : placed) {
-                if (pl.leader)
-                    surface.line(pl.leader_x0, pl.leader_y0, pl.leader_x1, pl.leader_y1, BLACK, 0.3);
-            }
             // kateri gives every point label a default thin white halo (pointLabelHaloWidthFactor)
             // so it reads over the dark point cloud; without it the black glyphs vanish into the
             // points they sit on.
             constexpr double kPointLabelHaloWidthFactor = 0.04;
-            for (size_t k = 0; k < placed.size(); ++k) {
+            const auto draw_label = [&](size_t k) {
                 if (inside_mode) {
                     // The block's ink box is centred on the point, so the box centre is what its
                     // lines are positioned against: each one horizontally centred, at its own
@@ -1009,11 +1020,42 @@ namespace ae::map_draw
                     for (const auto& line : block.lines)
                         surface.text_font(bcx - line.width / 2.0, bcy + line.baseline_dy, line.text, block.font_size, BLACK, false, false,
                                           block.font_size * kPointLabelHaloWidthFactor);
-                    continue;
+                    return;
                 }
                 const auto& [text, size] = label_draw[k];
                 // The box is [x0, y0]..[x1, y1] with the baseline-left anchor at (x0, y1).
                 surface.text_font(placed[k].x0, placed[k].y1, text, size, BLACK, false, false, size * kPointLabelHaloWidthFactor);
+            };
+
+            if (layered_labels) {
+                // `inside-layered`: the cloud has NOT been drawn yet. Walk the same `order` the
+                // ordinary point pass walks and emit each point immediately followed by its own
+                // label, so the next point's fill paints over the previous point's label exactly
+                // as it already paints over the previous point's disk. Nothing is reordered: the
+                // points keep their stacking to the letter, and a point with no label draws the
+                // same single call it does in every other mode. `label_point` was filled by the
+                // request loop above walking this same order, so one forward cursor matches
+                // labels to points.
+                size_t k = 0;
+                for (const size_t i : order) {
+                    draw_point(i);
+                    if (k < label_point.size() && label_point[k] == i) {
+                        draw_label(k);
+                        ++k;
+                    }
+                }
+                draw_serum_circles(); // above the whole cloud, as in every other mode
+            }
+            else {
+                // Tethers first, so each label's white halo masks the line where it meets the
+                // text. AD map_elements LabelTether convention (also used by cc/tal/draw-tree.cc
+                // for auto-placed labels): a hairline black stroke, which renders as mid-grey.
+                for (const auto& pl : placed) {
+                    if (pl.leader)
+                        surface.line(pl.leader_x0, pl.leader_y0, pl.leader_x1, pl.leader_y1, BLACK, 0.3);
+                }
+                for (size_t k = 0; k < placed.size(); ++k)
+                    draw_label(k);
             }
         }
 

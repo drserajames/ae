@@ -23,7 +23,8 @@ viewer (drag/Relax/GUI) and the fallback here via `AE_REPORT_MAP_RENDERER=kateri
 
 Point-label placement is a native-only knob (kateri always honours the offset hint):
 `NativeRenderer(label_mode=...)` or, for a whole batch run, `AE_MAP_DRAW_LABEL_AUTOPLACE` —
-`auto` (default), `auto-lines`, `inside`, `off`. See cc/map-draw/label-placement.hh.
+`auto` (default), `auto-lines`, `inside`, `inside-layered`, `off`. See
+cc/map-draw/label-placement.hh.
 """
 import os
 import sys
@@ -91,9 +92,13 @@ class NativeRenderer(MapRenderer):
     `label_mode` picks how point labels with no authored offset are placed: `"auto"` (the
     native default: overlap-avoided, no leader lines), `"auto-lines"` (same, with leader
     lines) or `"off"` (every label exactly at its offset) — in all three an authored offset
-    wins. `"inside"` is the exception: it puts EVERY label inside the point it names (split
-    across lines, shrunk to fit, passage suffix stripped), overriding authored offsets, which
-    describe outside placement and so mean nothing there. `""` defers to
+    wins. The `"inside"` pair is the exception: both put EVERY label inside the point it names
+    (split across lines, shrunk to fit, passage suffix stripped), overriding authored offsets,
+    which describe outside placement and so mean nothing there. They differ only in paint
+    order — `"inside"` draws all the labels over the finished cloud, so in a dense cluster the
+    labels of overlapping points overprint each other; `"inside-layered"` draws each label
+    with its own point, so an overlapping point covers the label under it and the topmost
+    label of a cluster stays readable (at the cost of the ones beneath). `""` defers to
     `AE_MAP_DRAW_LABEL_AUTOPLACE`, which is how a batch run selects a mode without touching
     code."""
 

@@ -286,6 +286,8 @@ namespace ae::map_draw
             return LabelMode::automatic_lines;
         if (name == "inside")
             return LabelMode::inside;
+        if (name == "inside-layered" || name == "layered")
+            return LabelMode::inside_layered;
         if (name == "off" || name == "pinned" || name == "0")
             return LabelMode::pinned;
         return std::nullopt;
@@ -419,12 +421,12 @@ namespace ae::map_draw
 
         std::vector<std::size_t> autos; // indexes into `labels` that we actually place
         for (std::size_t i = 0; i < labels.size(); ++i) {
-            // `inside` mode drops EVERY label onto offset [0, 0] — kateri's "blended across
+            // The `inside` modes drop EVERY label onto offset [0, 0] — kateri's "blended across
             // the point" branch of label_offset(), i.e. the text box centred on the point
-            // centre. Nothing to search: the whole point of the mode is that the label sits ON
+            // centre. Nothing to search: the whole point of them is that the label sits ON
             // the thing it names. An authored offset says where OUTSIDE the point the operator
-            // wants the label, which this mode has no use for, so it is overridden.
-            const bool centre_in_point = mode == LabelMode::inside;
+            // wants the label, which they have no use for, so it is overridden.
+            const bool centre_in_point = labels_inside_points(mode);
             const Candidate c = centre_in_point ? make_candidate(labels[i], 0.0, 0.0, false) : make_candidate(labels[i], labels[i].offset_x, labels[i].offset_y, false);
             result[i] = LabelPlacement{c.offset_x, c.offset_y, c.box.x0, c.box.y0, c.box.x1, c.box.y1, false, 0.0, 0.0, 0.0, 0.0};
             // A zero-size label (the report's `-no-label` style variants set `l.s` to 0, which

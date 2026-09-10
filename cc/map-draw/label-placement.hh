@@ -28,7 +28,7 @@
 // placed label is rendered by exactly the same `label_offset()` mapping as an authored one
 // — auto-placement can only ever pick an offset the operator could have typed.
 //
-// FOUR MODES (`LabelMode`, selected per render; see place_labels and label_mode_from_env):
+// FIVE MODES (`LabelMode`, selected per render; see place_labels and label_mode_from_env):
 //   * `automatic` (DEFAULT) — auto-placed, never tethered. Because an untethered displaced
 //     label has nothing but proximity to say which point it names, this mode is tuned to
 //     keep labels tight to their own point: it prefers a near imperfect spot to a distant
@@ -42,12 +42,18 @@
 //   * `inside` — EVERY label is drawn CENTRED IN its point (offset [0, 0]), split across lines
 //     and shrunk to fit the point's circle, with the passage suffix stripped (see
 //     inside_block). Nothing to avoid, nothing to tether, and nothing to search.
+//   * `inside_layered` — the SAME layout as `inside`; only the paint order differs. The caller
+//     interleaves each label with its own point in the existing z-order (point, then its label,
+//     then the next point) instead of painting every point and only then every label, so where
+//     two antigens overlap the upper point's disk covers the lower one's label just as it
+//     already covers the lower one's ink. `inside` smears those labels together; here the
+//     topmost label of a cluster reads cleanly and the ones beneath are simply hidden.
 //   * `pinned` — no auto-placement at all: every label keeps its offset, which is what the
 //     fidelity harness needs when it measures parity against a kateri golden.
 // Authored `l.p` offsets are honoured verbatim in `automatic`, `automatic_lines` and `pinned`
 // (and are obstacles for the rest) — a hand-adjusted offset is the operator's explicit
-// instruction about that label. `inside` is the exception: an authored offset is an
-// instruction about where OUTSIDE the point the label goes, which that mode has no use for,
+// instruction about that label. The `inside` pair is the exception: an authored offset is an
+// instruction about where OUTSIDE the point the label goes, which those modes have no use for,
 // so it is ignored and every label goes inside. A mode that put some labels inside and left
 // the hand-adjusted ones outside would read as a bug rather than a choice.
 // ======================================================================
@@ -56,16 +62,22 @@ namespace ae::map_draw
 {
     // How a render places the labels the operator has not hand-adjusted. See the header
     // comment above; `automatic` is the default, `pinned` the pre-milestone-I behaviour.
-    enum class LabelMode { automatic, automatic_lines, inside, pinned };
+    enum class LabelMode { automatic, automatic_lines, inside, inside_layered, pinned };
 
     // Parse a mode name as accepted by the API and by AE_MAP_DRAW_LABEL_AUTOPLACE:
-    // "auto" / "auto-lines" / "inside" / "off" (aliases: "1" = auto, "0"/"pinned" = off).
+    // "auto" / "auto-lines" / "inside" / "inside-layered" / "off" (aliases: "1" = auto,
+    // "layered" = inside-layered, "0"/"pinned" = off).
     // Returns nullopt for an unknown name so the caller can report it.
     std::optional<LabelMode> label_mode_from_name(std::string_view name);
 
     // The mode AE_MAP_DRAW_LABEL_AUTOPLACE asks for, or `automatic` when it is unset (an
     // unrecognised value is also `automatic` — a render must never fail on a typo'd env var).
     LabelMode label_mode_from_env();
+
+    // The modes that lay every label out CENTRED IN its point (inside_block + offset [0, 0]).
+    // `inside` and `inside_layered` share that layout exactly and differ only in when the
+    // caller paints the label, which is not the placer's business.
+    constexpr bool labels_inside_points(LabelMode mode) { return mode == LabelMode::inside || mode == LabelMode::inside_layered; }
 
     // kateri addPointLabel::labelOffset (draw_on.dart), mirrored by AD
     // acmacs::draw::PointLabel::text_offset: map one axis of a label offset hint to a device

@@ -113,27 +113,29 @@ corresponding **cached AD PNG**, verified **at high zoom, side-by-side**.
 hand-adjusted it — is placed by this module instead of always being dropped straight below its
 point. Labels with an authored `l.p` are honoured verbatim in `auto`, `auto-lines` and `off`,
 and become obstacles for the rest: a hand-adjusted offset is the operator's explicit
-instruction about that label. (`inside` is the exception — see below.) Candidates are
+instruction about that label. (The `inside` pair is the exception — see below.) Candidates are
 enumerated in kateri's *offset space*, so a placed label renders through the same
 `label_offset()` mapping as an authored one, and kateri's `[0, 1]` default is the first
 candidate (with a small bonus) — an unobstructed label does not move.
 
-### The four modes
+### The five modes
 
 | Mode | What labels do |
 |------|----------------|
 | **`auto`** (default) | Un-authored labels searched into free space, **no leader lines ever**. |
 | `auto-lines` | The same search, plus an AD-style tether (`LabelTether{BLACK, 0.3px}`) once the label lands far enough away that the association would be lost. |
-| `inside` | **Every** label — authored offset or not — drawn inside the point it names: passage suffix stripped, name broken across lines, font shrunk to fit, block centred on the point. No tethers, no search. |
+| `inside` | **Every** label — authored offset or not — drawn inside the point it names: passage suffix stripped, name broken across lines, font shrunk to fit, block centred on the point. No tethers, no search. All the labels are drawn *over the finished cloud*, so where points overlap their labels overprint. |
+| `inside-layered` (alias `layered`) | The **same layout as `inside`**; only the paint order differs — each label is drawn immediately after its own point instead of every point first and every label after, so a later point covers the earlier point's label exactly as it already covers the earlier point's disk. |
 | `off` (aliases `pinned`, `0`) | No auto-placement at all — every label exactly at its offset. What the fidelity harness needs when it measures parity against a kateri golden. |
 
 **Selecting one.** `ae::map_draw::export_styled_map(..., std::optional<LabelMode>)` in C++;
-`labels="auto"|"auto-lines"|"inside"|"off"` on `ae_backend.map_draw.export_styled_map` /
-`export_styled_maps` (and `NativeRenderer(label_mode=...)` in `py/ae/report/map_renderer.py`);
-or, for a batch run with no code change, the env var **`AE_MAP_DRAW_LABEL_AUTOPLACE`** taking
-the same names (`=0` still means "pin everything"). An explicit argument beats the env var;
-neither set means `auto`. An unrecognised env value falls back to `auto` — a render must not
-fail on a typo — whereas an unrecognised API name raises.
+`labels="auto"|"auto-lines"|"inside"|"inside-layered"|"off"` on
+`ae_backend.map_draw.export_styled_map` / `export_styled_maps` (and
+`NativeRenderer(label_mode=...)` in `py/ae/report/map_renderer.py`); or, for a batch run with
+no code change, the env var **`AE_MAP_DRAW_LABEL_AUTOPLACE`** taking the same names (`=0`
+still means "pin everything"). An explicit argument beats the env var; neither set means
+`auto`. An unrecognised env value falls back to `auto` — a render must not fail on a typo —
+whereas an unrecognised API name raises.
 
 **Why `auto` is tuned differently from `auto-lines`.** A leader line *tells* the reader which
 point a label belongs to, so under `auto-lines` distance is merely untidy and covering a point
@@ -148,11 +150,33 @@ reads through the label's white halo, text over text never does.) On the report 
 this pulls the three un-authored labels from gaps of 5.0 / 1.6 / 0.4 text-heights down to
 0 / 0 / 0.4 — each one touching or all but touching its own point.
 
-**`inside` ignores authored offsets — deliberately.** An `l.p` is an instruction about where
-*outside* the point the operator wants the label; in this mode there is no outside, so the hint
-cannot be honoured and is overridden. Putting only the un-adjusted labels inside would leave a
-map with a couple of labels in their points and the rest ranged around them, which reads as a
-bug rather than a choice. `inside` means **all** of them.
+**The `inside` pair ignores authored offsets — deliberately.** An `l.p` is an instruction about
+where *outside* the point the operator wants the label; in these modes there is no outside, so
+the hint cannot be honoured and is overridden. Putting only the un-adjusted labels inside would
+leave a map with a couple of labels in their points and the rest ranged around them, which reads
+as a bug rather than a choice. `inside` means **all** of them.
+
+**`inside-layered`: the same labels, drawn with their points.** `inside` centres every label on
+its own point, so two antigens that overlap on the map necessarily get overlapping labels — and
+because the renderer paints all the points and only then all the labels, those labels overprint
+into an unreadable smear (on the report serology map, four names pile onto each other in the
+central cluster). `inside-layered` changes nothing about the layout and everything about the
+paint order: `styled-draw.cc` walks the existing z-order and emits *point, then that point's
+label*, so the next point's fill paints over the previous point's label. The topmost label of a
+cluster then reads cleanly and the ones under it are simply covered — the same thing the
+overlapping disks already do to each other, rather than glyphs crossing glyphs. It is a trade:
+on the report serology map 9 of the 16 labels come out whole, 6 lose a line or part of one to a
+point drawn later, and 1 disappears entirely; under `inside` all 16 are drawn but the four in
+the cluster are mutually illegible.
+
+**Point stacking is untouched.** Only the labels move in the paint sequence — the points are
+drawn in exactly the same order, so a map with no labels (or with `l.s` = 0 throughout) renders
+pixel-identically in `inside-layered` and every other mode. `inside` itself is byte-for-byte
+what it was: it is a separate enum value and shares only the layout (`inside_block`, offset
+[0, 0], the shrink-to-floor), never the draw loop. The serum circles keep their place above the
+whole cloud: the layered path runs the same delayed serum-circle pass after ITS point pass, so
+they sit above the labels there — consistent with the rule that everything the renderer draws
+after the points (circles, legend, title) still goes on top.
 
 **`inside`: breaking the name across lines** (`inside_block`). A circle is widest across its
 middle, so two or three short centred lines usually fit at a bigger font than one long line.
