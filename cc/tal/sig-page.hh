@@ -59,6 +59,12 @@ namespace ae::tal
         // rectangle (x, y, w, h). Loads the settings + tree and draws via ae::tal::export_tree_into.
         void render_tree(const std::filesystem::path& tree, const std::filesystem::path& settings, double image_size, double x, double y, double w, double h);
 
+        // Draw the tree caption: `utf8` centred (both axes) in the device rectangle (x, y, w, h) at
+        // `font_size` points, in Helvetica. This is compose_grid's `tree_caption`, which the LaTeX
+        // path typesets \footnotesize and \centering directly under the tree image (sans=True =>
+        // Helvetica); the caller passes the band between the tree panel and the page bottom.
+        void draw_caption(std::string_view utf8, double x, double y, double w, double h, double font_size);
+
         // Finalise the page (cairo_show_page) and write the PDF: cairo_surface_finish emits the
         // trailer, so the file is COMPLETE when this returns and does not depend on the object
         // being destroyed. The surface is closed, so nothing can be drawn afterwards (a later

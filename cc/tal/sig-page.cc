@@ -107,6 +107,26 @@ namespace ae::tal
         check_status("rendering tree");
     }
 
+    void SigPageCanvas::draw_caption(std::string_view utf8, double x, double y, double w, double h, double font_size)
+    {
+        if (utf8.empty() || font_size <= 0.0)
+            return;
+        const std::string str{utf8};
+        cairo_save(context_);
+        // Helvetica: compose_grid typesets the signature page with sans=True (\usepackage{helvet}).
+        cairo_select_font_face(context_, "Helvetica", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        cairo_text_extents_t extents;
+        cairo_text_extents(context_, str.c_str(), &extents);
+        // cairo_show_text draws from the baseline-left pen origin; shift so the ink box is centred
+        // in the rect (LaTeX's \centering under the tree image).
+        cairo_move_to(context_, x + (w - extents.width) / 2.0 - extents.x_bearing, y + (h - extents.height) / 2.0 - extents.y_bearing);
+        cairo_set_source_rgb(context_, 0.0, 0.0, 0.0);
+        cairo_show_text(context_, str.c_str());
+        cairo_restore(context_);
+        check_status("drawing the tree caption");
+    }
+
     void SigPageCanvas::finish()
     {
         if (finished_ || context_ == nullptr)
