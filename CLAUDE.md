@@ -361,16 +361,40 @@ failure" in the ssm-report `style` step) was found and fixed this way on 2026-06
 ## Build system (standard path)
 
 **Preferred:** run **`./build.sh`** — a self-checking wrapper that encodes the working
-arm64/Apple-Clang/py3.14 recipe below (preflight checks, generated native file, `arch -arm64`
-meson/ninja, `CMAKE_POLICY_VERSION_MINIMUM=3.5`, CA-bundle → `SSL_CERT_FILE`, arch+import verify,
-`build/`→`build-py314/`). Then `source ae-env.sh` to set `AE_ROOT`/`PYTHONPATH`/data vars.
-`./build.sh check` runs preflight only. (Added on the `build-onboarding` branch.)
+arm64/Apple-Clang/py3.14 recipe below (preflight checks, generated native file, subprojects
+bootstrap, `arch -arm64` meson/ninja, `CMAKE_POLICY_VERSION_MINIMUM=3.5`, CA-bundle →
+`SSL_CERT_FILE`, arch+import verify, `build/`→`build-py314/`). Then `source ae-env.sh` to set
+`AE_ROOT`/`PYTHONPATH`/data vars. `./build.sh check` runs preflight only. (Added on the
+`build-onboarding` branch.)
 
-> **Fresh-checkout gotcha:** meson downloads the vendored subprojects (wraps) over HTTPS using the
-> build Python. Homebrew's **python@3.14 ships no CA bundle**, so on a clean `subprojects/` every
-> wrap download fails with `CERTIFICATE_VERIFY_FAILED`. Export `SSL_CERT_FILE` to a cert bundle
-> (`/etc/ssl/cert.pem` or `brew --prefix ca-certificates`/…/cacert.pem) — `build.sh` does this
-> automatically. The existing checkout hides the problem because its wraps are already cached.
+> **Fresh-checkout gotcha 1 — CA bundle.** meson downloads the vendored subprojects (wraps) over
+> HTTPS using the build Python. Homebrew's **python@3.14 ships no CA bundle**, so on a clean
+> `subprojects/` every wrap download fails with `CERTIFICATE_VERIFY_FAILED`. Export `SSL_CERT_FILE`
+> to a cert bundle (`/etc/ssl/cert.pem` or `brew --prefix ca-certificates`/…/cacert.pem) —
+> `build.sh` does this automatically. An existing checkout hides the problem because its wraps are
+> already cached.
+
+> **Fresh-checkout gotcha 2 — git-metadata writes in `subprojects/`.** Populating a clean
+> `subprojects/` needs two writes that **sandboxes protecting VCS metadata refuse anywhere inside
+> the project** (agent sandboxes do this):
+> - a **git repository** — `lexy` and `range-v3` are `[wrap-git]`, so meson runs `git clone`
+>   straight into `subprojects/`, and git writes `.git/config` and copies the template hooks into
+>   `.git/hooks/`: *"cannot copy '…/templates/hooks/commit-msg.sample' to
+>   '…/subprojects/lexy/.git/hooks/commit-msg.sample': Operation not permitted"* → `meson setup`
+>   dies with **"Git command failed"**;
+> - a **`.gitmodules` file** — several `[wrap-file]` release tarballs (e.g. xlnt) contain one, and
+>   meson's archive extraction dies with *"failed to unpack archive … Operation not permitted:
+>   '…/subprojects/xlnt-1.5.0/.gitmodules'"*.
+>
+> `build.sh` **handles this**: it probes whether `subprojects/` accepts those writes and, if not,
+> has meson resolve every wrap into a throwaway project under `$TMPDIR` (where the writes are
+> allowed) and copies the resulting directories in, minus their dot-entries — all wrap semantics
+> (hashes, `patch_directory` overlays, `patch_url`, git revisions) stay with meson. Downloads are
+> retried up to 3× (short reads show up as hash mismatches). In a normal, unsandboxed shell the
+> probe passes and this is a no-op. If the bootstrap cannot complete, `build.sh` **stops with an
+> actionable message** naming the manual fallback
+> (`rsync -a --exclude='.*' /path/to/other/ae/subprojects/ ./subprojects/`) rather than failing
+> obscurely inside meson.
 
 Legacy path (do **not** use):
 
