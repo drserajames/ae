@@ -246,7 +246,14 @@ its value across the sweep. None does.
 | Rasteriser/vector-emitter AA on shape and glyph edges | **~0.4–1.0 % fuzz30**, ~3–7 % strict; up to ~1.9 % fuzz30 on text-dense (serology) maps | **No** — inherent to Cairo vs the Dart `pdf` emitter |
 | Alpha/paling compositing rounding over large translucent areas | ≤ 16/255 delta over up to ~11 % of the raster on `-pale` maps; ~0 % after fuzz ≥ 2 % | **No** (sub-perceptual); would need bit-exact alpha-blend parity |
 | Geometric misregistration (viewport/recenter) | **0** — best shift is always (0,0) | already correct |
+| **1-px stroke tie-break on grid / legend-box edges** (§10, added after the K run) | **0.98 % strict** (23 % of the strict mean); **0.028 % fuzz30** (3.0 % of the fuzz30 mean) | **Partly** — see §10.6; one genuine renderer defect, the rest is a harness artefact |
 | True content differences (points, palette, frame, legend rows) | **not detected** in any of the 219 maps | — |
+
+> §5 was written before the stroke-tie analysis in §10. The line "essentially all of the
+> residual is anti-aliasing" is **not** quite right: ~23 % of the strict residual and ~3 % of
+> the fuzz30 residual are a deterministic 1-pixel rasterisation tie-break on axis-aligned
+> 1-px strokes, not AA. It does not change any verdict — the corrected fuzz30 mean is
+> **0.892 %** instead of 0.919 % — but it is a different mechanism and is documented in §10.
 
 ---
 
@@ -364,3 +371,224 @@ Inputs live in an ssm report working dir **outside** the repo
    `-scale-to`, and compare — that number is pure anti-aliasing.
 
 The run behind this document: **219 maps, 0 failures**, 18 lab dirs, 3 subtypes, 5 families.
+
+---
+
+## 10. Follow-up — the dark straight lines in the amplified diff
+
+**Date:** 2026-09-10. Same 219-map run, no re-render. Everything below is measured from the
+existing `run/` PNGs and PDFs plus four synthetic single-line control PDFs.
+
+Amplifying the native-vs-kateri difference images shows something §5 does not explain:
+**long, straight, high-contrast lines** — the outer frame, some interior grid lines, and the
+legend-box bottom edge — that are far darker than the surrounding glyph-edge noise. Glyph AA
+cannot produce those. They are real, they are systematic, and they are **not** AA.
+
+### 10.1 What the difference actually is
+
+Not sub-pixel phase, not stroke width, not colour, not alpha. It is a **whole-pixel
+tie-break**, and it lives in the **rasteriser**, not in either renderer's geometry.
+
+Both renderers emit the *same* lines at the *same* nominal device coordinates with the
+*same* 1.0 pt width. Verified by decompressing both content streams for one map
+(`bvic-cdc/clades-v1`):
+
+| | native (Cairo) | kateri (Dart `pdf`) |
+|---|---|---|
+| grid emission | 14 `x 0 m x 800 l S` + 14 `0 y m 800 y l S`, device coords direct | one path, 14+14 subpaths in **world** units under `61.53846 0 0 61.53846 110.76923 43.07692 cm` |
+| grid line width | `1 w` (device) | `0.01625 w` × 61.53846 = **1.00000** device |
+| grid colour | `0.8 0.8 0.8 RG` (204) | `0.8 0.8 0.8 RG` (204) |
+| outermost grid lines | device **0.000000** and **800.000000** | device **0.000002** and **799.999982** |
+| legend box | `10 551.52 273.828 238.48 re B`, bottom = **790.000000** | device rect `10.000002 … 283.793841`, bottom = **789.999978** |
+
+The two emitters agree to **2 × 10⁻⁵ pt**. That is the entire geometric difference.
+
+Poppler-splash then applies **thin-line stroke adjustment**: a 1-device-pixel stroke is
+snapped to exactly one pixel row/column, chosen by rounding the stroke's extent. When the
+stroke centre sits on an **exact integer** device coordinate its extent is exactly
+`[N−0.5, N+0.5]` — a perfect tie — and a 2 × 10⁻⁵ pt nudge flips the answer by a **whole
+pixel**. Native's coordinates land exactly on the integer; kateri's land a few ULP off it.
+
+**Synthetic control** (single 1 pt line on an 800 × 800 page, `pdftoppm -scale-to 800`):
+
+| line at PDF y | device y | painted row |
+|---|---|---|
+| `10` | 790.000000 | **790** |
+| `10.000022` | 789.999978 | **789** |
+| `9.5` | 790.500000 | 790 (no tie) |
+| `0` | 800.000000 | **none — line lost** |
+| `0.000022` | 799.999978 | **799** |
+| `0.5` | 799.500000 | 799 (no tie) |
+
+A 22-microns-of-a-point coordinate change moves a line one whole pixel, or deletes it. That
+is the whole phenomenon.
+
+### 10.2 It is systematic — three distinct populations
+
+Measured over all 219 pairs (`d = max-channel |native − kateri|`; 640 000 px per raster).
+
+**(a) Boundary grid lines — 219/219 maps.** The outermost grid lines lie exactly on the
+viewport bounds, i.e. device 0 and device 800. Native's `800.000000` rounds *outward* and
+the line falls entirely off the page:
+
+| | left col 0 | right col 799 | top row 0 | bottom row 799 |
+|---|---|---|---|---|
+| native draws it | 219/219 | **0/219** | 219/219 | **0/219** |
+| kateri draws it | 219/219 | 219/219 | 160/219 | 209/219 |
+
+So **native loses the bottom and right edge of the map frame in every single map**, and
+kateri's top edge is itself unstable (160/219) for the same reason with the opposite sign.
+
+**(b) Interior grid lines that land on exact integers — 152/219 maps.** Whenever
+`800·k/N` is an integer for some grid index `k`, that interior line hits the same tie.
+Worst case is the `h3-hint-cdc` charts, whose viewport is exactly 8 units → grid step
+exactly 100 px → **every** interior line ties: 15 rows + 12 columns each displaced by one
+pixel, 21 600 px = **3.4 % of the raster**, about three quarters of that map's 4.60 % strict.
+
+**(c) Legend-box bottom edge — 87/111 maps that have a legend.** The box is placed 10 pt
+above the page bottom, so its bottom edge is at device `800 − 10 = 790.000000` — a tie
+again. kateri paints row **789 in 111/111**; native paints **790 in 87** and 789 in 24.
+Left, right and top edges are identical in all 111 maps; only the bottom differs, always by
+exactly +1 row, always in the same direction. The 108 time-series maps have no legend and
+are entirely unaffected.
+
+That native is *bimodal* on a fixed coordinate is itself proof the arbiter is the
+rasteriser: replaying the two real rectangles through the synthetic harness reproduces it
+exactly — `10 551.52 273.828 238.48 re B` → rows 551/**790**, `10 518.062 162.984 271.938
+re B` → rows 518/**789**, both with bottom = 790.000000.
+
+**Not misregistration.** §5.2's best-of-9 integer-shift result (always (0,0)) holds for the
+lines too: the displacement is +1 px only, only on lines whose coordinate is an exact
+integer, and only in the +x/+y direction. Interior non-tie grid lines match **exactly** —
+the aggregate row-mean diff at the 13 nominal grid rows of a 13-unit viewport is
+0.24–4.07/255 versus 47.4 at row 799.
+
+### 10.3 What it costs
+
+Mean over 219 maps (raster = 640 000 px):
+
+| component | strict px/map | strict % | share of the 4.235 % strict mean | fuzz30 px/map | fuzz30 % | share of the 0.919 % fuzz30 mean |
+|---|---:|---:|---:|---:|---:|---:|
+| (a) boundary grid lines | 1 737 | 0.271 % | **6.4 %** | 1.3 | 0.0002 % | 0.02 % |
+| (b) interior grid ties | 4 351 | 0.680 % | **16.1 %** | ~0 | ~0 % | ~0 % |
+| (c) legend-box bottom edge | 198 | 0.031 % | 0.7 % | 177 | 0.028 % | **3.0 %** |
+| **total** | **~6 286** | **0.98 %** | **23.1 %** | **178** | **0.028 %** | **3.0 %** |
+
+The grid components are grey 204 against white 255 — Δ = 51/255 = 20 %, **below the 30 %
+fuzz threshold** — so they inflate strict by nearly a quarter and contribute essentially
+nothing to the content metric. The legend edge is black against white (Δ = 255) and
+therefore counts fully in both.
+
+Per family, the legend-edge share of fuzz30: by-clade **6.2 %**, −12m **5.5 %**, −6m
+**5.5 %**, serology **4.4 %**, time-series **0 %** (no legend). Across the 111
+legend-bearing maps it is **5.4 %** of their 1.015 % fuzz30 mean.
+
+**Corrected headline: fuzz30 mean 0.892 % (from 0.919 %), strict mean 3.26 % (from 4.235 %).**
+No verdict in §8 changes.
+
+### 10.4 It only happens at 1:1 rasterisation
+
+The tie requires the stroke to be **exactly 1.0 device pixel wide**, which happens only when
+the raster scale is exactly 1.0 — i.e. `-scale-to 800` on an 800 pt page, which is precisely
+what the harness does. Re-rasterising the same two PDFs at other sizes:
+
+| `-scale-to` | scale | last grid row/col: native / kateri | legend bottom row: native / kateri | strict |
+|---|---|---|---|---|
+| 799 | 0.9988 | 737 / 737 | 789 / 789 | 2.27 % |
+| **800** | **1.0000** | **738 / 799** | **790 / 789** | **2.75 %** |
+| 801 | 1.0012 | 800 / 800 | 790 / 790 | 2.25 % |
+| 1600 | 2.0000 | 1599 / 1599 | 1579–1580 / 1579–1580 | 1.36 % |
+
+At **any** other scale the difference vanishes completely — the grid extents match, the
+legend edge matches, and strict drops by ~0.5 pp on this map (and by ~2.5 pp on the
+step-100-grid `h3-hint-cdc` maps: 4.60 % → 2.13 %). So component (b) and most of (a) are an
+**artefact of the harness's raster size**, not of the renderer, and are invisible to any
+consumer of the PDF at print or screen resolution.
+
+### 10.5 Bearing on milestone D (recorded as *unverified*)
+
+`P2-RENDER-DESIGN.md` milestone D is "Background grid + border", left open on the question
+of whether the styled path needs AD's outer map border, on the grounds that *"kateri draws
+none"*. This investigation settles it:
+
+* **kateri has no border code** — confirmed in `kateri/lib/src/`: `grid()` in
+  `draw_on_pdf.dart` is the only line primitive, and there is no separate border, frame or
+  axis-line path anywhere. What reads as a frame in the goldens is simply the **first and
+  last grid lines**, which lie exactly on the viewport bounds.
+* The styled native renderer already draws those same four lines. So **no AD-style border
+  should be added** — the "missing border" question is moot.
+* But native currently **loses two of the four** (bottom and right, in 219/219 maps) to
+  §10.1's rounding. At 1:1 the native map frame is open on two sides where kateri's is
+  closed. That is a small but genuine, deterministic, always-same-direction content loss —
+  the one part of this finding that *is* a renderer defect rather than a harness artefact.
+
+Milestone D can be marked verified with that caveat, and closed once the boundary-line fix
+below lands.
+
+### 10.6 Proposed fixes — *not applied on this branch*
+
+`cc/map-draw/styled-draw.cc` is owned by another branch; this branch is measurement-only.
+Two independent changes, in priority order.
+
+**1. Renderer (the real defect) — clamp the boundary grid lines inside the surface.** In the
+grid block (`cc/map-draw/styled-draw.cc`, the `for (double gx = 0.0; gx <= image_w + 0.5;
+gx += step_x)` loops), stroke at a clamped position so the boundary line's centre is half a
+line width inside the page instead of exactly on the edge:
+
+```cpp
+const double x = std::clamp(gx, 0.5, image_w - 0.5);   // and the gy / image_h analogue
+surface.line(x, 0.0, x, image_h, grid, 1.0);
+```
+
+Interior lines are untouched (`0.5 ≤ gx ≤ image_w − 0.5` already). This is the same
+reasoning as the AD renderer's own comment at `cc/map-draw/draw.cc:712-716`, which doubles
+the border width for exactly this reason. Expected: restores the bottom and right frame
+lines in 219/219 maps, removing ~1 600 px/map of strict (**≈ 0.25 pp**, ~6 % of the strict
+mean); no effect on fuzz30. Verified in the synthetic control (device 799.5 → row 799).
+
+**2. Optional, cosmetic — pixel-snap the legend-box rectangle.** At
+`cc/map-draw/styled-draw.cc` (`surface.rectangle(box_x, box_y, box_w, box_h, BLACK, 1.0,
+WHITE)`), snap the four stroked edges to pixel centres:
+
+```cpp
+const double sx0 = std::floor(box_x) + 0.5,            sy0 = std::floor(box_y) + 0.5;
+const double sx1 = std::ceil(box_x + box_w) - 0.5,     sy1 = std::ceil(box_y + box_h) - 0.5;
+surface.rectangle(sx0, sy0, sx1 - sx0, sy1 - sy0, BLACK, 1.0, WHITE);
+```
+
+Replaying the real coordinates through the synthetic harness confirms this moves the box to
+rows 551/**789**, cols 10/283 — **exactly kateri's rendering** — and it removes native's
+current bimodality (790 in 87 maps, 789 in 24) by making the outcome independent of the
+rasteriser. Expected: removes the whole 0.028 pp legend component, i.e. **3.0 % of the mean
+fuzz30 residual** (5.4 % on the 111 legend-bearing maps).
+
+> Honest caveat on (2): both coordinates are "correct"; native's 790.000000 is the
+> arithmetically exact one and kateri's 789.999978 is float noise. Snapping is justified
+> because it makes native's own output deterministic, not because native is wrong.
+
+**3. Harness — stop rasterising at exactly 1:1.** The cheapest and largest win: change
+`fidelity.py`'s default `--size` from 800 to a value that is not the page size (801, or 1600
+for a 2× comparison). §10.4 shows this eliminates *all three* components at once — the ties
+cannot arise once the device stroke width is not exactly 1.0 px — and makes the strict metric
+~23 % less noisy without touching the renderer. It should be done regardless of (1) and (2),
+because until it is, the harness is measuring a rasteriser tie-break as if it were renderer
+fidelity.
+
+### 10.7 What was ruled out
+
+* **Sub-pixel position offset** — no. Both emitters place the lines within 2 × 10⁻⁵ pt.
+* **Line-width difference** — no. Both are exactly 1.0 device pt (kateri: `0.01625 w` under a
+  61.53846× CTM).
+* **Colour/alpha difference** — no. Grid `0.8 0.8 0.8 RG` in both; legend border black in both.
+* **Pixel-grid snapping in either renderer** — neither snaps. `grep` finds no `floor`/`round`/
+  `+ 0.5` on any grid, border or box coordinate in `cc/map-draw/` or in kateri's
+  `draw_on_pdf.dart` / `draw_on_canvas.dart`. The snapping is poppler's, downstream of both.
+* **Whole-map misregistration** — no; §5.2's (0,0) result holds for the lines specifically.
+* **Grid phase or step mismatch** — no. Interior non-tie grid lines coincide to the pixel in
+  both renderers; only lines at exact-integer device coordinates disagree.
+* **A "central axis" (x=0 / y=0) code path** — there is none in either renderer. The lines
+  that read as axes in an amplified diff are ordinary grid lines that happened to land on a
+  tie (e.g. device 400 when the viewport is 8 or 16 units wide).
+* **FP drift from repeated addition** in native's `gx += step_x` — present (up to ~0.002 pt
+  visible in Cairo's 3-decimal output) but not the cause; it is two orders of magnitude too
+  small to move a non-tie line and irrelevant at a tie.

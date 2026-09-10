@@ -79,4 +79,13 @@ JSON. Either a top-level object with config + a `maps` list, or a bare list of e
 [`FIGURE-MATRIX-RESULTS.md`](FIGURE-MATRIX-RESULTS.md) — the P2 **milestone K** figure-matrix
 sign-off: the derived figure matrix, the per-family px-diff table over 219 maps (18 lab dirs ×
 3 subtypes × 5 style families), the irreducible anti-aliasing analysis, the families that are
-unmatchable for want of a reference, and the verdict.
+unmatchable for want of a reference, and the verdict. **§10** is a follow-up investigation of
+the straight dark lines visible in amplified diff images: a 1-pixel poppler stroke-adjustment
+tie-break on axis-aligned 1-px strokes (grid, map frame, legend-box bottom edge) that accounts
+for ~23 % of the strict residual and ~3 % of the fuzz30 residual, and vanishes entirely at any
+raster size other than 1:1.
+
+> **Pick a `--size` that is not the page size.** At `--size 800` on an 800 pt page every stroke
+> is exactly 1.0 device pixel wide and every integer device coordinate is a rounding tie, so the
+> harness measures a rasteriser tie-break as if it were renderer fidelity. `--size 801` (or 1600
+> for a 2× comparison) removes it — see §10.4.
