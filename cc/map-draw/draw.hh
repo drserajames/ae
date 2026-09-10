@@ -82,8 +82,9 @@ namespace ae::map_draw
     // letterboxed (aspect-preserving, centred) into the device rectangle (dst_x, dst_y, dst_w, dst_h).
     // The context/surface are not owned. Byte-for-byte the same drawing calls as export_styled_map —
     // only the surface differs — so standalone file output is unaffected. See cc/tal/sig-page.*.
+    // `label_mode`: same meaning as export_styled_map's parameter of the same name (milestone I).
     void export_styled_map_into(const ae::chart::v3::Chart& chart, ae::projection_index projection_no, std::string_view style_name, double width,
-                                _cairo* context, double dst_x, double dst_y, double dst_w, double dst_h);
+                                _cairo* context, double dst_x, double dst_y, double dst_w, double dst_h, std::optional<LabelMode> label_mode = {});
 
     // Procrustes render: draw `secondary` framed like `primary`, with arrows for common
     // points (threshold 0.3) and an "RMS: {rms:.4f}" title. See make_pc in chains chart.py.
