@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -390,7 +392,12 @@ namespace ae::map_draw
 
     // ----------------------------------------------------------------------
 
-    void export_styled_map(const Chart& chart, projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output)
+    // Shared render core: compute the styled map exactly as before, then draw it through a surface
+    // obtained from `make_surface(image_w, image_h)`. The two public entry points differ ONLY in the
+    // surface they supply — a file-bound CairoPdf (export_styled_map) or a borrowed sub-rectangle of a
+    // shared page context (export_styled_map_into) — so the file-output path is unchanged.
+    static void render_styled_map(const Chart& chart, projection_index projection_no, std::string_view style_name, double width,
+                                  const std::function<std::unique_ptr<ae::draw::CairoPdf>(double image_w, double image_h)>& make_surface)
     {
         if (chart.projections().empty())
             throw std::runtime_error{"cannot draw styled map: chart has no projections"};
@@ -734,7 +741,8 @@ namespace ae::map_draw
         const auto dev_x = [=](double x) { return (x - vp_x) / vp_w * image_w; };
         const auto dev_y = [=](double y) { return (y - vp_y) / vp_h * image_h; }; // NO Y-flip
 
-        ae::draw::CairoPdf surface{output, image_w, image_h};
+        std::unique_ptr<ae::draw::CairoPdf> surface_holder = make_surface(image_w, image_h);
+        ae::draw::CairoPdf& surface = *surface_holder;
         surface.background(WHITE);
 
         // ---- grid (kateri grid: colour #CCCCCC as rendered in the golden, 1px, step 1 map unit
@@ -958,6 +966,28 @@ namespace ae::map_draw
                 rest.remove_prefix(nl + 1);
             }
         }
+    }
+
+    // File-output entry point (unchanged behaviour): create an owned CairoPdf bound to `output`
+    // (extension picks the backend) and render into it.
+    void export_styled_map(const Chart& chart, projection_index projection_no, std::string_view style_name, double width, const std::filesystem::path& output)
+    {
+        render_styled_map(chart, projection_no, style_name, width,
+                          [&output](double image_w, double image_h) { return std::make_unique<ae::draw::CairoPdf>(output, image_w, image_h); });
+    }
+
+    // Shared-surface entry point (single-canvas compositor): render into a sub-rectangle of the
+    // caller's Cairo context, letterboxed (aspect-preserving, centred) so a non-square map is not
+    // stretched. Same drawing calls as export_styled_map — only the surface differs.
+    void export_styled_map_into(const Chart& chart, projection_index projection_no, std::string_view style_name, double width,
+                                _cairo* context, double dst_x, double dst_y, double dst_w, double dst_h)
+    {
+        render_styled_map(chart, projection_no, style_name, width, [=](double image_w, double image_h) {
+            const double scale = (image_w > 0.0 && image_h > 0.0) ? std::min(dst_w / image_w, dst_h / image_h) : 1.0;
+            const double w = image_w * scale, h = image_h * scale;
+            const double x = dst_x + (dst_w - w) / 2.0, y = dst_y + (dst_h - h) / 2.0; // centre in the cell
+            return std::make_unique<ae::draw::CairoPdf>(context, x, y, w, h, image_w, image_h);
+        });
     }
 
 } // namespace ae::map_draw

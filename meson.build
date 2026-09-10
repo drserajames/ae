@@ -129,6 +129,18 @@ sources_py = [
   'cc/map-draw/draw.cc', # --- map-draw (subsystem #1, revived) ---
   'cc/map-draw/styled-draw.cc', # --- map-draw P2 milestone A (styled/semantic render) ---
   'cc/draw/cairo-surface.cc', # --- map-draw (subsystem #1, revived) ---
+  # --- sigp-vector: fully-vector single-canvas signature-page compositor. Draws the tree +
+  #     section maps as vectors onto one Cairo page, so it needs the tal tree renderer
+  #     (draw-tree/settings/continent-map + geo continent colours) linked into ae_backend
+  #     alongside cairo (they were previously only in the tal-draw binary). Cairo is already an
+  #     ae_backend dependency for map-draw; these link the same shared cc/draw/cairo-surface. ---
+  'cc/py/sig-page.cc',
+  'cc/tal/sig-page.cc',
+  'cc/tal/draw-tree.cc',
+  'cc/tal/settings.cc',
+  'cc/tal/continent-map.cc',
+  'cc/geo/geographic-map.cc',
+  'cc/geo/geographic-path.cc',
 ]
 
 # --- tal (subsystem #3) — headless tree layout; see cc/tal/PORTING.md ---
