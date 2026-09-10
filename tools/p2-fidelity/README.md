@@ -71,3 +71,12 @@ JSON. Either a top-level object with config + a `maps` list, or a bare list of e
   page-embedded and rely on the kateri golden.
 - A map whose **fuzz30 %** is high is a **content** miss (wrong points/frame/palette) that a
   renderer milestone should target; a map with low fuzz30 but high strict is a framing/AA tail.
+- **Strict AE is not a fidelity metric at this scale.** Rasterising the *same* PDF with two
+  rasterisers already costs ~6 % strict (see the AA-floor analysis below) — read fuzz30.
+
+## Results
+
+[`FIGURE-MATRIX-RESULTS.md`](FIGURE-MATRIX-RESULTS.md) — the P2 **milestone K** figure-matrix
+sign-off: the derived figure matrix, the per-family px-diff table over 219 maps (18 lab dirs ×
+3 subtypes × 5 style families), the irreducible anti-aliasing analysis, the families that are
+unmatchable for want of a reference, and the verdict.
