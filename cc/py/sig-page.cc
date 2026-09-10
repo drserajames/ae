@@ -48,7 +48,7 @@ void ae::py::sig_page(pybind11::module_& mdl)
         .def("finish", &ae::tal::SigPageCanvas::finish,
              pybind11::doc("Finalise (cairo_show_page) and write the PDF: the file is complete when this returns, it does not "
                            "wait for the canvas to be destroyed. Closes the surface, so nothing can be drawn afterwards. "
-                           "Idempotent; also called on destruction."));
+                           "Idempotent; also called on destruction. Raises RuntimeError on a cairo failure."));
 }
 
 // ----------------------------------------------------------------------

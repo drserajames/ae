@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // ======================================================================
@@ -60,14 +61,19 @@ namespace ae::tal
 
         // Finalise the page (cairo_show_page) and write the PDF: cairo_surface_finish emits the
         // trailer, so the file is COMPLETE when this returns and does not depend on the object
-        // being destroyed. The surface is closed, so nothing can be drawn afterwards. Called by
-        // the destructor if not already invoked; idempotent.
+        // being destroyed. The surface is closed, so nothing can be drawn afterwards (a later
+        // render_* reports the resulting cairo error rather than silently doing nothing). Called
+        // by the destructor if not already invoked; idempotent. Throws on a cairo failure (the
+        // destructor's call swallows it — it only warns).
         void finish();
 
       private:
         _cairo_surface* surface_{nullptr};
         _cairo* context_{nullptr};
         bool finished_{false};
+
+        // Throw if the shared context or the surface is in an error state (see sig-page.cc).
+        void check_status(std::string_view stage) const;
     };
 
 } // namespace ae::tal
