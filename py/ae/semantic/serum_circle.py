@@ -78,7 +78,14 @@ def style(chart: ae_backend.chart_v3.Chart, style_name: str, priority: int = 100
             else:
                 serum_passage_type = "cell"
             # print(f">>>> SR {serum_no} {serum.designation()} I:{serum.serum_id()} EI:{'EGG' in serum.serum_id()} P:[{serum.passage()}] PT:{serum_passage_type}", file=sys.stderr)
+            # Shallow-copy the top level, but deep-copy the nested "radius_lines" dict: the
+            # per-passage-type indexing below REPLACES its "outline" colour map with one
+            # colour string, so a shared nested dict would be flattened by the first serum
+            # and every later serum would silently inherit that first serum's radius-line
+            # colour. (No current caller passes radius_lines, so this changes no output.)
             this_circle_style = {**circle_style}
+            if isinstance(this_circle_style.get("radius_lines"), dict):
+                this_circle_style["radius_lines"] = {**this_circle_style["radius_lines"]}
             # index per-passage-type colour maps; fall back to "egg" if a style omits the
             # "reassortant" key (older callers) so a reassortant serum can't KeyError.
             if isinstance(this_circle_style.get("outline"), dict):
