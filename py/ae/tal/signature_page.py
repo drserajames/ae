@@ -891,7 +891,23 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         # compose_grid's row-major fill order (left to right, then down) — see _sig_page_layout.
         jobs = [(styled[i]["name"], cells[i][0] * _MM2PT, cells[i][1] * _MM2PT,
                  cells[i][2] * _MM2PT, cells[i][3] * _MM2PT, True) for i in range(len(styled))]
-        canvas.render_maps(str(styled_ace), 0, float(map_width), jobs)
+        # Grid line width: each map is rendered internally at `map_width` px and then scaled
+        # into its much smaller cell, which thins the grid by that same factor — a 1 px line
+        # lands at ~0.23 pt, a sub-pixel hairline, where AD (drawing at final page size) shows
+        # ~1 px. Scale the width back up by the cell's own shrink factor so the drawn weight
+        # matches AD's. The renderer takes it as an env knob so the report's golden maps keep
+        # the kateri-matching 1.0 default (see SM.MAP_GRID_LINE_WIDTH).
+        cell_pt = cells[0][2] * _MM2PT if cells else SM.MAP_PANEL_PT
+        grid_lw = SM.MAP_GRID_LINE_WIDTH * (SM.MAP_PANEL_PT / cell_pt) if cell_pt else SM.MAP_GRID_LINE_WIDTH
+        _prev_grid_lw = os.environ.get("AE_MAP_DRAW_GRID_LINE_WIDTH")
+        os.environ["AE_MAP_DRAW_GRID_LINE_WIDTH"] = f"{grid_lw:.4f}"
+        try:
+            canvas.render_maps(str(styled_ace), 0, float(map_width), jobs)
+        finally:
+            if _prev_grid_lw is None:
+                os.environ.pop("AE_MAP_DRAW_GRID_LINE_WIDTH", None)
+            else:
+                os.environ["AE_MAP_DRAW_GRID_LINE_WIDTH"] = _prev_grid_lw
         # Tree: render at the SAME internal image_size the pdfjam/LaTeX baseline uses
         # (`size or tal_size or 1000`, exactly compose_grid's tree render size) and let
         # export_tree_into letterbox-scale it into the panel — reproducing LaTeX's

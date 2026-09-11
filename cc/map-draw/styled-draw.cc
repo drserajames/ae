@@ -769,6 +769,24 @@ namespace ae::map_draw
         //      from vp origin; draw_on.dart's abstract default 0xCCCCCC, matched to the golden) ----
         {
             const ::Color grid{0xCCCCCC};
+            // Grid line width. 1.0 (the default) reproduces kateri and keeps the report's
+            // golden maps byte-identical. It is overridable because a map that is rendered at
+            // this size and then SCALED DOWN into a small panel — as the signature page does,
+            // 800 px into a ~184 pt cell — thins the grid by that same factor, landing at a
+            // sub-pixel ~0.5 px line where AD, which draws at the final page size, shows ~1 px.
+            // The signature page sets this (ae.tal.section_maps.MAP_GRID_LINE_WIDTH).
+            static const double grid_lw = [] {
+                if (const char* env = std::getenv("AE_MAP_DRAW_GRID_LINE_WIDTH")) {
+                    try {
+                        const double val = std::stod(env);
+                        if (val > 0.0)
+                            return val;
+                    }
+                    catch (const std::exception&) {  // unparsable -> keep the kateri-matching default
+                    }
+                }
+                return 1.0;
+            }();
             const double step_x = image_w / vp_w;
             const double step_y = image_h / vp_h;
             // Clamp each grid line's coordinate half a line width inside the surface. Without
@@ -779,11 +797,11 @@ namespace ae::map_draw
             // AD renderer's border comment at cc/map-draw/draw.cc:712-716.
             for (double gx = 0.0; gx <= image_w + 0.5; gx += step_x) {
                 const double x = std::clamp(gx, 0.5, image_w - 0.5);
-                surface.line(x, 0.0, x, image_h, grid, 1.0);
+                surface.line(x, 0.0, x, image_h, grid, grid_lw);
             }
             for (double gy = 0.0; gy <= image_h + 0.5; gy += step_y) {
                 const double y = std::clamp(gy, 0.5, image_h - 0.5);
-                surface.line(0.0, y, image_w, y, grid, 1.0);
+                surface.line(0.0, y, image_w, y, grid, grid_lw);
             }
         }
 

@@ -94,6 +94,13 @@ MAP_RENDER_WIDTH_PX = 800.0   # signature_page.render_section_maps_via_kateri de
 MAP_TITLE_PT = 10.0           # AD sp.tal `text_size`
 MAP_PANEL_PT = 184.3          # measured composed panel width (varies ~1% per page)
 MAP_TITLE_SIZE = round(MAP_TITLE_PT * MAP_RENDER_WIDTH_PX / MAP_PANEL_PT)  # -> 43
+# Grid line width, same scaling problem as the title. The renderers draw the grid 1 px wide at
+# the 800 px render size; downscaled into the ~184 pt panel that is ~0.23 pt, which at 150 dpi
+# is a sub-pixel ~0.5 px line. AD draws its grid at the final page size instead, so its lines
+# land at ~1 px and read much heavier: measured over the whole maps region of
+# h3-hi-guinea-pig-niid, AD's #CCCCCC grid ink is 2.23x ae's. Grid ink scales with line width,
+# so ~2.2 px at render size puts ae on AD's weight.
+MAP_GRID_LINE_WIDTH = 2.2
 
 
 # ======================================================================
