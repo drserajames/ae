@@ -11,8 +11,10 @@ date (a viridis time-series gradient), its sera shown, and a title
 ae has no single-canvas renderer (maps are drawn by kateri, the tree by
 `tal-draw`), so the coupling is reproduced in this orchestration layer:
 
-  1. parse the *shown* hz-sections out of the report's `.tal` settings
-     (`parse_sections`) and the time-series window (`parse_time_series`);
+  1. get the sections (`sections_for`): the *shown* hz-sections out of the report's `.tal`
+     settings (`parse_sections`), or — when the `.tal` no longer runs its `hz` sub-program,
+     as every report `.tal` from 2026-0805-tc1 on does not — the clade-derived sections AD
+     falls back to (`compute_sections`); plus the time-series window (`parse_time_series`);
   2. match tree leaves to chart antigens/sera by name (`match_leaves`);
   3. for each section collect the antigens whose leaf falls in its
      ``[first, last]`` leaf range, and its sera (deduped to the section that
@@ -140,6 +142,105 @@ def parse_time_series(tal_path) -> Optional[tuple[str, str]]:
     if not ts or "start" not in ts or "end" not in ts:
         return None
     return (str(ts["start"])[:7], str(ts["end"])[:7])
+
+
+# ----------------------------------------------------------------------
+# clade-derived sections — when the `.tal` no longer runs its `hz` sub-program
+# ----------------------------------------------------------------------
+#
+# `parse_sections` above reads the `.tal`'s `hz-sections` list, which is what AD uses only
+# while the `hz` sub-program is still IN the `tal` program. It was dropped from the report
+# `.tal`s between Feb and Aug 2026; with `hz` inert AD's HzSections element receives no
+# sections from settings and its whole list comes from `Clades::make_clades()` instead —
+# the `clades` block's per-clade `show` + section tolerances applied to the clade runs of
+# the *current* tree. `compute_sections` is that path, ported in
+# `ae_backend.tal.compute_hz_sections` (cc/tal/clades.cc) and parameterised here from the
+# `.tal` (`settings_v3.parse_clade_section_parameters`).
+#
+# aa-transitions: AD computes its own (the report `.tal`s ask `draw-aa-transitions` for
+# `method: eu-20200915`) and `sp.tal` appends them to each section's map title
+# (`"{section-prefix}. {section-label} {section-aa-transitions}"`). ae has no port of
+# eu-20200915: its only method is `tree.set_aa_nuc_transition_labels`'s `consensus`, which
+# lacks eu-20200915's root-sequence anchoring and so disagrees with AD on which
+# substitutions appear AND on their polarity — measured on a real B/Vic cycle tree, ae gives
+# the left and right residues of a shared position the other way round from AD, and produces
+# none of AD's root-anchored ancestral substitutions at all. An `.asr` tree's *stored*
+# transitions are a raw ancestral reconstruction and disagree even more widely (a real H1
+# cycle tree: ~30 substitutions per section against AD's 4-8).
+#
+# Printing either into a report figure would put substitutions on the page that are simply
+# wrong, so this function **suppresses** them by default and computing them is opt-in
+# (`aa_transitions=True`, or AE_SECTION_AA_TRANSITIONS=1). Empty is also what the last
+# shipped cycle's curated hz-sections carried, so the titles read as they did in Feb.
+# Porting eu-20200915 (AD cc/aa-transition-20200915.cc) is what would close this.
+
+SECTION_AA_TRANSITIONS_ENV = "AE_SECTION_AA_TRANSITIONS"
+
+
+def compute_sections(tree, tal_path, *, aa_transitions: Optional[bool] = None,
+                     program: str = "tal") -> list[dict]:
+    """Derive the hz-sections from `tree`'s clade annotations the way AD does when a
+    `.tal` no longer runs its `hz` sub-program. Same entry shape as `parse_sections`.
+
+    `tree` is a path to a tree file or an already-loaded `ae_backend.tree.Tree`."""
+    import sys as _sys
+
+    import ae_backend
+    from .settings_v3 import parse_clade_section_parameters
+
+    if not hasattr(ae_backend.tal, "compute_hz_sections"):
+        raise RuntimeError("ae_backend.tal.compute_hz_sections missing — rebuild ae (cc/tal/clades.cc + cc/py/tal.cc)")
+    if isinstance(tree, (str, Path)):
+        tree = ae_backend.tree.load(str(tree))
+    if aa_transitions is None:
+        aa_transitions = _os.environ.get(SECTION_AA_TRANSITIONS_ENV, "0") != "0"
+    if aa_transitions:
+        # populates Inode::aa_transitions, which compute_hz_sections accumulates. A tree that
+        # already carries them (an `.asr` tjz with `A` fields) keeps its own — this only fills
+        # in a tree that has none.
+        ae_backend.tree.set_aa_nuc_transition_labels(tree)
+
+    all_clades, per_clade = parse_clade_section_parameters(tal_path, program=program)
+
+    def params(entry: dict):
+        display_name = entry.get("display_name") or []
+        return ae_backend.tal.CladeSectionParameters(
+            inclusion_tolerance=int(entry["inclusion_tolerance"]),
+            exclusion_tolerance=int(entry["exclusion_tolerance"]),
+            shown=bool(entry["shown"]),
+            display_name=str(display_name[0]) if display_name else "")
+
+    computed = ae_backend.tal.compute_hz_sections(
+        tree, {name: params(entry) for name, entry in per_clade.items()}, params(all_clades))
+    if any(section.intersect for section in computed):
+        print("  [sigp] note: clade-derived hz-sections overlap (AD reports the same)", file=_sys.stderr)
+    return [
+        {
+            "id": section.id,
+            "prefix": section.prefix,
+            "first": section.first_name,
+            "last": section.last_name,
+            "label": section.label,
+            # blank unless opted in — see the note above on ae vs AD transition methods
+            "aa_transitions": section.aa_transitions if aa_transitions else "",
+        }
+        for section in computed
+    ]
+
+
+def sections_for(tal_path, tree, *, aa_transitions: Optional[bool] = None) -> list[dict]:
+    """The signature page's section list: the `.tal`'s *shown* `hz-sections` when it still
+    specifies them, else the clade-derived sections AD falls back to (`compute_sections`)."""
+    import sys as _sys
+
+    sections = parse_sections(tal_path)
+    if sections:
+        return sections
+    sections = compute_sections(tree, tal_path, aa_transitions=aa_transitions)
+    print(f"  [sigp] {Path(tal_path).name} has no shown hz-sections; using {len(sections)} "
+          "clade-derived section(s) (AD's fallback when the `hz` sub-program is not in the `tal` program)",
+          file=_sys.stderr)
+    return sections
 
 
 # ======================================================================

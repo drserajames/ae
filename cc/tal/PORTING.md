@@ -141,6 +141,22 @@ the `cc/draw/` surface API."*
    runs (a gap starts a new section). Reuses `ae::tree::Leaf::clades`. Exposed as
    `ae_backend.tal.compute_clade_sections`. Verified by
    [`test/test-clades.py`](test/test-clades.py).
+   **Section tolerance + hz-sections — DONE** (same files): `apply_section_tolerance()` ports
+   `Clades::make_sections()` (`section-inclusion-tolerance` bridges a run split by interspersed
+   leaves of another clade; `section-exclusion-tolerance` then drops the leftovers, unless every
+   section of the clade is small, in which case acmacs-tal keeps them all), and
+   `compute_hz_sections()` ports `Clades::make_clades()` handing its sections to `HzSections`
+   plus `HzSections::sort / detect_intersect / set_prefix / set_aa_transitions` — ids
+   `"{clade}-{section no}"`, prefixes A, B, C… top-to-bottom, and each section's transitions
+   accumulated (add-or-replace by position) from every inode whose subtree contains it. Exposed
+   as `ae_backend.tal.compute_hz_sections(tree, per_clade, all_clades)` with
+   `ae_backend.tal.CladeSectionParameters`; the per-clade map is built from a `.tal`'s `clades`
+   block by `ae.tal.settings_v3.parse_clade_section_parameters` and fed in by
+   `ae.tal.section_maps.compute_sections`. This is the path acmacs-tal itself takes whenever the
+   `hz` sub-program is absent from the running program — true of every report `.tal`'s own `tal`
+   program from 2026-0805-tc1 on, which is what makes signature pages buildable again. Verified
+   by [`test/test-clade-hz-sections.py`](../../test/test-clade-hz-sections.py) and differentially
+   against AD (see the note under #7).
 6. **Time series (date bucketing) — DONE.** [`time-series.hh`](time-series.hh)/[`time-series.cc`](time-series.cc),
    `ae::tal::compute_time_series(Tree&, interval, start?, end?)` → `TimeSeries{slots[], …}`
    for year/month/week/day intervals. Ports the *data* side of `time-series.cc` (slot
@@ -150,7 +166,19 @@ the `cc/draw/` surface API."*
    [`test/test-time-series.py`](test/test-time-series.py).
 7. AA-transition labelling — `cc/tree/aa-transitions.cc` already ports a consensus method;
    reconcile with acmacs-tal's versioned algorithms when richer labelling is needed.
-   Remaining Phase-A: hz-section detection (`hz-sections.cc`).
+   **This is now the one measured gap in the hz-section path.** The report `.tal`s ask
+   `draw-aa-transitions` for `method: eu-20200915` (acmacs-tal
+   `cc/aa-transition-20200915.cc`), which anchors every transition's left-hand residue to the
+   **root sequence** and then runs a multi-pass flip/left-right-same cleanup. ae's `consensus`
+   has no root anchoring, so it disagrees with acmacs-tal on which substitutions appear and on
+   their polarity: measured on a real B/Vic tree, ae reports the left and right residues of a
+   shared position the other way round from acmacs-tal, and produces none of acmacs-tal's
+   root-anchored ancestral substitutions at all. The section *boundaries* are unaffected —
+   they match acmacs-tal exactly — but the transition strings do not, so
+   `ae.tal.section_maps.compute_sections` leaves them blank unless explicitly asked
+   (`aa_transitions=True` / `AE_SECTION_AA_TRANSITIONS=1`) rather than printing wrong
+   substitutions onto a report figure. Porting `eu-20200915` closes this.
+   Phase A is otherwise complete (hz-section detection landed under #5).
 
 **Phase B — drawing (unblocked by subsystem #1 reaching M3):**
 5. **M1 — tree → PDF — DONE.** [`draw-tree.hh`](draw-tree.hh)/[`draw-tree.cc`](draw-tree.cc),
@@ -447,12 +475,18 @@ the `cc/draw/` surface API."*
       slot.width·(slot+1)`, horizontal_line from viewport.left to the spine. An earlier ae version
       had slot 0 at the right edge / deeper-left — the opposite — now corrected.)* ae's `compute_clade_sections` has **no section tolerance**
       (acmacs-tal `section-inclusion/exclusion-tolerance`), so a clade interrupted by interspersed
-      leaves fragments into dozens–hundreds of 1-leaf sections (e.g. `C (5a.2)`: 338 sections). Drawing
+      leaves fragments into dozens–hundreds of 1-leaf sections (the worst h1 clade: 338). Drawing
       them all was a cloud of ticks. Approximated the tolerances **at draw time**: drop sections below
       a leaf-count floor (`max(5, 0.001·height)`), then merge survivors separated by ≤ `0.04·height`
-      into bands → one (or a few) clean bracket(s) per clade. Eyeballed h1/h3/bvic: legend top-right,
-      `C (5a.2)`/`C.1 (5a.2a)` outermost, `C.1.1`/`D`/`D.3.1`/`D.x`/`C.1.7.x`/`C.1.8`/`C.1.9.x` nested
-      (h1); `J.x`/`K` (h3); `C.5.x`/`V1A.3a2` (bvic) — structurally matching the AD refs.
+      into bands → one (or a few) clean bracket(s) per clade. Eyeballed h1/h3/bvic against the AD
+      reference renders: legend top-right, the two broadest clades outermost and each sub-clade
+      nested inside its parent, in all three subtypes — structurally matching the AD refs.
+      (Clade names deliberately not reproduced here: this is a public repo.)
+      *(Update: the real tolerances are now ported — `apply_section_tolerance` in
+      [`clades.cc`](clades.cc), item #5 above. The draw-time floor/merge heuristic described here
+      is still what the clade **column** uses; the signature-page **section boundaries** use the
+      real algorithm and the `.tal`'s per-clade values. Moving the column onto it too would remove
+      this approximation.)*
     - **Wiring.** `legend.show` already flowed end-to-end (`TreeDrawParameters.legend`,
       `settings.cc` `config["legend"]["show"]`, `--legend` CLI flag); the only missing link was the
       translator enabling it under `clades-whocc` (now done). Tests: `test-settings-v3.py` +3 checks

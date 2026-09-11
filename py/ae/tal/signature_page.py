@@ -576,9 +576,15 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
 
     tmpdir = Path(tempfile.mkdtemp(prefix="tal-sigsec-"))
     try:
-        sections = SM.parse_sections(tal)
+        # The `.tal`'s own `hz-sections` when it still specifies them; otherwise AD's
+        # fallback — sections derived from the tree's clade annotations via the `clades`
+        # block (see SM.compute_sections). Every report `.tal` from 2026-0805-tc1 on takes
+        # the fallback: they define `hz-sections` but no longer run the `hz` sub-program,
+        # so every entry is "show": false and AD sections from `clades` instead.
+        sections = SM.sections_for(tal, tree)
         if not sections:
-            raise SignaturePageError(f"no shown hz-sections found in {tal}")
+            raise SignaturePageError(
+                f"no shown hz-sections in {tal} and no clade-derived sections from {tree}")
         window = SM.parse_time_series(tal)
         scale = SM.DateColorScale(*window) if window else None
         if scale is None:
@@ -768,9 +774,15 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
 
     tmpdir = Path(tempfile.mkdtemp(prefix="tal-sigsec-vec-"))
     try:
-        sections = SM.parse_sections(tal)
+        # The `.tal`'s own `hz-sections` when it still specifies them; otherwise AD's
+        # fallback — sections derived from the tree's clade annotations via the `clades`
+        # block (see SM.compute_sections). Every report `.tal` from 2026-0805-tc1 on takes
+        # the fallback: they define `hz-sections` but no longer run the `hz` sub-program,
+        # so every entry is "show": false and AD sections from `clades` instead.
+        sections = SM.sections_for(tal, tree)
         if not sections:
-            raise SignaturePageError(f"no shown hz-sections found in {tal}")
+            raise SignaturePageError(
+                f"no shown hz-sections in {tal} and no clade-derived sections from {tree}")
         window = SM.parse_time_series(tal)
         scale = SM.DateColorScale(*window) if window else None
         if scale is None:

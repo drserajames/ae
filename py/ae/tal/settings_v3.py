@@ -871,3 +871,125 @@ def load_tal(path, defines: dict | None = None, program: str | None = None) -> t
                 merged[key] = val       # named arrays: later file wins on collision
     effective = {**init_defines, **(defines or {})}
     return translate(merged, effective, program=program or "tal-default")
+
+
+# ======================================================================
+# clades block -> per-clade section parameters (AD Clades::Parameters)
+# ======================================================================
+#
+# When the `hz` sub-program is absent from a `.tal`'s `tal` program (true of every report
+# `.tal` from 2026-0805-tc1 on), AD's HzSections element gets no `sections` from settings
+# and its section list is built entirely by `Clades::make_clades()` from the **`clades`
+# block**. Reproducing that here needs only the sectioning half of AD's `CladeParameters`:
+# `show`, `section-inclusion-tolerance`, `section-exclusion-tolerance` and `display_name`
+# (the rest — slot, label, arrow, gaps — is drawing, handled by `translate()` above as
+# `clade_styles`).
+#
+# AD semantics reproduced, from acmacs-tal cc/settings.cc `add_clades` /
+# `read_per_clade` / `read_clade_parameters` and cc/clades.cc `find_or_add_pre_clade`:
+#   * `all-clades` is read into the defaults FIRST;
+#   * each `per-clade` entry starts as a **copy of those defaults** (find_or_add_pre_clade
+#     pushes `all_clades` and then overwrites the name), so a clade inherits `all-clades`
+#     tolerances and `show`;
+#   * a repeated `name` merges into the existing entry rather than adding a second;
+#   * a bare `"?…"` string entry in `per-clade` is a disabled comment and is skipped;
+#   * `show` accepts a bool or an array of bools; AD's `any_shown()` is
+#     `any(not hidden)`, i.e. an array showing ANY section keeps the clade (per-section
+#     `show` then only affects the clades *column*, not the hz-sections: AD's
+#     `Clades::make_clades()` hands every section to `HzSections::add_section` with the
+#     HzSection default `shown=true`);
+#   * `display_name` accepts a string or an array of strings and AD *appends* to whatever
+#     the defaults carried (read_clade_parameters emplace_backs without clearing).
+#
+# Defaults are AD's CladeParameters member initialisers (acmacs-tal cc/clades.hh:74-75).
+
+CLADE_SECTION_DEFAULTS = {"inclusion_tolerance": 10, "exclusion_tolerance": 5, "shown": True}
+
+
+def _read_clade_section_parameters(source: dict, into: dict) -> dict:
+    """Apply one `clades` per-clade / all-clades object onto `into` (AD
+    `Settings::read_clade_parameters`, sectioning keys only). Mutates and returns `into`."""
+    display_name = source.get("display_name")
+    if isinstance(display_name, str):
+        into["display_name"] = [*into.get("display_name", []), display_name]
+    elif isinstance(display_name, list):
+        into["display_name"] = [*into.get("display_name", []), *(str(d) for d in display_name)]
+    show = source.get("show")
+    if isinstance(show, bool):
+        into["shown"] = show
+    elif isinstance(show, list) and show:
+        into["shown"] = any(bool(s) for s in show)   # AD any_shown()
+    for key, target in (("section-inclusion-tolerance", "inclusion_tolerance"),
+                        ("section-exclusion-tolerance", "exclusion_tolerance")):
+        value = source.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            into[target] = int(value)
+    return into
+
+
+def find_command(tal: dict, name: str, program: str = "tal") -> dict | None:
+    """The last `{"N": name, …}` command reached by running `program`, or None.
+
+    Walks the program the way :func:`translate` does — following string references into
+    named sub-arrays, skipping `"?…"`-disabled ones and `{"?N": …}` disabled commands — so
+    a command defined in the file but NOT invoked by the program is correctly ignored (the
+    whole point for `hz-sections`, which these `.tal`s still define but no longer run).
+    Falls back to scanning every named array when `program` itself is absent."""
+    found: list[dict] = []
+
+    def run(prog, seen: frozenset) -> None:
+        for item in prog:
+            if isinstance(item, str):
+                if item.startswith("?") or item in seen:
+                    continue
+                sub = tal.get(item)
+                if isinstance(sub, list):
+                    run(sub, seen | {item})
+                continue
+            if not isinstance(item, dict) or "N" not in item:
+                continue                     # {"?N": …} disabled, or a comment
+            if item["N"] == "if":
+                for branch in (item.get("then"), item.get("else")):
+                    if isinstance(branch, list):
+                        run(branch, seen)    # both branches: we want presence, not evaluation
+            elif item["N"] == name:
+                found.append(item)
+
+    if isinstance(tal.get(program), list):
+        run(tal[program], frozenset({program}))
+    if not found:
+        for key, value in tal.items():
+            if key.startswith("?") or not isinstance(value, list):
+                continue
+            for item in value:
+                if isinstance(item, dict) and item.get("N") == name:
+                    found.append(item)
+    return found[-1] if found else None
+
+
+def parse_clade_section_parameters(tal, program: str = "tal") -> tuple[dict, dict[str, dict]]:
+    """Read a `.tal`'s `clades` block into ``(all_clades, per_clade)`` section parameters.
+
+    `tal` is a loaded settings dict or a path to a `.tal`. Each value is a dict with keys
+    ``inclusion_tolerance``, ``exclusion_tolerance``, ``shown`` and (optionally)
+    ``display_name`` (a list, AD's per-section-indexed vector). `per_clade` is keyed by
+    clade name. Feed these to ``ae_backend.tal.compute_hz_sections`` — see
+    :func:`ae.tal.section_maps.compute_sections`, which does exactly that."""
+    if isinstance(tal, (str, Path)):
+        tal = _loads_relaxed(Path(tal).read_text())
+    all_clades = dict(CLADE_SECTION_DEFAULTS)
+    per_clade: dict[str, dict] = {}
+    cmd = find_command(tal, "clades", program)
+    if not cmd:
+        return all_clades, per_clade
+    source_all = cmd.get("all-clades")
+    if isinstance(source_all, dict):
+        _read_clade_section_parameters(source_all, all_clades)
+    for entry in cmd.get("per-clade", []):
+        if not isinstance(entry, dict):
+            continue                          # a bare "?…" comment string
+        name = entry.get("name")
+        if not isinstance(name, str):
+            continue
+        _read_clade_section_parameters(entry, per_clade.setdefault(name, dict(all_clades)))
+    return all_clades, per_clade
