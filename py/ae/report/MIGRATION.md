@@ -598,11 +598,84 @@ geometry changes**: every `sr.clade_any_of` in the cycle is commented out or liv
 `old-adjust/`, and all of them feed `modify=` styling, never a `move`. Worth knowing before
 anyone un-comments one.
 
-**Still open on this stage** (see `../../../AE-PORT-SSM-ADJUST-AUDIT.md`): there is no
-styling or rendering, so no review loop — `slot.modify(...)`, the `modify=` argument of
-`select_*` and `path(outline=…)` are accepted and recorded but draw nothing, and snapshots
-advance the step counter without producing a PDF (step 4); and `compare_sequences`,
-procrustes arrows and `tal` wiring are untouched (step 5). Stage B is **not** done.
+#### Step 4 — the review loop: styling and snapshots (done 2026-09-11, minus the polygon)
+
+An `adjust/0do` script's loop is *select -> look -> re-cut the polygon*, and it needs the
+selection **marked on a drawn snapshot**. That is now in, in pure Python — no C++ change,
+no rebuild — as [`py/ae/adjust_render.py`](../adjust_render.py) plus three method bodies in
+`Slot`:
+
+* **`slot.modify(...)` and `modify={...}`** now style points. AD's keys (`fill`, `outline`,
+  `outline_width`, `show`, `shape`, `size`, `aspect`, `rotation`, `order`, `label`,
+  `legend`) are translated to `SemanticStyle.add_modifier` kwargs by
+  `adjust_render.normalize_modify`: most pass straight through (ae's `point_shape` even
+  parses AD's shape names, switching on the first letter), `order` becomes `raise_`/`lower`,
+  and AD's `PointLabel`/`PointLegend` dicts are remapped key by key. What has no ae
+  equivalent (`label.font`; `legend.show_if_none_selected` / `replace` / `show`) is dropped
+  with a message rather than raising.
+* **Each selection becomes modifiers**, one `selector={"!i": <per-side index>}` per point
+  with `only="antigens"`/`"sera"` — the `ae.semantic.select_mark` idiom. A serum arrives as
+  `number_of_antigens + serum_no` and is split back. A selection covering a whole side
+  collapses to one empty-selector modifier, which is the
+  `modify(select_antigens(lambda ag: True), size=10)` line that opens most real scripts.
+* **`slot.plot()` draws a real PDF** (and a `.png` at step 99, as AD does) through
+  `ae_backend.map_draw.export_styled_map` — the same native renderer the report uses. The
+  snapshot is drawn on top of the chart's own clade style (`clades`, or the highest
+  `clades-v<N>`; `Slot.base_style` overrides, `""` for the renderer's grey default), pulled
+  in as the first modifier's `parent`.
+* **The slot's chart is never touched.** The style is built on a throw-away copy, so
+  `99.ace` carries only the geometry the adjust operations produced (asserted in the test).
+  The copy is a JSON round trip, not `Chart.write()`: `write` always xz-compresses, ~14 s on
+  the largest report chart, against ~0.1 s for `export()` + a plain write. A full snapshot of
+  that chart (12,737 antigens) takes ~0.4 s.
+* **`reset_plot_spec()` and `color_by_clade()` are ported by re-pointing the base style.**
+  AD rebuilt its grey baseline point by point; ae's renderer draws exactly that baseline
+  when nothing says otherwise, so `reset_plot_spec` is `base_style = ""` plus forgetting the
+  accumulated styling. `color_by_clade` selects the chart's own clade style instead of
+  re-deriving colours from a `.mapi` file (`mapi_dir=` is accepted and ignored, with a
+  message) — which is why this cycle's scripts dropped `color_by_clade` altogether while the
+  2025 cycle's called it 40 times.
+
+**Verified differentially against the real AD extension**, re-deriving the AD side in the
+same run. For each of the 16 maps in the current cycle that has a real `slot.path(outline=)`
+in its `adjust/0do`, both engines ran that map's **own** polygon and **own** `modify` dict,
+after the `size=10`-on-every-antigen line: AD through `ChartDraw.modify` with the resulting
+per-point style read back from `chart.plot_spec().antigen(i)`, ae through `Zd`/`Slot` with
+the emitted `-adjust` modifiers resolved per point the way `styled-draw.cc`'s
+`point_matches` resolves them.
+
+| check | result |
+|---|---|
+| selection from the map's own polygon | **16/16** identical index sets, 13,080 points |
+| the points each engine restyles, and the values it gives them | **16/16** identical, 67,401 styled points |
+| AD restyling anything outside the selection | never |
+| end to end on a real map (`path -> select+modify -> move -> relax`) | both engines write the same file set — `00/01/02/99.pdf`, `99.png`, `99.ace` — and mark the same 577 antigens |
+
+The bar met is **same points, same styling intent**, plus a visual check of a rendered map;
+not pixel identity, which is not achievable (different renderers) and was not chased. Two
+visible differences, both improvements or pre-existing: ae draws the chart's clade colours
+where AD's snapshot of the same chart is a flat green (AD reads the legacy `c["p"]`, ae the
+`c["R"]` styles), and point sizes differ because the renderer's defaults are 20/32 px against
+AD's 10/15 — which is what the `size=10` line in every script is compensating for.
+
+**What did NOT land: drawing the polygon.** `slot.path(outline=…)` still only records the
+request (and says so once per slot). AD outlines the selection polygon on its snapshot; ae
+has no polygon primitive above the Cairo surface. `cc/chart/v3/styles.hh` has no
+path/figure/arrow element, so there is nothing to carry it on the chart, and
+`cc/map-draw/styled-draw.cc` draws only points, serum circles, the grid, labels, the legend
+and the title. Closing it needs **new C++** — a `Style` path element, its export/import, a
+pybind kwarg, and a draw call on the already-present
+`ae::draw::CairoPdf::path_negative_move` — and therefore a rebuild; it was deliberately not
+attempted here. The loop still works without it: the points the polygon caught *are* marked,
+by the `modify=` that always accompanies it, which is the question the analyst is asking.
+Procrustes arrows (step 5) are blocked on the same missing primitive.
+
+`test/adjust_review.py` locks the translation, the modifiers, the untouched `99.ace` and the
+drawn PDF/PNG down on synthetic data only.
+
+**Still open on this stage** (see `../../../AE-PORT-SSM-ADJUST-AUDIT.md`): the polygon
+outline above; and `compare_sequences`, procrustes arrows and `tal` wiring (step 5). Stage B
+is **not** done.
 
 **The real gap is one primitive.** All three missing ops are geometry on the layout, and all
 are enabled by **writing layout coordinates** (currently read-only). With a coordinate setter:
@@ -620,9 +693,9 @@ flip_over_line = reflect coords; geometric select = point-in-polygon over the la
 2. ✅ **DONE — A pure-Python `zero_do` port**, landed in `py/ae/adjust.py` rather than a new
    package: `Adjust` (`move`/`flip`/`select-inside`/`relax`/`procrustes`/frames) plus `Zd`,
    `Slot` and `main` (step directories, `NN` numbering, `final_ace`, slot chaining) on
-   `ae_backend.chart_v3`. Snapshots are **not** wired to a renderer yet — `Slot.renderer` is
-   the hook, and the step counter advances regardless so the numbers do not shift when
-   rendering lands (that is step 4 below).
+   `ae_backend.chart_v3`. Snapshots are drawn by `Slot.renderer`, which defaults to
+   `ae.adjust_render.SnapshotRenderer` (set it to `None` to keep AD's numbering without
+   drawing); the polygon outline itself is still missing — see "Step 4" above.
 
 **Effort:** modest — the chart-engine ops mostly exist; the new work is the coordinate-setter
 primitive (✅ now done — see above) + ~500-line thin-wrapper Python framework. The sole

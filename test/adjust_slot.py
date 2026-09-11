@@ -128,19 +128,28 @@ def test_clade_and_aa_and_geometry_combine():
     combination that had no ae expression before (audit §3): geometry lived on the adjust
     Point, sequence and clade only on chart_v3's SelectionData."""
     adj = Adjust(_chart(sequences=True))
-    # the right half of the map, in raw layout coordinates: big enough to catch a decent
-    # share of the points, small enough that the geometry term actually excludes some
-    region = adj.figure([[0, -100], [100, -100], [100, 100], [0, 100]],
-                        frame="map-not-transformed")
-
-    inside = set(adj.select_antigens(lambda pt: pt.inside(region)))
     x1 = set(adj.select_antigens(lambda pt: pt.clade_any_of(["X.1"])))
     aa = set(adj.select_antigens(lambda pt: bool(pt.aa["5A"])))
 
+    # The map is relaxed from a random start, so a fixed half-plane catches an arbitrary
+    # share of it — sometimes none of x1 & aa, which left the test proving nothing (it
+    # flaked on the "selected nothing" guard roughly one run in eight). Cut instead at the
+    # median x of the very points the sequence terms pick out, which always leaves some of
+    # them inside and some outside, whatever orientation the optimizer landed on.
+    coords = {}
+    adj.select_antigens(lambda pt: bool(coords.__setitem__(pt.no, pt.coords)))
+    xs = sorted(coords[no][0] for no in (x1 & aa) if coords.get(no))
+    cut = xs[len(xs) // 2]
+    far = max(abs(v) for co in coords.values() if co for v in co) + 1.0
+    region = adj.figure([[cut, -far], [far, -far], [far, far], [cut, far]],
+                        frame="map-not-transformed")
+
+    inside = set(adj.select_antigens(lambda pt: pt.inside(region)))
     combined = set(adj.select_antigens(
         lambda pt: pt.clade_any_of(["X.1"]) and bool(pt.aa["5A"]) and pt.inside(region)))
     assert combined == x1 & aa & inside, "combined predicate is not the intersection"
     assert combined, "the fixture selected nothing — the test is not exercising anything"
+    assert combined < (x1 & aa), "the geometry term excluded nothing — test proves nothing"
     print(f"OK [test_clade_and_aa_and_geometry_combine]: {len(combined)} antigens = "
           f"clade({len(x1)}) AND aa({len(aa)}) AND inside({len(inside)})")
 
