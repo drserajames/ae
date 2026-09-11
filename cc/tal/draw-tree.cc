@@ -87,6 +87,80 @@ namespace ae::tal
 
 namespace ae::tal
 {
+    // Does a node-mod's selector match this node? Extracted so the drawing path (which
+    // applies hide + the style overrides) and `apply_node_hide_mods` (which the `.names`
+    // dump uses, and which needs hide only) cannot drift apart.
+    static bool node_mod_selects(const NodeSelect& sel, const ae::tree::Node& base, const std::string* name, const std::string* date)
+    {
+        if (!sel.seq_id.empty() && (name == nullptr || std::find(sel.seq_id.begin(), sel.seq_id.end(), *name) == sel.seq_id.end()))
+            return false;
+        if (sel.cumulative_min && base.cumulative_edge.get() < *sel.cumulative_min)
+            return false;
+        if (sel.edge_min && base.edge.get() < *sel.edge_min)
+            return false;
+        if (!sel.date_min.empty()) {
+            if (name == nullptr)
+                return false;
+            if (const std::string day = canonical_date(*date); day.empty() || day < sel.date_min)
+                return false;
+        }
+        if (!sel.date_max.empty()) {
+            if (name == nullptr)
+                return false;
+            if (const std::string day = canonical_date(*date); day.empty() || !(day < sel.date_max))
+                return false;
+        }
+        return true;
+    }
+
+    // Apply ONLY the `hide` part of the settings' node mods, marking hidden nodes
+    // `shown = false` exactly as the drawing path does before it computes the layout.
+    //
+    // This exists for the `.names` dump, which computes a layout directly and so used to
+    // report every leaf in the tree regardless of the settings — 70002 instead of the shown
+    // subset on a report tree with 547 hide mods. Callers that match chart antigens against
+    // "the leaves on the tree" (the signature page's in-tree grey, its section leaf ranges)
+    // were therefore matching against hidden leaves too.
+    void apply_node_hide_mods(ae::tree::Tree& tree, const TreeDrawParameters& params)
+    {
+        using namespace ae::tree;
+        if (params.node_mods.empty())
+            return;
+        tree.calculate_cumulative();
+        const auto apply_hide = [&](Node& base, const std::string* name, const std::string* date) {
+            for (const auto& mod : params.node_mods) {
+                if (node_mod_selects(mod.select, base, name, date) && mod.apply.hide.value_or(false))
+                    base.shown = false;
+            }
+        };
+        struct Frame
+        {
+            node_index_t index;
+            std::size_t cursor;
+        };
+        std::vector<Frame> stack;
+        stack.push_back({Tree::root_index(), 0});
+        while (!stack.empty()) {
+            Frame& frame = stack.back();
+            const Inode& inode = tree.inode(frame.index);
+            if (frame.cursor < inode.children.size()) {
+                const node_index_t child = inode.children[frame.cursor++];
+                if (is_leaf(child)) {
+                    Leaf& leaf = tree.leaf(child);
+                    apply_hide(leaf, &leaf.name, &leaf.date);
+                }
+                else {
+                    Inode& child_inode = tree.inode(child);
+                    apply_hide(child_inode, nullptr, nullptr);
+                    stack.push_back({child, 0});
+                }
+            }
+            else {
+                stack.pop_back();
+            }
+        }
+    }
+
 // Shared tree-render core: compute the page geometry, then draw the whole tree through a surface
 // obtained from make_surface(width, height). The two public entry points differ ONLY in the surface
 // they supply — a file-bound CairoPdf (export_tree_pdf) or a borrowed sub-rectangle of a shared page
@@ -120,21 +194,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         tree.calculate_cumulative();
         const auto apply_mods = [&](node_index_base_t idx, Node& base, const std::string* name, const std::string* date) {
             for (const auto& mod : params.node_mods) {
-                const NodeSelect& sel = mod.select;
-                if (!sel.seq_id.empty() && (name == nullptr || std::find(sel.seq_id.begin(), sel.seq_id.end(), *name) == sel.seq_id.end()))
+                if (!node_mod_selects(mod.select, base, name, date))
                     continue;
-                if (sel.cumulative_min && base.cumulative_edge.get() < *sel.cumulative_min)
-                    continue;
-                if (sel.edge_min && base.edge.get() < *sel.edge_min)
-                    continue;
-                if (!sel.date_min.empty()) {
-                    if (name == nullptr) continue;
-                    if (const std::string day = canonical_date(*date); day.empty() || day < sel.date_min) continue;
-                }
-                if (!sel.date_max.empty()) {
-                    if (name == nullptr) continue;
-                    if (const std::string day = canonical_date(*date); day.empty() || !(day < sel.date_max)) continue;
-                }
                 const NodeApply& ap = mod.apply;
                 if (ap.hide.value_or(false))
                     base.shown = false;

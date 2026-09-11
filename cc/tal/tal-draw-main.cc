@@ -111,7 +111,12 @@ int main(int argc, char* const argv[])
         const std::filesystem::path output{positional[1]};
         if (output.extension() == ".names") {
             // text dump of the shown leaf names in draw (top-to-bottom) order — AD's `.names`/`/names`
-            // output. Apply ladderize first so the order matches what a PDF render would draw.
+            // output. Apply the settings' `hide` node-mods first — this dump computes its own
+            // layout, so without them it listed every leaf in the tree however many the settings
+            // hid (70002 rather than the shown subset on a report tree with 547 hide mods), and
+            // callers matching chart antigens against "leaves on the tree" matched hidden ones.
+            // Then ladderize, so the order matches what a PDF render would draw.
+            ae::tal::apply_node_hide_mods(*tree, params);
             if (params.ladderize == "number-of-leaves")
                 tree->ladderize(ae::tree::Tree::ladderize_method::number_of_leaves);
             else if (params.ladderize == "max-edge-length")

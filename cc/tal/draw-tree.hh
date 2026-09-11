@@ -201,6 +201,11 @@ namespace ae::tal
     // page is portrait (width = image_size * width_to_height_ratio). Takes Tree& because
     // layout computes cumulative edges. Returns the number of leaf labels suppressed by
     // collision avoidance (0 when disabled or none overlap).
+    // Apply only the `hide` node-mods (marking nodes shown=false), as the drawing path does
+    // before computing its layout. For callers that compute a layout themselves — notably
+    // tal-draw's `.names` dump, which otherwise lists every leaf regardless of the settings.
+    void apply_node_hide_mods(ae::tree::Tree& tree, const TreeDrawParameters& params);
+
     std::size_t export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size = 1000.0, const TreeDrawParameters& params = {});
 
     // Shared-surface form of export_tree_pdf (single-canvas signature-page compositor): render the
