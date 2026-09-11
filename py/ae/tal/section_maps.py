@@ -159,20 +159,36 @@ def parse_time_series(tal_path) -> Optional[tuple[str, str]]:
 #
 # aa-transitions: AD computes its own (the report `.tal`s ask `draw-aa-transitions` for
 # `method: eu-20200915`) and `sp.tal` appends them to each section's map title
-# (`"{section-prefix}. {section-label} {section-aa-transitions}"`). ae has no port of
-# eu-20200915: its only method is `tree.set_aa_nuc_transition_labels`'s `consensus`, which
-# lacks eu-20200915's root-sequence anchoring and so disagrees with AD on which
-# substitutions appear AND on their polarity — measured on a real B/Vic cycle tree, ae gives
-# the left and right residues of a shared position the other way round from AD, and produces
-# none of AD's root-anchored ancestral substitutions at all. An `.asr` tree's *stored*
-# transitions are a raw ancestral reconstruction and disagree even more widely (a real H1
-# cycle tree: ~30 substitutions per section against AD's 4-8).
+# (`"{section-prefix}. {section-label} {section-aa-transitions}"`).
 #
-# Printing either into a report figure would put substitutions on the page that are simply
-# wrong, so this function **suppresses** them by default and computing them is opt-in
-# (`aa_transitions=True`, or AE_SECTION_AA_TRANSITIONS=1). Empty is also what the last
-# shipped cycle's curated hz-sections carried, so the titles read as they did in Feb.
-# Porting eu-20200915 (AD cc/aa-transition-20200915.cc) is what would close this.
+# eu-20200915 is now ported (ae `cc/tree/aa-transitions.cc`, from AD
+# `acmacs-tal/cc/aa-transition-20200915.cc`) and verified against AD as data: on the Feb-2026
+# cycle trees, every internal node's label list is identical to AD's — bvic.after-2021
+# 5376/5376 nodes, h1.asr.after-2021 16734/16734, h3.asr.after-2021 10136/10136, same
+# substitutions, same order, same polarity. So transitions are computed and printed BY DEFAULT
+# again; pass `aa_transitions=False` (or AE_SECTION_AA_TRANSITIONS=0) to blank them.
+#
+# KNOWN RESIDUAL — the `.tal`'s node HIDING is not applied here. AD computes the transitions
+# after the settings stack has applied every `{"N": "nodes", "select": {"seq_id": ...},
+# "apply": {"hide": true}}` mod, and hidden leaves are excluded from the consensus counters,
+# from the leaf counts and from the vertical numbering the section accumulation keys on.
+# `compute_sections` runs on the tree as loaded, so:
+#   B/Vic (2026-0921, 52 hide mods): all 10 section strings identical to AD's real sp/0do run.
+#   H1    (2026-0921, 483 hide mods): sections A-C identical, D-M differ by 1-2 substitutions.
+#     Proven to be the hiding and nothing else: re-running AD's own sp/0do command with every
+#     `"hide": true` flipped to false makes AD and ae agree on all 13/13 section strings.
+# Closing it belongs with the signature-page settings stack (apply the `nodes` hide mods, then
+# reproduce AD's hidden-aware leaf counting and `Tree::set_first_last_next_node_id` vertical
+# numbering), not with the transition method.
+#
+# Two details are needed to reproduce an AD run and are set below:
+#   * method="eu-20200915"   — NOT ae's own `consensus`, which lacks eu-20200915's
+#     root-sequence anchoring and disagrees with AD both on which substitutions appear and on
+#     their polarity.
+#   * reset_labels=False     — AD's `tal` never clears the labels a `.asr` tjz already carries
+#     (`Tal::reset()` runs only in its interactive loop), so the method computes ON TOP of
+#     them and they take part in the ancestor chain. Clearing them changes the computed
+#     labels' left residue (measured: 604 of 16734 h1 nodes differ, 118 of 10136 h3 nodes).
 
 SECTION_AA_TRANSITIONS_ENV = "AE_SECTION_AA_TRANSITIONS"
 
@@ -193,12 +209,11 @@ def compute_sections(tree, tal_path, *, aa_transitions: Optional[bool] = None,
     if isinstance(tree, (str, Path)):
         tree = ae_backend.tree.load(str(tree))
     if aa_transitions is None:
-        aa_transitions = _os.environ.get(SECTION_AA_TRANSITIONS_ENV, "0") != "0"
+        aa_transitions = _os.environ.get(SECTION_AA_TRANSITIONS_ENV, "1") != "0"
     if aa_transitions:
-        # populates Inode::aa_transitions, which compute_hz_sections accumulates. A tree that
-        # already carries them (an `.asr` tjz with `A` fields) keeps its own — this only fills
-        # in a tree that has none.
-        ae_backend.tree.set_aa_nuc_transition_labels(tree)
+        # populates Inode::aa_transitions, which compute_hz_sections accumulates. See the note
+        # above for why the method and reset_labels are what they are.
+        ae_backend.tree.set_aa_nuc_transition_labels(tree, method="eu-20200915", reset_labels=False)
 
     all_clades, per_clade = parse_clade_section_parameters(tal_path, program=program)
 
@@ -221,7 +236,8 @@ def compute_sections(tree, tal_path, *, aa_transitions: Optional[bool] = None,
             "first": section.first_name,
             "last": section.last_name,
             "label": section.label,
-            # blank unless opted in — see the note above on ae vs AD transition methods
+            # computed by eu-20200915 and verified against AD (see the note above); blank only
+            # if the caller opted out
             "aa_transitions": section.aa_transitions if aa_transitions else "",
         }
         for section in computed

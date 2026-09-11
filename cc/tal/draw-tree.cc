@@ -97,10 +97,17 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
 {
     using namespace ae::tree;
 
-    // --- compute aa-substitution transitions (consensus) when requested, instead of
-    //     using the transitions already stored on the tree's inodes (the `A` field). ---
-    if (params.aa_transitions_compute)
-        set_aa_nuc_transition_labels(tree, AANucTransitionSettings{.set_aa_labels = true, .set_nuc_labels = false, .non_common_tolerance = params.aa_transitions_tolerance});
+    // --- compute aa-substitution transitions when requested, instead of using the
+    //     transitions already stored on the tree's inodes (the `A` field). The method comes
+    //     from the .tal's `draw-aa-transitions` `method` (acmacs-tal names it). ---
+    if (params.aa_transitions_compute) {
+        auto method{aa_nuc_transition_method::consensus};
+        if (params.aa_transitions_method == "eu-20200915" || params.aa_transitions_method == "eu_20200915" || params.aa_transitions_method == "eu-20200915-low-mem")
+            method = aa_nuc_transition_method::eu_20200915;
+        else if (params.aa_transitions_method != "consensus")
+            AD_WARNING("draw-aa-transitions: unsupported method \"{}\" — using consensus", params.aa_transitions_method);
+        set_aa_nuc_transition_labels(tree, AANucTransitionSettings{.set_aa_labels = true, .set_nuc_labels = false, .method = method, .non_common_tolerance = params.aa_transitions_tolerance});
+    }
 
     // --- node select/apply mods (settings DSL): hide nodes + collect per-node style
     //     overrides (keyed by node index, consulted during drawing). Applied before the

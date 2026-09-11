@@ -629,13 +629,28 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                 # leaving aa_transitions.show on would flood the tree with every stored inode
                 # transition (the H3/H1 purple flood). Only enable show for an "imported"
                 # block that carries NO per-node curation.
-                if not emitted_mrca and cmd.get("method", "imported") == "imported":
+                method = cmd.get("method", "imported")
+                if not emitted_mrca and method == "imported":
                     aa = schema.setdefault("aa_transitions", {})
                     aa["show"] = True
                     aa["compute"] = False  # use the tree's stored ("imported") transitions
                     mn = cmd.get("minimum-number-leaves-in-subtree")
                     if isinstance(mn, (int, float)) and mn >= 1:
                         aa["min_leaves"] = int(mn)
+                elif not emitted_mrca and method in ("eu-20200915", "eu_20200915", "eu-20200915-low-mem"):
+                    # ported in cc/tree/aa-transitions.cc and verified label-for-label against
+                    # AD; compute it rather than fall back to the tree's stored labels.
+                    aa = schema.setdefault("aa_transitions", {})
+                    aa["show"] = True
+                    aa["compute"] = True
+                    aa["method"] = "eu-20200915"
+                    if isinstance(cmd.get("non-common-tolerance"), (int, float)):
+                        aa["tolerance"] = float(cmd["non-common-tolerance"])
+                    mn = cmd.get("minimum-number-leaves-in-subtree")
+                    if isinstance(mn, (int, float)) and mn >= 1:
+                        aa["min_leaves"] = int(mn)
+                elif method not in ("imported", "eu-20200915", "eu_20200915", "eu-20200915-low-mem"):
+                    warnings.append(f"draw-aa-transitions: method {method!r} not ported (only 'imported' and 'eu-20200915')")
             elif name == "hz-sections":
                 schema["hz_sections"] = [
                     {"first": s.get("first", ""), "last": s.get("last", ""),

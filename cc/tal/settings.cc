@@ -98,6 +98,8 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
     if (const auto& aa = config["aa_transitions"]; aa.is_object()) {
         params.aa_transitions = get_bool(aa["show"]);
         params.aa_transitions_compute = get_bool(aa["compute"]);
+        if (std::string method = get_string(aa["method"]); !method.empty())
+            params.aa_transitions_method = std::move(method);
         params.aa_transitions_tolerance = get_double(aa["tolerance"], 0.6);
         params.aa_transitions_min_leaves = static_cast<int>(get_double(aa["min_leaves"], 1.0));
     }

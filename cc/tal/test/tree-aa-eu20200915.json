@@ -1,0 +1,14 @@
+{"_": "synthetic tree for test-aa-transitions-eu20200915.py. Residues are J and O, which are NOT amino-acid codes, so nothing here is WHO data. Leaves L1,L2 carry the ancestral sequence (all J); clade A (L3..L6) has O at position 13; the nested clade B (L5,L6) additionally has O at position 15. The consensus method labels NEITHER branch: at pos 13 the root's own consensus is already O (4 of 6 leaves, over the 0.6 tolerance), so parent and child agree; at pos 15 clade A has no consensus at all. eu-20200915 labels both, anchoring the left residue to the root sequence (the first leaf).",
+ "  version": "phylogenetic-tree-v3",
+ "tree": {"t": [
+   {"l": 1, "n": "L1", "a": "JJJJJJJJJJJJJJJ"},
+   {"l": 1, "n": "L2", "a": "JJJJJJJJJJJJJJJ"},
+   {"l": 1, "t": [
+     {"l": 1, "n": "L3", "a": "JJJJJJJJJJJJOJJ"},
+     {"l": 1, "n": "L4", "a": "JJJJJJJJJJJJOJJ"},
+     {"l": 1, "t": [
+       {"l": 1, "n": "L5", "a": "JJJJJJJJJJJJOJO"},
+       {"l": 1, "n": "L6", "a": "JJJJJJJJJJJJOJO"}
+     ]}
+   ]}
+ ]}}

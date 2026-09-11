@@ -1,3 +1,5 @@
+#include <functional>
+
 #include "tree/tree.hh"
 #include "tree/aa-transitions.hh"
 #include "py/module.hh"
@@ -178,17 +180,64 @@ void ae::py::tree(pybind11::module_& mdl)
     tree_submodule.def("export", &export_tree, "tree"_a, "filename"_a, "indent"_a = 0);
     tree_submodule.def("export_subtree", pybind11::overload_cast<const Node_Ref&, const std::filesystem::path&, size_t>(&export_subtree), "root_node"_a, "filename"_a, "indent"_a = 0);
 
+    // Mirrors acmacs-tal `Tree::report_first_last_leaves()` (AD cc/tree.cc, the `tal
+    // --first-last-leaves N` report), so ae's transition labels can be diffed against AD's
+    // AS DATA, keyed on each inode's (first leaf, last leaf) pair rather than on a node id
+    // (AD's "vertical.horizontal" node_id has no ae equivalent).
+    // Returns one tuple per inode with >= min_number_of_leaves leaves, in pre-order:
+    //   (level, number_of_leaves, first_leaf_name, last_leaf_name, transitions)
+    // `transitions` is AD's AA_Transitions::display(): space-joined "{left}{pos}{right}",
+    // entries with an empty left or right omitted.
+    tree_submodule.def(
+        "report_first_last_leaves",
+        [](Tree& tree, size_t min_number_of_leaves, bool aa) {
+            tree.update_number_of_leaves_in_subtree();
+            std::vector<std::tuple<size_t, size_t, std::string, std::string, std::string>> result;
+            const auto last_leaf = [&tree](node_index_t index) {
+                while (!is_leaf(index))
+                    index = tree.inode(index).children.back();
+                return index;
+            };
+            const auto display = [](const transitions_t& transitions) {
+                fmt::memory_buffer out;
+                bool first{true};
+                for (const auto& tr : transitions.transitions) {
+                    if (tr.left == ' ' || tr.right == ' ')
+                        continue;
+                    fmt::format_to(std::back_inserter(out), "{}{}{}{}", first ? "" : " ", tr.left, tr.pos, tr.right);
+                    first = false;
+                }
+                return fmt::to_string(out);
+            };
+            const std::function<void(node_index_t, size_t)> walk = [&](node_index_t index, size_t level) {
+                const Inode& node = tree.inode(index);
+                if (node.number_of_leaves() >= min_number_of_leaves)
+                    result.emplace_back(level, node.number_of_leaves(), tree.leaf(tree.first_leaf(index)).name, tree.leaf(last_leaf(index)).name,
+                                        display(aa ? node.aa_transitions : node.nuc_transitions));
+                for (const auto child : node.children) {
+                    if (!is_leaf(child))
+                        walk(child, level + 1);
+                }
+            };
+            walk(Tree::root_index(), 0);
+            return result;
+        },
+        "tree"_a, "min_number_of_leaves"_a = 20, "aa"_a = true);
+
     tree_submodule.def(
         "set_aa_nuc_transition_labels",
-        [](Tree& tree, std::string_view method_str, bool set_aa_labels, bool set_nuc_labels) {
+        [](Tree& tree, std::string_view method_str, bool set_aa_labels, bool set_nuc_labels, double non_common_tolerance, bool reset_labels) {
             aa_nuc_transition_method method{aa_nuc_transition_method::consensus};
             if (method_str == "consensus")
                 method = aa_nuc_transition_method::consensus;
+            else if (method_str == "eu-20200915" || method_str == "eu_20200915" || method_str == "eu-20200915-low-mem")
+                method = aa_nuc_transition_method::eu_20200915; // the per-pos (low-mem) and full forms give identical labels
             else
                 throw std::invalid_argument{AD_FORMAT("Unrecognized aa/nuc transition method: \"{}\"", method_str)};
-            set_aa_nuc_transition_labels(tree, AANucTransitionSettings{.set_aa_labels = set_aa_labels, .set_nuc_labels = set_nuc_labels, .method = method});
+            set_aa_nuc_transition_labels(
+                tree, AANucTransitionSettings{.set_aa_labels = set_aa_labels, .set_nuc_labels = set_nuc_labels, .method = method, .reset_labels = reset_labels, .non_common_tolerance = non_common_tolerance});
         },
-        "tree"_a, "method"_a = "consensus", "set_aa_labels"_a = true, "set_nuc_labels"_a = false);
+        "tree"_a, "method"_a = "consensus", "set_aa_labels"_a = true, "set_nuc_labels"_a = false, "non_common_tolerance"_a = 0.6, "reset_labels"_a = true);
 
     // ----------------------------------------------------------------------
 }

@@ -636,6 +636,70 @@ extra aa variant AD omits; AD boxes matrix sections where ae draws separator lin
   crashing. `calculate_cumulative` / `set_node_id` were already iterative and were only
   victims of the null deref. `compute_layout` was always iterative and safe.
 
+## eu-20200915 aa-transitions — ported and verified against AD (2026-09-11)
+
+`cc/tree/aa-transitions.cc` now implements **`eu-20200915`** alongside its own `consensus`,
+a port of AD `acmacs-tal/cc/aa-transition-20200915.cc`
+(`update_aa_transitions_eu_20200915[_per_pos]`). This is the method the report `.tal`s name in
+`draw-aa-transitions`. The per-position and all-positions forms of AD's driver are equivalent
+(each position is computed independently), so only the per-position one is ported.
+
+What it adds over `consensus`, in order of impact:
+
+1. **Root-sequence anchoring (AD stage 3).** A label's left residue is the right residue of the
+   nearest ancestor label at the same position, and where there is none, the residue of the
+   tree's first leaf. This is what makes ancestral substitutions appear at all, and what sets
+   their polarity. `consensus` had no such pass.
+2. **Flip removal (AD stage 3).** A label whose descendants revert it within fewer than 3
+   levels, across more than 0.5 % of its leaves, is dropped and the walk repeats.
+3. **A stricter notion of "common"** — a node is common only when every child shares its
+   consensus; a child is labelled only when at least two of the child's own children share the
+   child's consensus.
+4. **Label lifting** (AD `Node::replace_aa_transition`) — the same label is removed from the
+   nearest descendants that carry one, pruned at the first labelled node on each path.
+5. `X` is not counted into the consensus (`-` is), and `left == right` labels are dropped last.
+
+Selectable as `method="eu-20200915"` on `ae_backend.tree.set_aa_nuc_transition_labels`, via a
+`.tal`'s `draw-aa-transitions` `method` (settings key `aa_transitions.method`, translated in
+`py/ae/tal/settings_v3.py`), and used by `ae.tal.section_maps.compute_sections`.
+
+`AANucTransitionSettings::reset_labels` (default true) exists because **AD's `tal` does not
+clear the labels a tree already carries**: `Tal::reset()` runs only in its interactive loop, so
+on a `.asr` tjz the method computes on top of the imported `A` labels and those take part in
+stage 3's ancestor chain. `compute_sections` passes `reset_labels=False` to match.
+
+**Differential verification against AD, as data** (one AD run and one ae run per tree, same
+tjz; AD invoked with a minimal `.tal` selecting the method and `-D ladderize-method=none`,
+compared with `tal --first-last-leaves`, which prints each inode's first/last leaf and its
+label list — keyed both on pre-order position and on the leaf pair, since node ids differ):
+
+| tree | inodes compared | identical label lists |
+|---|---:|---:|
+| `bvic.after-2021` (Feb, 38 128 leaves)     | 5 376  | 5 376 |
+| `h1.asr.after-2021` (Feb)                  | 16 734 | 16 734 |
+| `h3.asr.after-2021` (Feb)                  | 10 136 | 10 136 |
+| `h1.asr.after-2021` (Sep, 99 056 leaves)   | 17 585 | 17 585 |
+
+Same substitutions, same order, same polarity, zero differences. End to end, ae's
+`compute_sections` reproduces AD's real `sp/0do` section strings for **B/Vic, all 10 sections,
+character for character**.
+
+**One residual, and it is not the method.** ae's `compute_sections` does not apply the `.tal`'s
+`{"N": "nodes", … "apply": {"hide": true}}` mods, which AD applies before computing; hidden
+leaves are excluded from AD's consensus counters, leaf counts and vertical numbering. On the
+Sep H1 page (483 hide mods) sections A–C match and D–M differ by 1–2 substitutions; re-running
+AD's own command with every `"hide": true` flipped to false makes AD and ae agree on **13/13**.
+B/Vic (52 hide mods) matches either way. Closing it means applying the `nodes` hide mods and
+reproducing AD's hidden-aware leaf counting and `Tree::set_first_last_next_node_id` vertical
+numbering (note the quirk: AD gives a hidden leaf `node_id.vertical = NotSet`, so an inode whose
+leftmost leaf is hidden contributes to no section at all) — signature-page-stack work.
+
+**Unrelated pre-existing crash found on the way:** `ae_backend.tree.Tree.ladderize()` segfaults
+on a large real tree, and `Nodes.remove()` traps — both reproduce on `tal-clade-sections` at
+`HEAD`, untouched by this work.
+
+Tests: `cc/tal/test/test-aa-transitions-eu20200915.py` (7 checks, invented `J`/`O` residues).
+
 ## 6. Conf / format docs to mine next
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-conf.org` — the settings DSL reference.
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-processing.org` — processing stages.

@@ -272,8 +272,20 @@ std::vector<ae::tal::ComputedHzSection> ae::tal::compute_hz_sections(ae::tree::T
                 }
             }
         }
-        for (std::size_t sno{0}; sno < sections.size(); ++sno)
-            sections[sno].aa_transitions = fmt::format("{}", fmt::join(accumulated[sno], " "));
+        // AD formats a section's label with AA_Transitions::display_most_important(0), which
+        // drops any entry with an empty left or right residue — a label whose ancestral residue
+        // was never resolved is not printed. Mirror that here.
+        for (std::size_t sno{0}; sno < sections.size(); ++sno) {
+            fmt::memory_buffer out;
+            bool first{true};
+            for (const auto& transition : accumulated[sno]) {
+                if (transition.left == ' ' || transition.right == ' ')
+                    continue;
+                fmt::format_to(std::back_inserter(out), "{}{}", first ? "" : " ", transition);
+                first = false;
+            }
+            sections[sno].aa_transitions = fmt::to_string(out);
+        }
     }
 
     return sections;
