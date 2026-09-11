@@ -69,12 +69,20 @@ WHITE = "#ffffff"
 # kateri px by ~4.03 (in-section 3.5 -> 14.1, matched to AD by isolated-point diameter).
 # AD /all-color color:grey88 => test = solid grey fill + grey88 outline (== fill); reference +
 # sera = HOLLOW (transparent fill, grey88 outline); in-section = date-colour fill + BLACK outline.
-BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": 1.0, "size": 10.1}
-REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": 12.1}
-BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": 12.1}
+# The units->kateri-px conversion was 4.03, measured when the sig page composed its maps
+# differently. Re-measured 2026-09-11 against the published AD page, rasterised at 300 dpi:
+# the in-section dots (the tightest anchor — a sharp cluster, n=41 AD / 44 ae) are 17 px in AD
+# and were 15 px in ae, so every point was a uniform ~13% small. 4.03 -> 4.566 puts them on AD.
+# (Do not re-derive this from grey-cloud dots: overlapping points and antialiasing fringes
+# split into spurious small components there, which is why a first pass at this read the
+# background dots as ~1.8x small. The in-section dots are isolated and measure cleanly.)
+AD_UNITS_TO_KATERI_PX = 4.566
+BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": 1.0, "size": round(2.5 * AD_UNITS_TO_KATERI_PX, 1)}
+REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
+BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
 # in-tree but off-section: AD's darker gray63 fill with a thin WHITE outline (width 0.5).
 INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE, "outline_width": 0.5}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": 1.5, "size": 14.1}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": 1.5, "size": round(3.5 * AD_UNITS_TO_KATERI_PX, 1)}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 # Sig-page serum circles draw the EMPIRICAL radius (AD spc.tal empirical.show:true). With the
 # kateri root fix (plot_spec.dart: `T ? t : e`, matching ae's `T`=theoretical convention),
