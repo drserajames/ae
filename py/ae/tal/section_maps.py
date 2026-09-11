@@ -77,12 +77,25 @@ WHITE = "#ffffff"
 # split into spurious small components there, which is why a first pass at this read the
 # background dots as ~1.8x small. The in-section dots are isolated and measure cleanly.)
 AD_UNITS_TO_KATERI_PX = 4.566
+# NB the base/reference/serum outline_width stays at 1.0 rather than being converted.
+# AD's mapi `/size-reset` authors it as 1.0 in the same units as the sizes, so converting
+# it looks right — but doing so overshoots badly: grey88 ink went to 141% of AD (47k vs
+# 33k) because on a SOLID dot the outline is drawn on the edge and grows the dot, so the
+# unit has different meaning here than in AD's renderer. Left alone until that is
+# understood; the residual is that ae's grey88 ink is ~74% of AD's.
 BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": 1.0, "size": round(2.5 * AD_UNITS_TO_KATERI_PX, 1)}
 REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
 BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
-# in-tree but off-section: AD's darker gray63 fill with a thin WHITE outline (width 0.5).
-INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE, "outline_width": 0.5}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": 1.5, "size": round(3.5 * AD_UNITS_TO_KATERI_PX, 1)}
+# Outline widths are in the SAME AD units as the sizes (sp.tal:29 authors
+# `"size": 3.5, "outline_width": 0.5` together), so they go through the same
+# conversion. They did not: the sizes were converted and the widths passed through raw,
+# which left the in-tree dots' WHITE separator outline at 0.5 px instead of ~2.3 —
+# about 4.5x too thin, so overlapping gray63 dots merged into blobs instead of being
+# held apart, and the in-section black outline at 1.5 instead of ~2.3.
+INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE,
+                  "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 1)}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 1),
+                     "size": round(3.5 * AD_UNITS_TO_KATERI_PX, 1)}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 # Sig-page serum circles draw the EMPIRICAL radius (AD spc.tal empirical.show:true). With the
 # kateri root fix (plot_spec.dart: `T ? t : e`, matching ae's `T`=theoretical convention),
