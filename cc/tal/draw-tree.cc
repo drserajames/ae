@@ -522,16 +522,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0}, x_dash0{0.0}, x_grey0{0.0}, x_hzmark0{0.0};
     if (params.clades_before_time_series) {
         // AD layout-with-maps order (left→right past the tree): labels, clades, time-series
-        // matrix, grey matches-chart dash, hz-section markers (rightmost, next to the maps).
+        // matrix, grey matches-chart dash, hz-section markers, then the AA dash-bar colour
+        // columns nearest the maps.
         if (label_w > 0.0)     { cursor += gap; x_label0 = cursor;  cursor += label_w; }
         if (clade_w > 0.0)     { cursor += gap; x_clade0 = cursor;  cursor += clade_w; }
         if (ts_w > 0.0)        { cursor += gap; x_ts0 = cursor;     cursor += ts_w; }
-        // AA dash-bar columns (the per-position colour bars AD draws between the time-series
-        // matrix and the maps). This slot was missing: `dash_w` was subtracted from `tree_w`
-        // above, but `x_dash0` was left at 0, so the bars drew at x=0 on top of the tree while
-        // their reserved width sat empty. AD's order past the matrix is dash-bars, then the
-        // grey matches-chart column, then the hz-section markers nearest the maps.
-        if (dash_w > 0.0)      { cursor += gap; x_dash0 = cursor;   cursor += dash_w; }
         if (grey_dash_w > 0.0) { cursor += grey_gap; x_grey0 = cursor;   cursor += grey_dash_w; }
         // hz-section markers on the RIGHT of the time series (AD), hugging the grey-dash/matrix.
         // AD runs the bracket's top/bottom arms right up to (and the section-letter halo slightly
@@ -539,6 +534,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // x_hzmark0 sits just inside the grey column's right edge, the arm-left-end overlapping the
         // table dashes like AD rather than floating a gap to its right (Sarah r6 sig section item #5a).
         if (hz_marker_w > 0.0) { cursor -= gap * 0.25; x_hzmark0 = cursor; cursor += hz_marker_w; }
+        // AA dash-bar colour columns go OUTSIDE the hz-section markers, i.e. between the
+        // section brackets/letters and the maps — that is AD's order (matrix, grey dashes,
+        // bracket+letter column, colour bars, maps). Placing them before the markers, as a
+        // first pass at this did, leaves the section letters sitting inboard of the bars
+        // instead of wrapping around them.
+        if (dash_w > 0.0)      { cursor += gap; x_dash0 = cursor;   cursor += dash_w; }
     }
     else {
         // AD layout-tree-only order: labels, time-series matrix, clades, then aa dash-bars.

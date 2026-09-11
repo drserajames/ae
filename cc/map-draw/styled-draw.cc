@@ -789,18 +789,21 @@ namespace ae::map_draw
             }();
             const double step_x = image_w / vp_w;
             const double step_y = image_h / vp_h;
-            // Clamp each grid line's coordinate half a line width inside the surface. Without
+            // Clamp each grid line's coordinate half a line width inside the surface (the
+            // literal 0.5 here was only half a width back when the width was always 1.0;
+            // with a wider grid the edge line was clipped and drew lighter than the rest,
+            // which reads as one odd-weight line). Without
             // this, a boundary line that lands exactly on the device edge (e.g. gx == image_w)
             // is a perfect tie for poppler-splash's pixel-snapping and rounds off-page, so the
             // frame's right/bottom edge silently vanishes (see p2-figure-matrix §10.5/10.6).
             // Interior lines (0.5 <= gx <= image_w - 0.5) are unaffected. Same reasoning as the
             // AD renderer's border comment at cc/map-draw/draw.cc:712-716.
             for (double gx = 0.0; gx <= image_w + 0.5; gx += step_x) {
-                const double x = std::clamp(gx, 0.5, image_w - 0.5);
+                const double x = std::clamp(gx, grid_lw * 0.5, image_w - grid_lw * 0.5);
                 surface.line(x, 0.0, x, image_h, grid, grid_lw);
             }
             for (double gy = 0.0; gy <= image_h + 0.5; gy += step_y) {
-                const double y = std::clamp(gy, 0.5, image_h - 0.5);
+                const double y = std::clamp(gy, grid_lw * 0.5, image_h - grid_lw * 0.5);
                 surface.line(0.0, y, image_w, y, grid, grid_lw);
             }
         }
