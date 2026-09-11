@@ -23,7 +23,7 @@ This package holds the ae-based **report engine** (the library tier of the team'
 |--------|------|--------|
 | `latex.py` | LaTeX assembler — functions returning `list[str]` (`cover`, `toc`, `section_title`, `time_series`, `phylogenetic_tree`, `maps_in_columns`, `geographic`, the WhoccStatisticsTable builder) | vcm `latex.py` |
 | `dirs.py` | working-dir conventions; `lab_title` / `lab_of_dir` | vcm `dirs.py` |
-| `main_loop.py` | async command loop + kateri `Task`; the `@command` / `no_kateri` / `no_loop` decorators | vcm `main_loop.py` |
+| `main_loop.py` | async command loop + kateri `Task`; the `@command` / `no_kateri` / `no_loop` / `@headless` / `@interactive_kateri` decorators | vcm `main_loop.py` |
 | `modules.py` | hot-reload module machinery | vcm `modules.py` |
 | `download.py` | chart download / `relax` / `orient_to` / `merge` via `ae_backend.chart_v3` | vcm `download.py` |
 | `stat_tables.py` | `stat.json.xz` → tabs / csv / html | vcm `stat.py` |
@@ -51,6 +51,28 @@ runners). These encode season-specific scientific decisions and are edited every
 | `geographic.py` | geographic time-series maps via ae's **`geo-draw`**: `make_geo(geo_dir, time_series, hidb_dir, color_by=…)` counts hidb antigens by (month, location), writes geo-draw's `--data` records JSON, and renders `<geo_dir>/<subtype>-<YYYY-MM>.pdf`. Decoupled from `ConferenceData`. **`color_by="continent"`** (default) → one continent-coloured dot per location; **`color_by="clade"`** → one clade-coloured **pie** per location (wedges per clade + legend), clade resolved from **seqdb** (name/reassortant/passage match; unresolved → "unknown"). |
 | `trees.py` | phylogenetic-tree PDFs via ae's **`tal-draw`**: `make_trees(specs)` translates the report's `.tal` settings-v3 config (`ae.tal.settings_v3`) → tal-draw schema and renders the tree file (`.tjz`/`tree.json[.xz]`) → the `<subtype>.pdf` the `phylogenetic_tree` page embeds. Replaces AD's `tal -s …`. |
 | `commander.py` | the `@command` surface (`download`/`populate`/`prestyle`/`style`/`export`). |
+
+### When each command opens kateri
+
+| command | kateri |
+|---------|--------|
+| `style`, `serum_coverage`, per-report `rotate` | always — the interactive viewer, loop stays up |
+| `prestyle` | **`@interactive_kateri`**: yes when run from a terminal, no when scripted — single-shot (`@no_loop`), the window goes with the command |
+| `export`, `serum_coverage_export` (`@headless`) | only with `AE_REPORT_MAP_RENDERER=kateri`; the native default renders in-process |
+| `download`, `populate*` (`@no_kateri`) | never |
+
+`@interactive_kateri` keys off **stdout being a tty** (`main_loop.kateri_wanted`), so
+`./0do prestyle` typed at a prompt shows the prestyled map, while every scripted path — the
+report's `scripts/repro/headless-lib.sh` wrappers run
+`( cd $FOLDER && ./0do $cmd ) >/dev/null 2>&1 &`, plus nohup/CI/cron — runs kateri-free.
+`AE_REPORT_KATERI=1` forces the window on (e.g. when piping through `tee`),
+`AE_REPORT_KATERI=0` forces it off.
+
+It decides only *whether kateri is launched*, never how long the loop runs — `prestyle` stays
+`@no_loop`, so its window comes and goes with the command. Holding a window open for
+inspection is `style`'s job (no `@no_loop`, so the loop lives until the operator closes
+kateri). `prestyled.ace` is written before kateri is touched, so both paths produce identical
+files.
 
 **Per-report adaptations a report needs** (one-time, in the report dir — not in `ae`):
 - `conference_data.py`: `class ConferenceData(ae.report.conference_data_base.ConferenceData)`.
