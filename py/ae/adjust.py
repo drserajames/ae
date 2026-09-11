@@ -518,6 +518,44 @@ class Adjust:
             master = self._be.chart_v3.Chart(str(master))
         self.chart.orient_to(master, self.projection_no)
 
+    def point_sequences(self, points, nuc: bool = False) -> list:
+        """`(designation, sequence)` for each of *points* (point indices, so sera are
+        `number_of_antigens + serum_no`), for `compare_sequences`.
+
+        Unsequenced points are kept, with their empty sequence, because AD keeps them: its
+        `subset_to_compare_selected_t` iterates the whole selection and a zero-length
+        sequence simply contributes to no position counter."""
+        result = []
+        for point_no in points:
+            if point_no < self.number_of_antigens:
+                obj = self.chart.antigen(point_no)
+            else:
+                obj = self.chart.serum(point_no - self.number_of_antigens)
+            result.append((obj.designation(),
+                           obj.sequence_nuc() if nuc else obj.sequence_aa()))
+        return result
+
+    def compare_sequences(self, set1, set2, output=None, names=("1", "2"),
+                          nuc: bool = False, open: bool = False):
+        """Compare the sequences of two sets of points and, if *output* is given, write
+        the comparison HTML there.
+
+        Port of AD's `chart_draw.compare_sequences(set1=, set2=, output=, open=)`
+        (`acmacs-py/cc/py-mapi.cc:191`): the two selections become groups named "1" and
+        "2", the amino acids at every position are counted per group, and the positions
+        where more than one amino acid occurs across both groups are the ones reported.
+        The comparison and the HTML viewer are ae's own
+        (`ae.sequences.compare`, shared with `bin/seqdb-compare-sequences`), so the markup
+        differs from AD's; the substance — which positions differ, and with which amino
+        acids at what frequency — is the same computation.
+
+        *set1* / *set2* are lists of point indices, as `select_antigens` returns. Returns
+        the `ae.sequences.compare.Comparison`."""
+        from ae.sequences.compare import compare_sequences as _compare_sequences
+        groups = {name: self.point_sequences(points, nuc=nuc)
+                  for name, points in zip(names, (set1, set2))}
+        return _compare_sequences(groups, output=output, open=open)
+
     def snapshot(self):
         "An independent clone of the current chart (round-trips through json)."
         return self._be.chart_v3.chart_from_json(self.chart.export())
@@ -863,6 +901,31 @@ class Slot:
         the only two things that invalidate AD's viewport. Call
         `slot.adjust.invalidate_viewport()` if you want the frame to follow."""
         self.adjust.orient_to(master)
+
+    # -- sequence comparison --------------------------------------------
+
+    def compare_sequences(self, set1, set2, overwrite: bool = False, open: bool = True,
+                          nuc: bool = False) -> Path:
+        """Write a sequence comparison of *set1* vs *set2* into this slot's directory and
+        return its path.
+
+        Port of AD's `Slot.compare_sequences` (`acmacs_py.zero_do_5:387`), including the
+        file name it writes — `<chart stem>.compare-seq.html` in `slot.subdir()` — so the
+        paths recorded as provenance keep meaning, and its `overwrite=False` behaviour: an
+        existing file is left alone.
+
+        *set1* / *set2* are lists of point indices, as `slot.select_antigens` returns.
+        The comparison itself is ae's (`ae.sequences.compare`, shared with
+        `bin/seqdb-compare-sequences`), so the page's markup is not AD's; what it reports
+        is the same computation. No snapshot is taken and the chart is not changed, as in
+        AD."""
+        fn = self.subdir().joinpath(f"{self.chart_filename.stem}.compare-seq.html")
+        print(f">>> {fn}  (compare_sequences)", file=sys.stderr)
+        if overwrite or not fn.exists():
+            self.adjust.compare_sequences(set1, set2, output=fn, open=open, nuc=nuc)
+        else:
+            print(f">> {fn} already exists (not overriden)", file=sys.stderr)
+        return fn
 
     def procrustes(self, secondary_chart_file=None, step: int = None, threshold: float = 0.3,
                    png: bool = False, open: bool = False, title=None):
