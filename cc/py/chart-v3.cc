@@ -341,19 +341,40 @@ disables the gate. Raises if the chart has fewer than 2 layers.)")) //
         .def(
             "relax_incremental", //
             [](Chart& chart, size_t projection_no, size_t number_of_optimizations, bool rough, size_t /*number_of_best_distinct_projections_to_keep*/, bool remove_source_projection,
-               bool unmovable_non_nan_points, std::optional<std::vector<std::vector<double>>> titer_weights) {
+               bool unmovable_non_nan_points, std::optional<std::vector<std::vector<double>>> titer_weights, std::optional<std::vector<size_t>> unmovable_points) {
                 if (number_of_optimizations == 0)
                     number_of_optimizations = 100;
+                if (projection_index{projection_no} >= chart.projections().size())
+                    throw std::invalid_argument{fmt::format("relax_incremental: wrong projection index: {}, number of projections: {}", projection_no, chart.projections().size())};
                 optimization_options opt;
                 opt.precision = rough ? optimization_precision::rough : optimization_precision::fine;
                 opt.rsp = remove_source_projection ? ae::chart::v3::remove_source_projection::yes : ae::chart::v3::remove_source_projection::no;
                 opt.unnp = unmovable_non_nan_points ? ae::chart::v3::unmovable_non_nan_points::yes : ae::chart::v3::unmovable_non_nan_points::no;
+                // Points frozen during the relax: the explicit list passed here, or (when it is None)
+                // the unmovable set stored in the source projection by Projection.set_unmovable().
+                // Passing [] explicitly freezes nothing regardless of the source projection.
+                ae::unmovable_points unmovable;
+                if (unmovable_points.has_value()) {
+                    const auto number_of_points = chart.number_of_points();
+                    for (const auto pnt : *unmovable_points) {
+                        if (point_index{pnt} >= number_of_points)
+                            throw std::invalid_argument{fmt::format("relax_incremental: wrong unmovable point index: {}, number of points in chart: {}", pnt, number_of_points)};
+                        unmovable.insert_if_not_present(point_index{pnt});
+                    }
+                }
+                else
+                    unmovable = chart.projections()[projection_index{projection_no}].unmovable();
                 const auto weights = make_titer_weights(chart, titer_weights);
-                chart.relax_incremental(projection_index{projection_no}, number_of_optimizations_t{number_of_optimizations}, opt, ae::disconnected_points{}, ae::unmovable_points{}, weights);
+                chart.relax_incremental(projection_index{projection_no}, number_of_optimizations_t{number_of_optimizations}, opt, ae::disconnected_points{}, unmovable, weights);
                 chart.projections().sort(chart);
             }, //
             "projection_no"_a = 0, "number_of_optimizations"_a = 0, "rough"_a = false, "number_of_best_distinct_projections_to_keep"_a = 5, "remove_source_projection"_a = true,
-            "unmovable_non_nan_points"_a = false, "titer_weights"_a = pybind11::none()) //
+            "unmovable_non_nan_points"_a = false, "titer_weights"_a = pybind11::none(), "unmovable_points"_a = pybind11::none(), //
+            pybind11::doc{"unmovable_points: list of point indexes (antigens 0..n_ag-1, sera continue at n_ag..) to hold fixed while the "
+                          "remaining points are relaxed; unlike unmovable_non_nan_points=True (which freezes every point that has "
+                          "coordinates) this freezes exactly the listed points, so e.g. reference antigens can be pinned while sera stay "
+                          "free to move. Default None: use the source projection's own unmovable set (Projection.set_unmovable()); pass [] "
+                          "to freeze nothing."}) //
 
         // ----------------------------------------------------------------------
 

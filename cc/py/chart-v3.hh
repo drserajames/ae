@@ -45,13 +45,18 @@ namespace ae::py
         }
 
         // pin points so a subsequent relax keeps them fixed (replaces the current unmovable set)
+        // points are indexed like set_coordinates: antigens 0..n_ag-1, sera continue at n_ag..
         void set_unmovable(const std::vector<size_t>& points)
         {
+            const auto number_of_points = projection.layout().number_of_points();
             auto& unmovable = projection.unmovable().get();
             unmovable.clear();
             unmovable.reserve(points.size());
-            for (const auto pnt : points)
+            for (const auto pnt : points) {
+                if (point_index{pnt} >= number_of_points)
+                    throw std::invalid_argument{fmt::format("set_unmovable: wrong point index: {}, number of points in layout: {}", pnt, number_of_points)};
                 unmovable.push_back(point_index{pnt});
+            }
         }
 
         double relax(ae::chart::v3::optimization_precision precision)
