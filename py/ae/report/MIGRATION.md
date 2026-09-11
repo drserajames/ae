@@ -522,6 +522,11 @@ polygon ported verbatim selected **the wrong points, with no error**. Measured o
 report map, an actual `move_outliers` polygon selected 211 antigens under AD and **0**
 under `ae.adjust`, and `move(to=[5,7])` wrote `[5, 7]` where AD wrote `[-4.923, 1.954]`.
 
+Those figures are properties of *that chart at that moment*, not of the fix: the maps are
+re-optimised between runs, and the same polygon on the same map gave 10 the next day. The
+acceptance criterion is therefore **"ae and AD select the same index set on the same
+chart"**, never a remembered count — re-derive the AD side whenever you re-check.
+
 `Adjust` now implements the frame: `transformation`, `transform`/`inverse_transform`,
 `transformed_layout()`, `viewport()` (AD's bounding-ball recipe), and
 `to_layout_coordinates`/`to_layout_offset`. `figure`, `move`, `set_coordinates`, `move_by`
@@ -529,9 +534,11 @@ and `flip_over_line` all take `frame=` and **default to `"viewport-origin"`**, s
 scripts port verbatim; pass `frame="map-not-transformed"` for raw layout coordinates.
 
 Verified against the real AD extension across a whole report cycle (17 maps): **27/27
-polygons select identical antigen-index sets** (24,804 selections) and **21/21 move
-destinations land on identical layout coordinates** (<1e-9). `test/adjust_frames.py`
-locks the behaviour down on synthetic data.
+polygons select identical antigen-index sets** and **21/21 move destinations land on
+identical layout coordinates** (<1e-9). Run twice on charts a day apart (24,804 then
+24,503 selections as the maps were re-optimised) — parity held both times.
+`test/adjust_frames.py` locks the behaviour down on synthetic data, so it does not drift
+with the report charts.
 
 **Still open on this stage** (see `../../../AE-PORT-SSM-ADJUST-AUDIT.md`): the predicate
 object exposes no `aa` / `clade_any_of`; there is no `modify` / drawn `path` / snapshot, so
