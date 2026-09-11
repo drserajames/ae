@@ -67,17 +67,17 @@ void ae::py::tal(pybind11::module_& mdl)
         .def_readwrite("display_name", &ae::tal::CladeSectionParameters::display_name)                                                                //
         ;
 
-    pybind11::class_<ae::tal::HzSection>(tal_submodule, "HzSection")                                                                    //
-        .def_readonly("id", &ae::tal::HzSection::id, pybind11::doc("AD \"{clade name}-{section no}\""))                                 //
-        .def_readonly("prefix", &ae::tal::HzSection::prefix, pybind11::doc("A, B, C … in top-to-bottom order"))                         //
-        .def_readonly("label", &ae::tal::HzSection::label)                                                                              //
-        .def_readonly("first_name", &ae::tal::HzSection::first_name)                                                                     //
-        .def_readonly("last_name", &ae::tal::HzSection::last_name)                                                                       //
-        .def_readonly("first_vertical", &ae::tal::HzSection::first_vertical)                                                             //
-        .def_readonly("last_vertical", &ae::tal::HzSection::last_vertical)                                                               //
-        .def_readonly("aa_transitions", &ae::tal::HzSection::aa_transitions)                                                             //
-        .def_readonly("intersect", &ae::tal::HzSection::intersect)                                                                       //
-        .def_property_readonly("size", &ae::tal::HzSection::size)                                                                        //
+    pybind11::class_<ae::tal::ComputedHzSection>(tal_submodule, "HzSection")                                                                    //
+        .def_readonly("id", &ae::tal::ComputedHzSection::id, pybind11::doc("AD \"{clade name}-{section no}\""))                                 //
+        .def_readonly("prefix", &ae::tal::ComputedHzSection::prefix, pybind11::doc("A, B, C … in top-to-bottom order"))                         //
+        .def_readonly("label", &ae::tal::ComputedHzSection::label)                                                                              //
+        .def_readonly("first_name", &ae::tal::ComputedHzSection::first_name)                                                                     //
+        .def_readonly("last_name", &ae::tal::ComputedHzSection::last_name)                                                                       //
+        .def_readonly("first_vertical", &ae::tal::ComputedHzSection::first_vertical)                                                             //
+        .def_readonly("last_vertical", &ae::tal::ComputedHzSection::last_vertical)                                                               //
+        .def_readonly("aa_transitions", &ae::tal::ComputedHzSection::aa_transitions)                                                             //
+        .def_readonly("intersect", &ae::tal::ComputedHzSection::intersect)                                                                       //
+        .def_property_readonly("size", &ae::tal::ComputedHzSection::size)                                                                        //
         ;
 
     tal_submodule.def(

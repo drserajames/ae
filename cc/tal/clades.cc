@@ -164,7 +164,7 @@ namespace ae::tal
     };
 } // namespace ae::tal
 
-std::vector<ae::tal::HzSection> ae::tal::compute_hz_sections(ae::tree::Tree& tree, const per_clade_parameters_t& per_clade, const CladeSectionParameters& all_clades)
+std::vector<ae::tal::ComputedHzSection> ae::tal::compute_hz_sections(ae::tree::Tree& tree, const per_clade_parameters_t& per_clade, const CladeSectionParameters& all_clades)
 {
     using namespace ae::tree;
 
@@ -174,7 +174,7 @@ std::vector<ae::tal::HzSection> ae::tal::compute_hz_sections(ae::tree::Tree& tre
     // --- sections, AD Clades::make_clades() -> HzSections::add_section ---
     // Every section of every shown clade becomes an hz-section, id "{clade}-{section no}",
     // label = the per-clade display name (falling back to the clade name).
-    std::vector<HzSection> sections;
+    std::vector<ComputedHzSection> sections;
     for (const Clade& clade : clades) {
         std::string label{clade.name};
         if (const auto found = per_clade.find(clade.name); found != per_clade.end() && !found->second.display_name.empty())
@@ -183,7 +183,7 @@ std::vector<ae::tal::HzSection> ae::tal::compute_hz_sections(ae::tree::Tree& tre
             label = all_clades.display_name;
         for (std::size_t section_no{0}; section_no < clade.sections.size(); ++section_no) {
             const CladeSection& section = clade.sections[section_no];
-            sections.push_back(HzSection{.id = fmt::format("{}-{}", clade.name, section_no),
+            sections.push_back(ComputedHzSection{.id = fmt::format("{}-{}", clade.name, section_no),
                                          .label = label,
                                          .first_name = section.first_name,
                                          .last_name = section.last_name,
@@ -193,7 +193,7 @@ std::vector<ae::tal::HzSection> ae::tal::compute_hz_sections(ae::tree::Tree& tre
     }
 
     // --- HzSections::sort() : top-to-bottom by the first leaf ---
-    std::sort(std::begin(sections), std::end(sections), [](const HzSection& s1, const HzSection& s2) { return s1.first_vertical < s2.first_vertical; });
+    std::sort(std::begin(sections), std::end(sections), [](const ComputedHzSection& s1, const ComputedHzSection& s2) { return s1.first_vertical < s2.first_vertical; });
 
     // --- HzSections::detect_intersect() ---
     for (auto sect = std::begin(sections); sect != std::end(sections); ++sect) {
@@ -262,7 +262,7 @@ std::vector<ae::tal::HzSection> ae::tal::compute_hz_sections(ae::tree::Tree& tre
             if (span.aa_transitions == nullptr || span.aa_transitions->empty())
                 continue;
             for (std::size_t sno{0}; sno < sections.size(); ++sno) {
-                const HzSection& section = sections[sno];
+                const ComputedHzSection& section = sections[sno];
                 if (span.first_vertical <= section.first_vertical && section.last_vertical <= span.last_vertical) {
                     for (const auto& transition : span.aa_transitions->transitions) {
                         // AD AA_Transitions::add_or_replace: drop any entry at the same position, append

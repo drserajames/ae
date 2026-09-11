@@ -82,7 +82,7 @@ namespace ae::tal
     // set_prefix / set_aa_transitions (AD cc/hz-sections.cc).
     // ------------------------------------------------------------------
 
-    struct HzSection
+    struct ComputedHzSection
     {
         std::string id{};             // AD "{clade name}-{section no}"
         std::string prefix{};         // A, B, C … in top-to-bottom order
@@ -103,7 +103,7 @@ namespace ae::tal
     // aa-transitions accumulated from every inode whose subtree contains it (AD
     // HzSections::set_aa_transitions). Transitions are read from `Inode::aa_transitions`,
     // so populate them first (ae::tree::set_aa_nuc_transition_labels) if the tree carries none.
-    std::vector<HzSection> compute_hz_sections(ae::tree::Tree& tree, const per_clade_parameters_t& per_clade, const CladeSectionParameters& all_clades = {});
+    std::vector<ComputedHzSection> compute_hz_sections(ae::tree::Tree& tree, const per_clade_parameters_t& per_clade, const CladeSectionParameters& all_clades = {});
 
 } // namespace ae::tal
 
