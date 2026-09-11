@@ -38,7 +38,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from .settings_v3 import _loads_relaxed
 
@@ -93,15 +93,71 @@ MAP_TITLE_SIZE = 26  # kateri px; sits in the top-left band ABOVE the first hori
 # ======================================================================
 
 
-def _find_command(tal: dict, name: str) -> Optional[dict]:
-    """Find the first command object ``{"N": name, ...}`` anywhere in a parsed
-    `.tal` (a dict of named sub-programs, each a list of command objects)."""
+def load_tal_stack(tal_path) -> dict:
+    """A `.tal` settings environment from one file OR an AD-style settings **stack**.
+
+    `tal_path` is a path, or a sequence of paths to overlay the way AD's
+    ``tal -s a.tal -s b.tal`` does: every file's named arrays go into one environment and a
+    later file wins on key collision. AD's real signature-page command line
+    (``sp/0do``) passes five or six files — ``<lab>/sp.mapi``, ``<sub>.sp.tal``,
+    ``<sub><infix>.tal``, ``sp.tal``, optionally ``spc.tal``, ``<page>.sp.tal`` — and the
+    hz-sections, time-series window and serum-circle rules the section maps need are spread
+    across them, so every reader here takes the whole stack rather than one file.
+
+    (`init` is merged key-wise rather than overwritten, matching AD's accumulating define
+    environment; the readers here only look at named arrays, but keeping `init` whole makes
+    the returned dict a faithful stand-in for the loaded settings.)"""
+    if isinstance(tal_path, (str, Path)):
+        return _loads_relaxed(Path(tal_path).read_text())
+    merged: dict = {}
+    init: list = []
+    for one in tal_path:
+        tal = _loads_relaxed(Path(one).read_text())
+        for key, val in tal.items():
+            if key == "init":
+                init.extend(val if isinstance(val, list) else [val])
+            else:
+                merged[key] = val
+    if init:
+        merged["init"] = init
+    return merged
+
+
+def _stack_paths(tal_path) -> list[Path]:
+    """The stack as a list of paths (a single path becomes a one-element list)."""
+    return [Path(tal_path)] if isinstance(tal_path, (str, Path)) else [Path(one) for one in tal_path]
+
+
+def _stack_name(tal_path) -> str:
+    """A short human name for a stack, for log lines."""
+    return " + ".join(p.name for p in _stack_paths(tal_path))
+
+
+def _find_commands(tal: dict, name: str) -> list[dict]:
+    """Every command object ``{"N": name, ...}`` anywhere in a parsed `.tal` (a dict of
+    named sub-programs, each a list of command objects), in dict/array order."""
+    out = []
     for value in tal.values():
         if isinstance(value, list):
             for cmd in value:
                 if isinstance(cmd, dict) and cmd.get("N") == name:
-                    return cmd
-    return None
+                    out.append(cmd)
+    return out
+
+
+def _find_command(tal: dict, name: str, *, require: Sequence[str] = ()) -> Optional[dict]:
+    """Find a command object ``{"N": name, ...}`` in a parsed `.tal`.
+
+    With `require`, only a command carrying **all** of those keys qualifies. On a settings
+    stack the same element is configured from several files — AD's `Settings::add_element`
+    finds the existing layout element and re-initialises it, so the fields end up unioned —
+    and the first textual match is often the bare re-init: on the sig-page stack
+    `<sub>.sp.tal`'s `tal-default` re-runs `time-series` with no `start`/`end`, while the
+    window itself lives in the tree `.tal`. Taking the first match there silently loses the
+    date colour scale, so `require` selects the command that actually carries the fields."""
+    found = [cmd for cmd in _find_commands(tal, name)
+             if all(key in cmd for key in require)]
+    return found[0] if found else None
 
 
 def parse_sections(tal_path) -> list[dict]:
@@ -111,9 +167,11 @@ def parse_sections(tal_path) -> list[dict]:
     ``prefix`` is the section's letter (AD's ``"L"``), ``first``/``last`` are
     leaf seq_ids bounding the section, and ``aa_transitions`` is its label
     suffix. Only sections with ``"show": true`` are returned (AD draws a map
-    only for shown sections)."""
-    tal = _loads_relaxed(Path(tal_path).read_text())
-    hz = _find_command(tal, "hz-sections")
+    only for shown sections).
+
+    `tal_path` is one `.tal` or a whole AD settings stack (see `load_tal_stack`)."""
+    tal = load_tal_stack(tal_path)
+    hz = _find_command(tal, "hz-sections", require=("sections",))
     if not hz:
         return []
     out = []
@@ -136,10 +194,12 @@ def parse_sections(tal_path) -> list[dict]:
 def parse_time_series(tal_path) -> Optional[tuple[str, str]]:
     """Return ``(start, end)`` "YYYY-MM" of the `.tal` time-series, or None.
 
-    AD samples the date colour-scale over these monthly slots."""
-    tal = _loads_relaxed(Path(tal_path).read_text())
-    ts = _find_command(tal, "time-series")
-    if not ts or "start" not in ts or "end" not in ts:
+    AD samples the date colour-scale over these monthly slots. `tal_path` is one `.tal` or
+    a whole AD settings stack (see `load_tal_stack`) — on the sig-page stack the window
+    comes from the tree `.tal` while the surrounding layout comes from `<sub>.sp.tal`."""
+    tal = load_tal_stack(tal_path)
+    ts = _find_command(tal, "time-series", require=("start", "end"))
+    if not ts:
         return None
     return (str(ts["start"])[:7], str(ts["end"])[:7])
 
@@ -215,7 +275,7 @@ def compute_sections(tree, tal_path, *, aa_transitions: Optional[bool] = None,
         # above for why the method and reset_labels are what they are.
         ae_backend.tree.set_aa_nuc_transition_labels(tree, method="eu-20200915", reset_labels=False)
 
-    all_clades, per_clade = parse_clade_section_parameters(tal_path, program=program)
+    all_clades, per_clade = parse_clade_section_parameters(load_tal_stack(tal_path), program=program)
 
     def params(entry: dict):
         display_name = entry.get("display_name") or []
@@ -244,7 +304,8 @@ def compute_sections(tree, tal_path, *, aa_transitions: Optional[bool] = None,
     ]
 
 
-def sections_for(tal_path, tree, *, aa_transitions: Optional[bool] = None) -> list[dict]:
+def sections_for(tal_path, tree, *, aa_transitions: Optional[bool] = None,
+                 program: str = "tal") -> list[dict]:
     """The signature page's section list: the `.tal`'s *shown* `hz-sections` when it still
     specifies them, else the clade-derived sections AD falls back to (`compute_sections`)."""
     import sys as _sys
@@ -252,8 +313,8 @@ def sections_for(tal_path, tree, *, aa_transitions: Optional[bool] = None) -> li
     sections = parse_sections(tal_path)
     if sections:
         return sections
-    sections = compute_sections(tree, tal_path, aa_transitions=aa_transitions)
-    print(f"  [sigp] {Path(tal_path).name} has no shown hz-sections; using {len(sections)} "
+    sections = compute_sections(tree, tal_path, aa_transitions=aa_transitions, program=program)
+    print(f"  [sigp] {_stack_name(tal_path)} has no shown hz-sections; using {len(sections)} "
           "clade-derived section(s) (AD's fallback when the `hz` sub-program is not in the `tal` program)",
           file=_sys.stderr)
     return sections
@@ -289,7 +350,9 @@ def _load_serum_circle_hide_rules(spc_tal_path=None) -> list[dict]:
     if env:
         candidates.append(Path(env))
     if spc_tal_path:
-        candidates.append(Path(spc_tal_path))
+        # a whole settings stack: AD's `-s spc.tal` is in it, so read the rules from the
+        # file that was actually passed rather than guessing a path relative to cwd.
+        candidates += _stack_paths(spc_tal_path)
     candidates += [Path.cwd() / "sp" / "spc.tal", Path("sp/spc.tal")]
     for p in candidates:
         try:
@@ -673,7 +736,7 @@ def section_title(section: dict) -> str:
 def build_section_styles(chart, sections, match, scale: Optional[DateColorScale], viewport, *,
                          base_priority: int = 50000, available_styles: Optional[set] = None,
                          vaccine_marks: Optional[list] = None, serum_circles: bool = False,
-                         serum_circle_fold: float = 2.0):
+                         serum_circle_fold: float = 2.0, spc_tal=None):
     """Add one semantic style per section to `chart` and return
     ``[{name, title, n_antigens, n_sera}]``. kateri renders each via set_style.
 
@@ -704,7 +767,7 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         # of each serum's EMPIRICAL radius (the drawn circle; AD's empirical.show:true /
         # theoretical.show:false) at the fold in use, plus this chart's lab, so the
         # per-section loop below can drop the sera AD suppresses (else ae draws extras).
-        hide_rules = _load_serum_circle_hide_rules()
+        hide_rules = _load_serum_circle_hide_rules(spc_tal)
         try:
             hide_lab = chart.info().lab()
         except Exception:

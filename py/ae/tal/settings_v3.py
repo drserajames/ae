@@ -206,13 +206,31 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list,
     """
     canvas_height = 1000.0
     margins = {"left": 0.025, "right": 0.0, "top": 0.025, "bottom": 0.025}
-    width = 0.0
     visited: set = set()  # sub-array names already walked (so builtin hooks aren't doubled)
+    # Layout elements, keyed AD's way. `Settings::add_element` (acmacs-tal cc/settings.cc:37)
+    # looks the layout up by (element C++ type, `id`) and, when found, RE-INITIALISES that
+    # element in place rather than adding a second one — so a command repeated later in the
+    # program (the sig-page stack runs `tree`/`time-series` once from `<sub>.sp.tal`'s
+    # layout and again from the tree `.tal`'s own `tal` program) contributes its width ONCE,
+    # with the LAST value. `Gap` alone is added with `add_unique::yes` (settings.cc:655), so
+    # every un-`id`'d gap is its own element. Summing blindly instead double-counts the whole
+    # column set and inflates the page by ~1 tree width.
+    elements: dict = {}   # (name, id) -> width contribution
+    gap_seq = 0
+
+    def _put(name: str, cmd: dict, value: float) -> None:
+        nonlocal gap_seq
+        if name == "gap" and "id" not in cmd:
+            gap_seq += 1
+            key = ("gap", f"-unique-{gap_seq}")
+        else:
+            key = (name, str(cmd.get("id", "")))
+        elements[key] = value
 
     def walk(program) -> None:
         """Recursively walk a `.tal` settings program — expanding each referenced sub-array
-        once — accumulating the canvas height and width from its draw items."""
-        nonlocal canvas_height, width
+        once — accumulating the canvas height and the per-element widths from its draw items."""
+        nonlocal canvas_height
         for item in program:
             if isinstance(item, str):
                 if item.startswith("?"):
@@ -243,17 +261,17 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list,
             elif name == "tree":
                 w = _as_number(cmd.get("width-to-height-ratio"), defines)
                 if w and w > 0:
-                    width += w
+                    _put(name, cmd, w)
             elif name == "gap":
                 if "pixels" in cmd:  # pixels override width-to-height-ratio (Gap::prepare)
-                    p = _as_number(cmd["pixels"], defines)
-                    if p is not None:
-                        width += p / canvas_height
+                    px = _as_number(cmd["pixels"], defines)
+                    if px is not None:
+                        _put(name, cmd, px / canvas_height)
                 elif "width-to-height-ratio" in cmd:
                     w = _as_number(cmd["width-to-height-ratio"], defines)
-                    width += w if w is not None else _GAP_DEFAULT_WIDTH
+                    _put(name, cmd, w if w is not None else _GAP_DEFAULT_WIDTH)
                 else:
-                    width += _GAP_DEFAULT_WIDTH
+                    _put(name, cmd, _GAP_DEFAULT_WIDTH)
             elif name == "time-series":
                 slot = cmd.get("slot") if isinstance(cmd.get("slot"), dict) else {}
                 slot_width = _as_number(slot.get("width"), defines)
@@ -261,24 +279,26 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list,
                     slot_width = _TS_SLOT_DEFAULT_WIDTH
                 slots = _time_series_slots(cmd, warnings)
                 if slots is not None:
-                    width += slots * slot_width
+                    _put(name, cmd, slots * slot_width)
+                # a later re-init carrying no window does NOT clobber: AD's element keeps
+                # the start/end it was given the first time.
             elif name == "clades":
                 w = _as_number(cmd.get("width-to-height-ratio"), defines)
                 if w is not None:
-                    width += w
+                    _put(name, cmd, w)
                 else:
                     # auto-sized: (n_slots+2)*slot.width. n_slots needs the tree, which
                     # we don't have here; the reports always set width-to-height-ratio,
                     # so this is only an approximation for atypical configs.
                     slot = cmd.get("slot") if isinstance(cmd.get("slot"), dict) else {}
                     slot_width = _as_number(slot.get("width"), defines) or _CLADES_SLOT_DEFAULT_WIDTH
-                    width += 2 * slot_width
+                    _put(name, cmd, 2 * slot_width)
             elif name in ("dash-bar", "dash-bar-aa-at", "dash-bar-clades"):
                 w = _as_number(cmd.get("width-to-height-ratio"), defines)
-                width += w if w is not None else _DASH_BAR_DEFAULT_WIDTH
+                _put(name, cmd, w if w is not None else _DASH_BAR_DEFAULT_WIDTH)
             elif name == "hz-section-marker":
                 w = _as_number(cmd.get("width-to-height-ratio"), defines)
-                width += w if w is not None else _HZ_MARKER_DEFAULT_WIDTH
+                _put(name, cmd, w if w is not None else _HZ_MARKER_DEFAULT_WIDTH)
             elif name in tal and isinstance(tal[name], list):
                 visited.add(name)
                 walk(tal[name])  # object-form sub-array invocation {"N": "<sub-array>"}
@@ -297,6 +317,7 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list,
         for hook in ("tal-dash-bar-left-1", "tal-dash-bar-clades", "tal-dash-bar-left-2"):
             if hook not in visited and hook in tal and isinstance(tal[hook], list):
                 walk(tal[hook])
+    width = sum(elements.values())
     return (width + margins["left"] + margins["right"]) / (1.0 + margins["top"] + margins["bottom"])
 
 
@@ -624,6 +645,14 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     # auto-place the curated labels into whitespace (tal-draw searches; the
                     # per-label offsets become optional hints). Default on; a .tal can opt out.
                     schema["mrca_labels_auto_place"] = bool(cmd.get("auto-place-labels", True))
+                    # AD has ONE DrawAATransitions element, re-initialised by each
+                    # `draw-aa-transitions` command, so a curated block REPLACES a blanket one
+                    # rather than adding to it. That matters on the settings stack: the builtin
+                    # `tal-modifications` runs an uncurated `draw-aa-transitions` (which turns
+                    # the blanket stored-transition labels on) BEFORE the report `.tal`'s own
+                    # curated `eu-aa-transitions` block. Leaving the blanket flag set would draw
+                    # the curated labels AND every stored inode transition — the purple flood.
+                    schema.pop("aa_transitions", None)
                 # AD draws the curated per-node labels OR (when no curation is given) every
                 # stored inode transition — never both. When we emitted curated MRCA labels,
                 # leaving aa_transitions.show on would flood the tree with every stored inode
@@ -802,6 +831,13 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                 schema["tip_names"] = True
             elif name in ("margins", "gap", "set"):
                 pass  # no tal-draw equivalent / no-op for a one-off render
+            elif name in tal and isinstance(tal[name], list):
+                # object-form sub-array invocation, `{"N": "<sub-array>"}` — AD's settings
+                # apply() falls through to the named environment entry when no builtin
+                # matches the name, so this is the same call as the bare string form.
+                # acmacs-tal's builtin `layout` uses it (`{"N": "layout-with-maps"}`), so
+                # without this the whole sig-page column layout is silently skipped.
+                run(tal[name])
             else:
                 warnings.append(f"command {name!r} not handled — skipped")
 
@@ -839,8 +875,100 @@ _CONF_INIT_DEFAULTS = {
     "canvas-height": 1000,
     "ladderize-method": "number-of-leaves",
     "report-cumulative-output": "",
+    "report-cumulative-max": 100,
     "report-time-series-output": "",
     "whocc": False,
+    "do-populate-with-nuc-duplicates": True,
+    "report-aa-at-pos-counter": False,
+    "tree-draw-aa-transitions": True,
+    "hz-section-marker-label-size": 2.5,
+    "hz-section-marker-line-width": 1.0,
+    "gap-bvic-after-3del-bar": 0.005,
+    "gap-between-antigenic-maps": 20,
+    "antigenic-map-border-width": 0.5,
+    "reference-antigen-size": 5,
+    "test-antigen-size": 3,
+    "serum-size": 5,
+    # AD sets this from the command line: `tal --chart X` makes `$chart-present` true, which
+    # is what selects `layout-with-maps` over `layout-tree-only` in the builtin `layout`
+    # program. Callers that render with a chart pass `chart-present` in `defines`.
+    "chart-present": False,
+}
+
+
+# acmacs-tal's builtin *programs* (conf/tal.json), the settings AD has loaded before the
+# first `-s` file — needed by the signature-page stack, where `sp/<sub>.sp.tal` invokes
+# `tal-pre` / `tal-modifications` by name, and where a subtype whose `<sub>.sp.tal` is `{}`
+# (B/Vic, B/Yam) runs AD's builtin `tal-default` -> `layout` -> `layout-with-maps` outright.
+# Seeded as the BASE layer of the overlay (opt-in, `builtin_programs=True`) so any `-s` file
+# that redefines one of these names wins, exactly as in AD.
+#
+# Two deliberate omissions, neither structural:
+#   * the `tal-dash-bar-*` column hooks are seeded EMPTY. AD's builtin `tal-dash-bar-clades`
+#     body is a per-subtype clade/colour table; every report `.tal` redefines the name with
+#     its own, so the builtin body is never the one that draws. Keeping it out also keeps
+#     surveillance clade tokens out of this repo.
+#   * the `antigenic-map*` / `/tal-mapi` map-side programs are not seeded: the section maps
+#     are drawn by `ae.tal.section_maps`, not by this tree translator, which ignores them.
+_CONF_PROGRAMS: dict = {
+    "tal-default": ["tal-pre", "layout", "tal-modifications"],
+    "tal-pre": [
+        {"N": "if", "condition": {"and": ["$whocc", {"not": "$tree-has-sequences"}]},
+         "then": [{"N": "seqdb", "filename": "$seqdb-filename"},
+                  {"N": "if", "condition": "$do-populate-with-nuc-duplicates",
+                   "then": [{"N": "populate-with-nuc-duplicates"}]}]},
+        {"N": "report-cumulative", "output": "$report-cumulative-output", "max": "$report-cumulative-max"},
+        {"N": "ladderize", "method": "$ladderize-method"},
+    ],
+    "layout": [
+        {"N": "if", "condition": "$chart-present",
+         "then": [{"N": "layout-with-maps"}],
+         "else": [{"N": "layout-tree-only"}]},
+    ],
+    "layout-with-maps": [
+        {"N": "margins"},
+        {"N": "tree", "color-by": "continent", "width-to-height-ratio": 0.48, "legend": {"show": True}},
+        {"N": "draw-on-tree"},
+        "tal-dash-bar-clades",
+        {"N": "clades"},
+        {"N": "time-series", "color-by": "continent", "color-scale": {"show": True},
+         "report": "$report-time-series-output"},
+        {"N": "gap", "width-to-height-ratio": 0.005},
+        {"N": "dash-bar", "id": "dash-bar matches-chart-antigen",
+         "nodes": [{"select": {"matches-chart-antigen": True}, "color": "#808080"}]},
+        {"N": "hz-section-marker", "width-to-height-ratio": 0.005,
+         "label-size": "$hz-section-marker-label-size",
+         "line": {"color": "black", "line_width": "$hz-section-marker-line-width"}},
+        {"N": "gap", "pixels": "$gap-between-antigenic-maps", "width-to-height-ratio": 0.0},
+        {"N": "antigenic-maps", "gap-between-maps": "$gap-between-antigenic-maps"},
+        {"N": "title", "text": "{virus-type/lineage} {chart-assay} {chart-lab}", "color": "black", "size": 0.015},
+    ],
+    "layout-tree-only": [
+        {"N": "margins"},
+        {"N": "tree", "color-by": "continent", "width-to-height-ratio": 0.48, "legend": {"show": True}},
+        {"N": "draw-on-tree"},
+        "tal-dash-bar-left-1",
+        "tal-dash-bar-clades",
+        "tal-dash-bar-left-2",
+        {"N": "time-series", "color-by": "continent", "color-scale": {"show": False},
+         "report": "$report-time-series-output"},
+        {"N": "clades"},
+        {"N": "title", "text": "{virus-type/lineage}", "color": "black", "size": 0.015},
+    ],
+    "tal-modifications": [
+        {"N": "if", "condition": "$tree-draw-aa-transitions",
+         "then": [{"N": "draw-aa-transitions", "minimum-number-leaves-in-subtree": 0.01,
+                   "text-line-interleave": 0.3}]},
+        {"N": "if", "condition": {"and": ["$whocc", {"not-empty": "$virus-type"}]},
+         "then": [{"N": "nodes", "select": {"vaccine": {"type": "current", "passage": "cell"}, "report": False},
+                   "apply": "report"}]},
+        {"N": "if", "condition": "$report-aa-at-pos-counter",
+         "then": [{"N": "aa-at-pos-counter-report", "tolerance": 0.01}]},
+        "tal",
+    ],
+    "tal-dash-bar-left-1": [],
+    "tal-dash-bar-left-2": [],
+    "tal-dash-bar-clades": [],
 }
 
 
@@ -858,7 +986,8 @@ def _collect_init_defines(tal: dict, into: dict) -> None:
             into[key] = val
 
 
-def load_tal(path, defines: dict | None = None, program: str | None = None) -> tuple[dict, list]:
+def load_tal(path, defines: dict | None = None, program: str | None = None,
+             builtin_programs: bool = False) -> tuple[dict, list]:
     """Load and translate acmacs-tal `.tal` settings.
 
     `path` is a single `.tal` file (the report trees) OR a list of files to overlay the way
@@ -869,6 +998,13 @@ def load_tal(path, defines: dict | None = None, program: str | None = None) -> t
     overrides AD's builtin one, so the overlay path defaults `program` to "tal-default".
 
     `defines` are `-D` overrides (name -> value); they take precedence over `init` defines.
+
+    `builtin_programs` (overlay path only) seeds acmacs-tal's builtin `conf/tal.json`
+    programs (`_CONF_PROGRAMS`) as the base layer, the way AD has them loaded before the
+    first `-s` file. The signature-page stack needs it: `sp/<sub>.sp.tal` invokes `tal-pre`
+    and `tal-modifications` by name, and for a subtype whose `<sub>.sp.tal` is `{}` the
+    whole page comes from the builtin `tal-default` chain. Off by default so the info-tree
+    overlay keeps its verified behaviour (info.tal is self-contained).
     """
     if isinstance(path, (str, Path)):
         # Single-file (report) path — unchanged behaviour: no conf/init seeding.
@@ -876,7 +1012,7 @@ def load_tal(path, defines: dict | None = None, program: str | None = None) -> t
         return translate(tal, defines, program=program or "tal")
 
     # Overlay path: merge several files into one environment.
-    merged: dict = {}
+    merged: dict = {key: val for key, val in _CONF_PROGRAMS.items()} if builtin_programs else {}
     init_defines: dict = dict(_CONF_INIT_DEFAULTS)
     for one in path:
         tal = _loads_relaxed(Path(one).read_text())
