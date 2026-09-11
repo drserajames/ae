@@ -121,8 +121,21 @@ def test_figure_selection_matches_ad_semantics():
     coordinates fall inside the polygon once the viewport origin is added."""
     adj = _adjust(rotate=25.0, flip="ew")
     origin_x, origin_y, size = adj.viewport()
-    # a quadrant of the viewport, authored the way an adjust/0do script authors one
-    vertices = [[size / 2, size / 2], [size, size / 2], [size, size], [size / 2, size]]
+
+    # A box authored the way an adjust/0do script authors one — as an offset from the
+    # viewport origin. It is anchored on the layout's own median point rather than on a
+    # fixed quadrant of the viewport: chart1.ace is relaxed from random starts here, so a
+    # fixed quadrant lands on an empty part of the map every so often and the "is this
+    # test exercising anything" guard below trips at random.
+    transformed = adj.transformed_layout()
+    known = [tc for no in range(adj.number_of_antigens)
+             if (tc := transformed[no]) is not None]
+    median_x = sorted(p[0] for p in known)[len(known) // 2]
+    median_y = sorted(p[1] for p in known)[len(known) // 2]
+    half = size / 4.0
+    cx, cy = median_x - origin_x, median_y - origin_y      # median, viewport-relative
+    vertices = [[cx - half, cy - half], [cx + half, cy - half],
+                [cx + half, cy + half], [cx - half, cy + half]]
 
     selected = set(adj.select_antigens(lambda pt: pt.inside(adj.figure(vertices))))
 
@@ -131,7 +144,6 @@ def test_figure_selection_matches_ad_semantics():
     absolute = [[origin_x + vx, origin_y + vy] for vx, vy in vertices]
     lo_x, hi_x = absolute[0][0], absolute[1][0]
     lo_y, hi_y = absolute[0][1], absolute[2][1]
-    transformed = adj.transformed_layout()
     expected = {no for no in range(adj.number_of_antigens)
                 if (tc := transformed[no]) is not None
                 and lo_x < tc[0] < hi_x and lo_y < tc[1] < hi_y}

@@ -27,9 +27,17 @@ Example::
 `flip_over_line()` read their coordinates in AD's `"viewport-origin"` frame by default —
 an offset from the origin of the map viewport, in transformed (drawn) space — so polygons
 and destinations copied out of an AD `adjust/0do` script mean here exactly what they meant
-there. The viewport is recomputed from the chart, as AD does (`Adjust.viewport()`); it is
+there. The viewport is derived from the chart, as AD does (`Adjust.viewport()`), and — again
+as AD does — **computed once and then frozen** for the life of the `Adjust`, so a move
+part-way through a script does not shift the frame under the polygons that follow it. It is
 not the report's per-map viewport setting. Pass `frame="map-not-transformed"` to author in
 raw layout coordinates instead, or `frame="map-transformed"` for absolute drawn ones.
+
+**Running a whole AD `adjust/0do` script.** `Zd` and `Slot` at the bottom of this module
+reproduce AD's `acmacs_py.zero_do_5` step machinery — the `<slot_name>/` step directories,
+the `NN` snapshot numbering, the `99.ace` final chart and the slot-to-slot chaining that
+`map-adjustments.txt` records as provenance. Styling and rendering are not ported yet, so
+`modify`/`path(outline=…)` are accepted and recorded but draw nothing; see `Slot.modify`.
 """
 
 import sys
@@ -38,6 +46,7 @@ import math
 import asyncio
 import importlib.util
 from pathlib import Path
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -84,7 +93,15 @@ class Point:
     """Selection context passed to predicates. Attribute access delegates to the
     underlying antigen/serum (so `pt.name()`, `pt.sequence_aa()`, `pt.semantic`,
     `pt.designation()` work), plus geometry: `pt.point_no`, `pt.coords`, `pt.x`,
-    `pt.y`, and `pt.inside(figure)`."""
+    `pt.y`, and `pt.inside(figure)`.
+
+    It also carries AD's sequence/clade spellings — `pt.aa["<pos><AA>"]`,
+    `pt.clade_any_of([...])`, `pt.has_clade(...)`, `pt.has_any_clade_of([...])` — so a
+    predicate copied out of an `adjust/0do` script means here what it meant there. AD
+    binds those on `SelectionDataAntigen`/`SelectionDataSerum`
+    (`acmacs-py/cc/py-antigen.cc:140,156`); ae binds the same data under different
+    names (`Antigen.sequence_aa()`, `Antigen.semantic.clades()`), so these are thin
+    aliases, not new logic."""
 
     __slots__ = ("point_no", "no", "kind", "coords", "_obj")
 
@@ -115,6 +132,51 @@ class Point:
         """Whether the point lies inside `figure`."""
         return figure.contains(self.coords)
 
+    # -- AD predicate spellings (sequence / clade) ----------------------
+    #
+    # AD's adjust predicates are `geometry AND sequence-or-clade`, e.g.
+    #   lambda ag: ag.aa["<pos><AA>"] and ag.inside(path)
+    #   lambda ag: ag.clade_any_of([...]) and ag.inside(path)
+    # ae reaches the same data through `sequence_aa()` / `semantic.clades()`. Keeping
+    # AD's names here is what lets a 0do predicate port verbatim.
+
+    @property
+    def aa(self):
+        """The aligned AA sequence, indexable as AD's `ag.aa[...]`, with the query
+        spelled `"<pos><AA>"`: `pt.aa["5A"]` (position 5 is A), `pt.aa["!5A"]` (is
+        not), `pt.aa["5A 7N"]` (all of them).
+
+        A point with no sequence answers False to a positive query and True to a
+        negated one — it has no position 5, so position 5 is not A. That is AD's
+        behaviour too, verified against the real extension across a report cycle."""
+        return self._obj.sequence_aa()
+
+    def clades(self) -> list:
+        """The point's clades (empty if it carries none)."""
+        return list(self._obj.semantic.clades())
+
+    def has_clade(self, clade: str) -> bool:
+        """Whether the point carries *clade* — plain membership of the semantic
+        `clades` array, which is what `SemanticAttributes::has_clade`
+        (`cc/chart/v3/semantic.hh`) does. Reimplemented here over `clades()` because
+        C++ binds `has_clade` on `SelectionData` but not on `SemanticAttributes`."""
+        return clade in self.clades()
+
+    def has_any_clade_of(self, clades) -> bool:
+        """Whether the point carries any clade in *clades*
+        (`SemanticAttributes::has_any_clade_of`)."""
+        mine = self.clades()
+        return any(clade in mine for clade in clades)
+
+    def clade_any_of(self, clades) -> bool:
+        """AD's spelling of `has_any_clade_of` (`acmacs-py/cc/py-antigen.cc:14`,
+        `clades().exists_any_of`). Same test, kept so 0do predicates port verbatim."""
+        return self.has_any_clade_of(clades)
+
+    def is_sequenced(self) -> bool:
+        """Whether the point carries an AA sequence at all."""
+        return bool(self._obj.sequence_aa())
+
 # ----------------------------------------------------------------------
 
 class Adjust:
@@ -130,6 +192,7 @@ class Adjust:
         self.projection_no = projection_no
         self.number_of_antigens = chart.number_of_antigens()
         self.number_of_sera = chart.number_of_sera()
+        self._viewport = None
         if chart.number_of_projections() == 0:
             raise ValueError("chart has no projection to adjust — relax it first")
 
@@ -206,14 +269,41 @@ class Adjust:
     def viewport(self) -> tuple:
         """AD's map viewport as `(origin_x, origin_y, size)`.
 
-        Recomputed from the chart, never stored — this is `ChartDraw::calculate_viewport()`
-        (acmacs-map-draw/cc/draw.cc): the minimum bounding ball of the *transformed*
-        layout (acmacs-chart-2/cc/bounding-ball.cc), then `whole_width()` — round the
-        diameter up to a whole number about the same centre. Disconnected points are
-        ignored, as in AD's `Layout::area()`.
+        **Computed once, then frozen** — and that is deliberate, because AD freezes it
+        too. `ChartDraw::MapViewport` caches the viewport and only recomputes when
+        `recalculate_` is set, which happens in exactly two places, `ChartDraw::rotate`
+        and `ChartDraw::flip` (acmacs-map-draw/cc/draw.cc:106,117). Moving points and
+        relaxing do **not** invalidate it, so every polygon and every move destination
+        in one AD slot is resolved against the same frame, even after earlier steps have
+        moved points around.
+
+        Recomputing per call instead — which this did until 2026-09-11 — silently shifts
+        the frame under the `path → move → path` pattern that real `adjust/0do` scripts
+        use. Measured against the real AD extension over this cycle's 18 readable maps:
+        after a bulk move, AD's frame shifts by 0 on every map and the per-call reading
+        shifted by 3.7–7.5 map units on every map — bigger than most polygons.
+
+        Call `invalidate_viewport()` (or `rotate`/`flip_ew`/`flip_ns`, which do it for
+        you) to force a recomputation, exactly as AD does.
+
+        The computation itself is `ChartDraw::calculate_viewport()`: the minimum bounding
+        ball of the *transformed* layout (acmacs-chart-2/cc/bounding-ball.cc), then
+        `whole_width()` — round the diameter up to a whole number about the same centre.
+        Disconnected points are ignored, as in AD's `Layout::area()`.
 
         Note this is *not* the report's per-map `viewport()` setting, and not the
         recentered frame `cc/map-draw/styled-draw.cc` uses for report figures."""
+        if self._viewport is None:
+            self._viewport = self._calculate_viewport()
+        return self._viewport
+
+    def invalidate_viewport(self):
+        """Drop the cached viewport so the next `viewport()` recomputes it from the
+        current layout — AD's `MapViewport::set_recalculate()`."""
+        self._viewport = None
+
+    def _calculate_viewport(self) -> tuple:
+        "Compute the viewport from the current transformed layout (see `viewport`)."
         points = [p for p in self.transformed_layout() if p is not None]
         if not points:
             raise ValueError("chart has no points with coordinates: cannot compute a viewport")
@@ -355,6 +445,29 @@ class Adjust:
             projx, projy = ax + t * dx, ay + t * dy
             proj.set_coordinates(pno, [2 * projx - c[0], 2 * projy - c[1]])
 
+    # -- whole-map orientation ------------------------------------------
+    #
+    # These change the projection *transformation*, not the stored coordinates, so
+    # they move the drawn map under the viewport — which is why they are the only
+    # two operations AD invalidates the cached viewport for (draw.cc:106,117).
+
+    def rotate(self, angle: float):
+        """Rotate the whole map by *angle*. AD's `ChartDraw::rotate` takes **radians**
+        (`rotate_radians`); the ae backend it delegates to reads a magnitude below 3.15
+        as radians and anything larger as degrees. Invalidates the viewport."""
+        self.projection.transformation().rotate(angle)
+        self.invalidate_viewport()
+
+    def flip_ew(self):
+        "Flip the whole map east-west (about the horizontal axis). Invalidates the viewport."
+        self.projection.transformation().flip_ew()
+        self.invalidate_viewport()
+
+    def flip_ns(self):
+        "Flip the whole map north-south (about the vertical axis). Invalidates the viewport."
+        self.projection.transformation().flip_ns()
+        self.invalidate_viewport()
+
     # -- pinning / optimization -----------------------------------------
 
     def pin(self, points):
@@ -413,6 +526,379 @@ class Adjust:
         "Write the adjusted chart to *filename* (compression by extension)."
         self.chart.write(str(filename))
         return Path(filename)
+
+# ----------------------------------------------------------------------
+# The Zd / Slot step chain — ae's port of AD's acmacs_py.zero_do_5
+# ----------------------------------------------------------------------
+#
+# An AD `adjust/0do` script is a sequence of *slots*. Each slot is a function decorated
+# with `@zd.slot`; the decorator runs it immediately, inside a context manager that
+#
+#   * names the slot from the function's `__qualname__`, with the enclosing function's
+#     `<locals>` replaced by a two-digit slot counter — so a `move_156K` nested in
+#     `move_156N_outliers` becomes `move_156N_outliers.01.move_156K`;
+#   * gives it a directory of that name, into which snapshots are written as `NN.pdf`,
+#     numbered from 00 in the order they are taken;
+#   * on exit writes the adjusted chart to `99.ace` in that directory.
+#
+# Those paths are the provenance the report records — `map-adjustments.txt` refers to
+# charts as e.g. `adjust/move_outliers.00.move_right_outliers/99.ace` — so the naming and
+# numbering are load-bearing, not cosmetic. A slot chains onto the previous one by
+# assigning `slot.chart_filename = <the previous slot function>`: the decorator has by
+# then rebound that name to the previous slot's return value, conventionally its
+# `final_ace()` path.
+#
+# What is NOT ported yet (Stage B step 4, the review loop): styling and rendering. AD's
+# `slot.modify(...)`, the `modify=` argument of `select_*`, and the `outline`/`fill`
+# arguments of `slot.path` all exist here and are recorded, but draw nothing, and no PDF
+# or PNG is produced. Snapshot *numbering* is still tracked so that the step numbers do
+# not shift once rendering lands.
+
+
+class Zd:
+    """The script-level context of an AD `adjust/0do` run: it hands out numbered slots.
+
+    Port of `acmacs_py.zero_do_5.Zd`. Use it as `ae.adjust` scripts and AD scripts both
+    do — decorate each step with `@zd.slot`::
+
+        def outliers_moved(zd: Zd):
+            @zd.slot
+            def move_outliers(slot: Slot):
+                slot.chart_filename = SOURCE
+                ...
+                return slot.final_ace()
+    """
+
+    def __init__(self, cmd=None, directory=None):
+        """*cmd* is the command being run (recorded only, as in AD). *directory* is where
+        slot directories are created; it defaults to the current directory, which is what
+        AD does and what the recorded `adjust/<slot>/99.ace` paths assume."""
+        self.num_slots = 0
+        self.directory = Path(directory) if directory is not None else Path()
+        self.cmd = cmd
+        self.section(cmd)
+
+    def section(self, cmd):
+        "Hook for a subclass to announce a new section; AD's is a no-op too."
+
+    def slot(self, func):
+        """Decorator: run *func* as the next slot and return whatever it returns.
+
+        The slot's name — and so its directory — is `func.__qualname__` with `<locals>`
+        replaced by the slot number, reproducing AD's scheme exactly
+        (`zero_do_5.py:38`)."""
+        slot_name = func.__qualname__.replace("<locals>", f"{self.num_slots:02d}")
+        self.num_slots += 1
+        with self.slot_context(slot_name) as sl:
+            return func(sl)
+
+    @contextmanager
+    def slot_context(self, slot_name: str):
+        "Run a `Slot` named *slot_name*, finalizing it (99.ace) however the body exits."
+        slot = Slot(self, slot_name)
+        try:
+            yield slot
+        finally:
+            slot.finalize()
+
+
+class Slot:
+    """One step of an adjust script: a directory, numbered snapshots, and a final chart.
+
+    Port of `acmacs_py.zero_do_5.Slot`, delegating the actual chart work to `Adjust`
+    (reachable as `slot.adjust` if you want the ae-native API). Set `chart_filename` to
+    the chart this step starts from — either a path, or the value a previous slot
+    returned — and the chart is opened lazily on first use.
+    """
+
+    #: Called as `renderer(slot, path, png=bool, open=bool)` when a snapshot is taken.
+    #: `None` — the default — records the snapshot's number and path but draws nothing,
+    #: because ae's styling/rendering port is Stage B step 4. Set it to wire in a
+    #: renderer without changing the numbering.
+    renderer = None
+
+    def __init__(self, zd: Zd, slot_name: str):
+        "Create the slot; nothing touches the filesystem until a chart or path is needed."
+        self.zd = zd
+        self.slot_name = slot_name
+        self.step = 0
+        self.final_step = 99
+        self._chart_filename = None
+        self._adjust = None
+        self.export_final_ace = True
+        self.snapshots = []          # [(step, Path)] — every snapshot this slot took
+        self.styling = []            # recorded modify() requests (see modify())
+        self._warned_styling = False
+
+    # -- the chart this slot works on -----------------------------------
+
+    @property
+    def chart_filename(self):
+        "The chart this slot starts from."
+        return self._chart_filename
+
+    @chart_filename.setter
+    def chart_filename(self, filename):
+        """Set the starting chart, discarding any chart already opened. Accepts a path,
+        or whatever a previous slot returned (`slot.chart_filename = move_156N`), which
+        by convention is that slot's `final_ace()`."""
+        self._chart_filename = Path(filename) if filename is not None else None
+        self._adjust = None
+
+    @property
+    def adjust(self) -> "Adjust":
+        """The `Adjust` for this slot's chart, opened on first use (AD's
+        `make_chart_draw`). Raises if `chart_filename` was never set."""
+        if self._adjust is None:
+            if self._chart_filename is None:
+                raise RuntimeError("slot: chart_filename is not set")
+            self._adjust = Adjust(self._chart_filename)
+        return self._adjust
+
+    @property
+    def chart(self):
+        "The underlying `ae_backend.chart_v3.Chart`."
+        return self.adjust.chart
+
+    def final_chart(self):
+        """The chart as it now stands, opening `chart_filename` if the slot never got
+        round to it (AD's `final_chart` goes through `make_chart_draw` and does the same,
+        so a slot that set a filename and then failed still exports its source chart).
+        None if there is no chart to open, or it cannot be adjusted."""
+        if self._adjust is None and self._chart_filename is None:
+            return None
+        try:
+            return self.adjust.chart
+        except (ValueError, RuntimeError) as err:
+            print(f">> {self.slot_name}: no chart to export ({err})", file=sys.stderr)
+            return None
+
+    # -- paths ----------------------------------------------------------
+
+    def subdir(self) -> Path:
+        """This slot's directory, created if needed. As in AD, `parents=False`: the
+        parent (normally `adjust/`) must already exist."""
+        subd = self.zd.directory / self.slot_name
+        subd.mkdir(parents=False, exist_ok=True)
+        return subd
+
+    def final_ace(self) -> Path:
+        """This slot's final chart path, `<slot_name>/99.ace` — the path the report's
+        `map-adjustments.txt` records and the next slot chains onto. Creates the slot
+        directory as a side effect, as AD's does."""
+        return self.subdir().joinpath(f"{self.final_step:02d}.ace")
+
+    def finalize(self):
+        """Take the final (99) snapshot and write `99.ace`. Called for you when the slot
+        body exits, however it exits."""
+        if self._adjust is None and self._chart_filename is None:
+            return                                  # slot never touched a chart
+        chart = self.final_chart()
+        self.plot(step=self.final_step)
+        if self.export_final_ace and chart is not None:
+            ace = self.final_ace()
+            chart.write(str(ace))
+            print(f">>> final {self.slot_name}: {ace}", file=sys.stderr)
+
+    # -- snapshots (numbering only until Stage B step 4) ----------------
+
+    def plot(self, step: int = None, infix: str = None, png: bool = False, open: bool = False):
+        """Record snapshot *step* (the next in sequence if None) as `NN[.infix].pdf` in
+        this slot's directory, and hand it to `renderer` if one is set.
+
+        With no renderer nothing is drawn — ae's styling/rendering is Stage B step 4 —
+        but the step counter still advances, so the numbers a future renderer produces
+        will be the numbers AD produced."""
+        if self._adjust is None and self._chart_filename is None:
+            return None
+        if step is None:
+            step = self.step
+            self.step += 1
+        name = f"{step:02d}" + (f".{infix}" if infix else "")
+        pdf = self.subdir().joinpath(f"{name}.pdf")
+        self.snapshots.append((step, pdf))
+        if self.renderer is not None:
+            self.renderer(self, pdf, png=png, open=open)
+        return pdf
+
+    # -- styling (recorded, not drawn — Stage B step 4) -----------------
+
+    def modify(self, selected=None, **kwargs):
+        """Record a styling request against *selected* and draw nothing.
+
+        AD's `slot.modify` drives the legacy plot spec through `ChartDraw` purely so the
+        analyst can see, on the snapshot, which points a polygon caught. ae's styling is
+        the semantic-style system, so this is a real port rather than a rename, and it is
+        Stage B step 4 — not done. The call is accepted (so an AD script runs verbatim)
+        and appended to `slot.styling`, and the first one per slot says so on stderr;
+        nothing is drawn and the chart is not changed."""
+        if not self._warned_styling:
+            self._warned_styling = True
+            print(f">> {self.slot_name}: slot.modify() is recorded but draws nothing — "
+                  f"ae's styling port is Stage B step 4", file=sys.stderr)
+        self.styling.append({"selected": selected, **kwargs})
+
+    # -- geometry -------------------------------------------------------
+
+    def path(self, path, outline: str = None, outline_width: float = 1.0, fill: str = None,
+             close: bool = True, coordinates_relative_to: str = "viewport-origin") -> Figure:
+        """Build the polygon *path* and return it, for use with `pt.inside(...)`.
+
+        *coordinates_relative_to* is AD's name for the coordinate frame and takes AD's
+        values; it defaults, as AD does, to `"viewport-origin"`. `outline`/`fill` are
+        accepted and recorded but nothing is drawn (see `modify`). *close* is accepted
+        for signature compatibility: `Figure.contains` treats the vertex list as closed
+        either way, and AD only passes `close=False` when the "polygon" is a line handed
+        to `flip_over_line`, where closure is meaningless."""
+        figure = self.adjust.figure(path, frame=coordinates_relative_to)
+        if outline or fill:
+            self.styling.append({"path": figure, "outline": outline,
+                                 "outline_width": outline_width, "fill": fill})
+        return figure
+
+    def select_antigens(self, predicate=None, report=20, modify: dict = None,
+                        snapshot: bool = True) -> list[int]:
+        "Select antigens (all of them if *predicate* is None); see `_select`."
+        return self._select("antigens", predicate, report, modify, snapshot)
+
+    def select_sera(self, predicate=None, report=20, modify: dict = None,
+                    snapshot: bool = True) -> list[int]:
+        "Select sera (all of them if *predicate* is None); see `_select`."
+        return self._select("sera", predicate, report, modify, snapshot)
+
+    def _select(self, kind, predicate, report, modify, snapshot) -> list[int]:
+        """Run the selection and return **point indices** (for sera these are
+        `number_of_antigens + serum_no`, which is what `move` and friends take).
+
+        *report* prints the first N of them, as AD's does — True for all, an int for a
+        cap, False for none. *modify* is recorded, not drawn. *snapshot* advances the
+        snapshot counter."""
+        select = getattr(self.adjust, "select_" + kind)
+        selected = select(predicate)
+        print(f">>> {len(selected)} {kind} selected", file=sys.stderr)
+        if report:
+            limit = len(selected) if report is True else int(report)
+            for n, point_no in enumerate(selected):
+                if n >= limit:
+                    print(f"    ... {len(selected) - limit} {kind} more", file=sys.stderr)
+                    break
+                print(f"    {n:3d} {point_no:5d} {self._designation(kind, point_no)}",
+                      file=sys.stderr)
+        if modify:
+            # AD lets an analyst comment a styling key out by prefixing it with "?"
+            self.modify(selected=selected,
+                        **{k: v for k, v in modify.items() if k[:1] != "?"})
+        if snapshot:
+            self.plot()
+        return selected
+
+    def _designation(self, kind, point_no) -> str:
+        "Best available name for a point, for the selection report."
+        adj = self.adjust
+        if kind == "antigens":
+            obj = adj.chart.antigen(point_no)
+        else:
+            obj = adj.chart.serum(point_no - adj.number_of_antigens)
+        try:
+            return obj.designation()
+        except Exception:
+            return obj.name()
+
+    def move(self, selected, to=None, flip_over_line=None, snapshot: bool = True):
+        """Move *selected* to *to*, and/or reflect them over *flip_over_line* (a pair of
+        vertices, or a `Figure` from `slot.path(..., close=False)`). Coordinates are in
+        the viewport-origin frame, as AD's are."""
+        if to is not None:
+            self.adjust.move(selected, to=to)
+        if flip_over_line is not None:
+            vertices = (flip_over_line.source_vertices
+                        if isinstance(flip_over_line, Figure) else flip_over_line)
+            self.adjust.flip_over_line(selected, vertices[0], vertices[1])
+        if snapshot:
+            self.plot()
+
+    # -- optimization ---------------------------------------------------
+
+    def relax(self, grid: bool = False, snapshot: bool = True):
+        "Re-optimize the projection, optionally running a grid test afterwards."
+        self.adjust.relax()
+        if grid:
+            self.adjust.chart.grid_test()
+        if snapshot:
+            self.plot()
+
+    def grid(self, move_relax: int = 0, snapshot: bool = True):
+        "Run a grid test; returns the backend's result."
+        res = self.adjust.chart.grid_test(move_relax=move_relax)
+        if snapshot:
+            self.plot()
+        return res
+
+    def stress(self) -> float:
+        "Current stress of the projection."
+        return self.adjust.stress()
+
+    def reset_unmovable(self):
+        "Unpin every point (AD's name for `Adjust.unpin_all`)."
+        self.adjust.unpin_all()
+
+    def rotate(self, angle: float):
+        "Rotate the whole map (see `Adjust.rotate` on the angle's units)."
+        self.adjust.rotate(angle)
+
+    def flip(self, direction: str = "ew"):
+        "Flip the whole map, `\"ew\"` or `\"ns\"`."
+        if direction == "ew":
+            self.adjust.flip_ew()
+        elif direction == "ns":
+            self.adjust.flip_ns()
+        else:
+            raise ValueError(f"flip: expected 'ew' or 'ns', got {direction!r}")
+
+    def orient_to(self, master):
+        """Re-orient this map onto *master* by procrustes.
+
+        Note this leaves the cached viewport alone, because AD's does: `slot.orient_to`
+        goes straight to the chart and never passes through `ChartDraw::rotate`/`flip`,
+        the only two things that invalidate AD's viewport. Call
+        `slot.adjust.invalidate_viewport()` if you want the frame to follow."""
+        self.adjust.orient_to(master)
+
+    def procrustes(self, secondary_chart_file=None, step: int = None, threshold: float = 0.3,
+                   png: bool = False, open: bool = False, title=None):
+        """Procrustes against *secondary_chart_file* (this slot's own starting chart if
+        None) and return the result. AD draws arrows onto the snapshot instead of
+        returning numbers; the arrows are Stage B step 5."""
+        other = secondary_chart_file if secondary_chart_file is not None else self._chart_filename
+        result = self.adjust.procrustes(other)
+        self.plot(step=step, infix="pc", png=png, open=open)
+        return result
+
+
+def main(module=None):
+    """Run an adjust script from the command line, as AD's `ZD.main()` does: each
+    top-level callable in the script is a command, the first one is the default, and the
+    chosen one is called with a fresh `Zd`.
+
+    Use it the way an `adjust/0do` script does — `exit(ZD.main())` — after importing this
+    module as `ZD`."""
+    import argparse
+
+    module = module or sys.modules["__main__"]
+
+    def commands():
+        return [name for name, value in vars(module).items()
+                if name[0] != "_" and name != "Path" and callable(value)]
+
+    parser = argparse.ArgumentParser(description=module.__doc__)
+    parser.add_argument("--command-list", action="store_true", default=False)
+    parser.add_argument("command", nargs="?")
+    args = parser.parse_args()
+    if args.command_list:
+        print("\n".join(commands()))
+        return 0
+    command = args.command or commands()[0]
+    return getattr(module, command)(Zd(command))
 
 # ----------------------------------------------------------------------
 
