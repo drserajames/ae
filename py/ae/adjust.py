@@ -36,8 +36,10 @@ raw layout coordinates instead, or `frame="map-transformed"` for absolute drawn 
 **Running a whole AD `adjust/0do` script.** `Zd` and `Slot` at the bottom of this module
 reproduce AD's `acmacs_py.zero_do_5` step machinery — the `<slot_name>/` step directories,
 the `NN` snapshot numbering, the `99.ace` final chart and the slot-to-slot chaining that
-`map-adjustments.txt` records as provenance. Styling and rendering are not ported yet, so
-`modify`/`path(outline=…)` are accepted and recorded but draw nothing; see `Slot.modify`.
+`map-adjustments.txt` records as provenance. `slot.modify(...)` styles the selection and
+`slot.plot()` draws the numbered snapshot with ae's native headless renderer (see
+`ae.adjust_render`), so the analyst's select -> look -> re-cut-the-polygon loop works; the
+one piece still missing is the outline of the polygon itself, which needs new C++.
 """
 
 import sys
@@ -48,6 +50,8 @@ import importlib.util
 from pathlib import Path
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
+
+from ae import adjust_render
 
 if TYPE_CHECKING:
     from ae.utils.kateri import Communicator
@@ -612,10 +616,18 @@ class Slot:
     """
 
     #: Called as `renderer(slot, path, png=bool, open=bool)` when a snapshot is taken.
-    #: `None` — the default — records the snapshot's number and path but draws nothing,
-    #: because ae's styling/rendering port is Stage B step 4. Set it to wire in a
-    #: renderer without changing the numbering.
-    renderer = None
+    #: The default draws the styled map with ae's native headless renderer
+    #: (`ae.adjust_render.SnapshotRenderer`). Set it to `None` to number the snapshots
+    #: without drawing them, or to your own callable to draw them differently.
+    renderer = adjust_render.SnapshotRenderer()
+
+    #: Named style the snapshot is drawn on top of (`c["R"]`). `None` auto-detects the
+    #: chart's own clade colouring; `""` uses the renderer's plain grey default, which is
+    #: what AD's `reset_plot_spec` produced. See `ae.adjust_render.default_base_style`.
+    base_style = None
+
+    #: Write `99.png` beside `99.pdf` when the slot finalizes, as AD does.
+    make_final_png = True
 
     def __init__(self, zd: Zd, slot_name: str):
         "Create the slot; nothing touches the filesystem until a chart or path is needed."
@@ -627,8 +639,8 @@ class Slot:
         self._adjust = None
         self.export_final_ace = True
         self.snapshots = []          # [(step, Path)] — every snapshot this slot took
-        self.styling = []            # recorded modify() requests (see modify())
-        self._warned_styling = False
+        self.styling = []            # modify()/path() requests, drawn by plot() — see modify()
+        self._warned_path = False
 
     # -- the chart this slot works on -----------------------------------
 
@@ -700,15 +712,19 @@ class Slot:
             chart.write(str(ace))
             print(f">>> final {self.slot_name}: {ace}", file=sys.stderr)
 
-    # -- snapshots (numbering only until Stage B step 4) ----------------
+    # -- snapshots ------------------------------------------------------
 
     def plot(self, step: int = None, infix: str = None, png: bool = False, open: bool = False):
-        """Record snapshot *step* (the next in sequence if None) as `NN[.infix].pdf` in
-        this slot's directory, and hand it to `renderer` if one is set.
+        """Draw snapshot *step* (the next in sequence if None) as `NN[.infix].pdf` in this
+        slot's directory, styled by everything `modify()` has been told so far.
 
-        With no renderer nothing is drawn — ae's styling/rendering is Stage B step 4 —
-        but the step counter still advances, so the numbers a future renderer produces
-        will be the numbers AD produced."""
+        The drawing is done by `renderer` — by default
+        `ae.adjust_render.SnapshotRenderer`, which renders the semantic style natively and
+        never touches the slot's own chart. Set `renderer = None` to keep the numbering
+        (which matches AD's) without drawing anything.
+
+        A `.png` is written beside the PDF when *png*, and at the final step when
+        `make_final_png`, as AD does."""
         if self._adjust is None and self._chart_filename is None:
             return None
         if step is None:
@@ -718,25 +734,59 @@ class Slot:
         pdf = self.subdir().joinpath(f"{name}.pdf")
         self.snapshots.append((step, pdf))
         if self.renderer is not None:
-            self.renderer(self, pdf, png=png, open=open)
+            self.renderer(self, pdf, png=png or (step == self.final_step and self.make_final_png),
+                          open=open)
         return pdf
 
-    # -- styling (recorded, not drawn — Stage B step 4) -----------------
+    # -- styling --------------------------------------------------------
 
     def modify(self, selected=None, **kwargs):
-        """Record a styling request against *selected* and draw nothing.
+        """Style *selected* on this slot's snapshots — AD's `slot.modify`, ported.
 
-        AD's `slot.modify` drives the legacy plot spec through `ChartDraw` purely so the
-        analyst can see, on the snapshot, which points a polygon caught. ae's styling is
-        the semantic-style system, so this is a real port rather than a rename, and it is
-        Stage B step 4 — not done. The call is accepted (so an AD script runs verbatim)
-        and appended to `slot.styling`, and the first one per slot says so on stderr;
-        nothing is drawn and the chart is not changed."""
-        if not self._warned_styling:
-            self._warned_styling = True
-            print(f">> {self.slot_name}: slot.modify() is recorded but draws nothing — "
-                  f"ae's styling port is Stage B step 4", file=sys.stderr)
-        self.styling.append({"selected": selected, **kwargs})
+        *selected* is a list of point numbers as `select_antigens` / `select_sera` return
+        them (a serum is `number_of_antigens + serum_no`). The styling keys are AD's —
+        `fill`, `outline`, `outline_width`, `show`, `shape`, `size`, `aspect`, `rotation`,
+        `order`, `label`, `legend` — translated to ae semantic-style modifiers by
+        `ae.adjust_render.normalize_modify`, which reports anything it has to drop.
+
+        Nothing is applied to the chart here: the request is appended to `slot.styling`
+        and turned into a throw-away named style when a snapshot is drawn, so the chart
+        this slot writes to `99.ace` carries only the geometry the adjust operations
+        produced. Later `modify` calls win over earlier ones on the same point, as
+        successive `ChartDraw.modify` calls do in AD."""
+        self.styling.append({"kind": "modify", "selected": list(selected or ()),
+                             "modifier": adjust_render.normalize_modify(kwargs)})
+
+    def reset_plot_spec(self, snapshot: bool = False):
+        """Drop all styling and go back to the plain grey baseline — AD's
+        `reset_plot_spec`, which strips the clade colours so a marked selection stands out.
+
+        AD rebuilt that baseline point by point (grey test antigens, transparent reference
+        antigens and sera, egg shapes, rotated reassortants). ae's renderer draws exactly
+        that when no style says otherwise, so the port is to stop drawing on the chart's
+        clade style (`base_style = ""`) and forget the accumulated `modify` requests.
+        Sizes differ cosmetically: AD used 10/15 px, the renderer's default is 20/32 —
+        which is why real scripts follow this with `modify(..., size=10)`."""
+        self.base_style = ""
+        self.styling = []
+        if snapshot:
+            self.plot()
+
+    def color_by_clade(self, mapi_dir=None, style: str = None, snapshot: bool = False):
+        """Colour the snapshot by clade — AD's `color_by_clade`, ported to ae's styling.
+
+        AD read a `.mapi` file and turned each clade rule into a `ChartDraw.modify` on the
+        legacy plot spec. In ae the same clade colouring is already **on the chart**, as a
+        `c["R"]` named style the `prestyle` step baked (`clades`, or `clades-v<N>`), so
+        this selects that style as the snapshot's base rather than re-deriving it. Pass
+        *style* to name one explicitly. *mapi_dir* is accepted so a ported script runs
+        verbatim, and ignored — the chart's own style supersedes it."""
+        if mapi_dir is not None:
+            print(f">> {self.slot_name}: color_by_clade(mapi_dir=…) ignored — ae takes the "
+                  f"clade colouring from the chart's own named style", file=sys.stderr)
+        self.base_style = style if style is not None else adjust_render.default_base_style(self.chart)
+        if snapshot:
+            self.plot()
 
     # -- geometry -------------------------------------------------------
 
@@ -745,14 +795,23 @@ class Slot:
         """Build the polygon *path* and return it, for use with `pt.inside(...)`.
 
         *coordinates_relative_to* is AD's name for the coordinate frame and takes AD's
-        values; it defaults, as AD does, to `"viewport-origin"`. `outline`/`fill` are
-        accepted and recorded but nothing is drawn (see `modify`). *close* is accepted
-        for signature compatibility: `Figure.contains` treats the vertex list as closed
-        either way, and AD only passes `close=False` when the "polygon" is a line handed
-        to `flip_over_line`, where closure is meaningless."""
+        values; it defaults, as AD does, to `"viewport-origin"`. *close* is accepted for
+        signature compatibility: `Figure.contains` treats the vertex list as closed either
+        way, and AD only passes `close=False` when the "polygon" is a line handed to
+        `flip_over_line`, where closure is meaningless.
+
+        **`outline`/`fill` are recorded but not drawn.** AD outlines the polygon on the
+        snapshot; ae has no polygon primitive above the Cairo surface, so that half needs
+        new C++ — see `ae.adjust_render.polygon_support_note`, printed once per slot that
+        asks for it. The points the polygon caught are still marked, by the `modify=` that
+        normally accompanies it, so the select → look → re-cut loop works without it."""
         figure = self.adjust.figure(path, frame=coordinates_relative_to)
         if outline or fill:
-            self.styling.append({"path": figure, "outline": outline,
+            if not self._warned_path:
+                self._warned_path = True
+                print(f">> {self.slot_name}: {adjust_render.polygon_support_note()}",
+                      file=sys.stderr)
+            self.styling.append({"kind": "path", "figure": figure, "outline": outline,
                                  "outline_width": outline_width, "fill": fill})
         return figure
 
