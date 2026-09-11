@@ -502,7 +502,48 @@ runs it, reviews a rendered snapshot, iterates. Output: `adjusted.ace`. `Slot` i
 | **move points to coords** | ❌ Layout is read-only (`__getitem__`, no `__setitem__`) |
 | **geometric select (`figure` + `ag.inside`)** | ❌ but the predicate ctx exposes `point_no` and the layout is readable → Python point-in-polygon is feasible |
 | **flip_over_line** | ❌ reflect points over a line (pure-Python geometry on layout) |
+| **coordinate frame of the literals** | ✅ fixed — see "Coordinate frames" below (was silently wrong) |
 | render / snapshot | AD `ChartDraw` → in ae use **kateri** (review only; not needed to produce `adjusted.ace`) |
+
+### Coordinate frames (fixed 2026-09-10)
+
+An `adjust/0do` script authors **every** polygon and **every** move destination in AD's
+**viewport-origin** frame — `slot.path` / `slot.move` default to
+`coordinates_relative_to="viewport-origin"` (`acmacs_py/zero_do_5.py:99,104`), which means
+*viewport origin + the literal*, in **transformed** space
+(`acmacs-map-draw/cc/coordinates.cc`). `ag.inside()` then tests **transformed** layout
+coordinates (`acmacs-chart-2/cc/chart.hh:960`) and `slot.move(to=)` inverse-transforms
+before writing (`acmacs-py/cc/py-mapi.cc:175`). That viewport is not the report's per-map
+`viewport()` setting and is not stored anywhere: AD recomputes it as the minimum bounding
+ball of the transformed layout, widened by `whole_width()` (`draw.cc:62-97`).
+
+`ae.adjust` originally read those literals as raw untransformed layout coordinates, so a
+polygon ported verbatim selected **the wrong points, with no error**. Measured on a real
+report map, an actual `move_outliers` polygon selected 211 antigens under AD and **0**
+under `ae.adjust`, and `move(to=[5,7])` wrote `[5, 7]` where AD wrote `[-4.923, 1.954]`.
+
+Those figures are properties of *that chart at that moment*, not of the fix: the maps are
+re-optimised between runs, and the same polygon on the same map gave 10 the next day. The
+acceptance criterion is therefore **"ae and AD select the same index set on the same
+chart"**, never a remembered count — re-derive the AD side whenever you re-check.
+
+`Adjust` now implements the frame: `transformation`, `transform`/`inverse_transform`,
+`transformed_layout()`, `viewport()` (AD's bounding-ball recipe), and
+`to_layout_coordinates`/`to_layout_offset`. `figure`, `move`, `set_coordinates`, `move_by`
+and `flip_over_line` all take `frame=` and **default to `"viewport-origin"`**, so AD
+scripts port verbatim; pass `frame="map-not-transformed"` for raw layout coordinates.
+
+Verified against the real AD extension across a whole report cycle (17 maps): **27/27
+polygons select identical antigen-index sets** and **21/21 move destinations land on
+identical layout coordinates** (<1e-9). Run twice on charts a day apart (24,804 then
+24,503 selections as the maps were re-optimised) — parity held both times.
+`test/adjust_frames.py` locks the behaviour down on synthetic data, so it does not drift
+with the report charts.
+
+**Still open on this stage** (see `../../../AE-PORT-SSM-ADJUST-AUDIT.md`): the predicate
+object exposes no `aa` / `clade_any_of`; there is no `modify` / drawn `path` / snapshot, so
+no review loop; and the `Zd`/`Slot` chain (step dirs, `final_ace`, slot chaining) is not
+built. Stage B is **not** done.
 
 **The real gap is one primitive.** All three missing ops are geometry on the layout, and all
 are enabled by **writing layout coordinates** (currently read-only). With a coordinate setter:
