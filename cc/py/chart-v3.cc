@@ -392,6 +392,10 @@ disables the gate. Raises if the chart has fewer than 2 layers.)")) //
             pybind11::doc("returns pair of dates (str), date range is inclusive!")) //
 
         .def(
+            "homologous_antigens", [](const Chart& chart, const Serum& serum) { return ae::to_vector_base_t(chart.antigens().homologous(serum)); }, "serum"_a,
+            pybind11::doc("returns list of antigen indexes homologous to the serum")) //
+
+        .def(
             "select_antigens", //
             [](std::shared_ptr<Chart> chart, const std::function<bool(const SelectionData<Antigen>&)>& func, size_t projection_no) {
                 return new SelectedAntigens{chart, func, projection_index{projection_no}};
