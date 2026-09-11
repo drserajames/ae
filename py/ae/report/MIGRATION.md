@@ -658,24 +658,67 @@ where AD's snapshot of the same chart is a flat green (AD reads the legacy `c["p
 `c["R"]` styles), and point sizes differ because the renderer's defaults are 20/32 px against
 AD's 10/15 — which is what the `size=10` line in every script is compensating for.
 
-**What did NOT land: drawing the polygon.** `slot.path(outline=…)` still only records the
-request (and says so once per slot). AD outlines the selection polygon on its snapshot; ae
-has no polygon primitive above the Cairo surface. `cc/chart/v3/styles.hh` has no
-path/figure/arrow element, so there is nothing to carry it on the chart, and
-`cc/map-draw/styled-draw.cc` draws only points, serum circles, the grid, labels, the legend
-and the title. Closing it needs **new C++** — a `Style` path element, its export/import, a
-pybind kwarg, and a draw call on the already-present
-`ae::draw::CairoPdf::path_negative_move` — and therefore a rebuild; it was deliberately not
-attempted here. The loop still works without it: the points the polygon caught *are* marked,
-by the `modify=` that always accompanies it, which is the question the analyst is asking.
-Procrustes arrows (step 5) are blocked on the same missing primitive.
+### Drawing the polygon, and procrustes arrows — the figure primitive (DONE 2026-09-11)
 
-`test/adjust_review.py` locks the translation, the modifiers, the untouched `99.ace` and the
-drawn PDF/PNG down on synthetic data only.
+`slot.path(outline=…)` used to only *record* the request: ae had no figure primitive above
+the Cairo surface, so a polygon could not be put on a chart at all. That primitive now
+exists, and with it both the polygon outline (step 4's tail) and **procrustes arrows**
+(step 5) are drawn.
 
-**Still open on this stage** (see `../../../AE-PORT-SSM-ADJUST-AUDIT.md`): the polygon
-outline above; and `compare_sequences`, procrustes arrows and `tal` wiring (step 5). Stage B
-is **not** done.
+**C++.** `semantic::PathElement` on `Style` (`cc/chart/v3/styles.hh`) — vertices,
+outline/fill/outline-width, `close`, and an optional arrow head at the last vertex — with
+export/import as the style's `"P"` key (documented in `doc/ace-format.js`) and
+`Style.add_path(vertices, **kwargs)` / `remove_paths()` in pybind. `styled-draw.cc` collects
+the resolved style chain's figures (parents first, so later wins and draws on top) and draws
+them above the point cloud and its labels, below only the legend and title. The draw call is
+a new `CairoPdf::polygon()`: the existing `path_negative_move` overloads a negative x as a
+subpath marker, which is unusable in device coordinates where x ≥ 0 is normal and a vertex
+at x = 0 would be misread as a move-to. Arrow-head geometry follows AD's
+`Surface::arrow_head` — apex at the last vertex, base `arrow_width × 2` back along the line,
+base half-width `arrow_width / 2`, with the shaft stopping at the base.
+
+**The coordinate frame is the load-bearing decision.** A `PathElement`'s vertices are stored
+in **layout (untransformed)** coordinates — the frame `Projection::layout()` reports and
+`ae.adjust.Figure` holds after `Adjust.figure()` has converted from AD's viewport-origin
+frame — and the renderer applies the projection transformation to them exactly as it applies
+it to the points. So the polygon that is drawn is literally the polygon that made the
+selection, and it follows the map through a rotation or flip instead of drifting off it.
+(The alternative, storing drawn-space coordinates, would have frozen the figure against a
+re-orientation.)
+
+**Python.** `Slot.path(outline=…, fill=…)` appends the figure's converted vertices to
+`slot.styling`; `Adjust.procrustes_arrows()` ports AD's `acmacs::mapi::procrustes_arrows`
+(procrustes-map the secondary layout onto the primary, measure every common point, arrow the
+ones over the threshold) and `Slot.procrustes()` draws them on `NN.pc.pdf` while still
+returning the numbers — it returns `ProcrustesArrows`, with AD's `ProcrustesData` on `.data`,
+AD's `distances_t` on `.distances` and the segments on `.arrows`. Its match level defaults to
+`"auto"`, not `"strict"`, because AD's `slot.procrustes` builds its `CommonAntigensSera` with
+no match level and AD's default is `automatic`; on a secondary chart with antigens removed
+the two levels disagree about how many points are common. Figures ride the same throw-away
+snapshot style the `modify` modifiers do, so `99.ace` still carries only geometry.
+
+**Verified differentially against the real AD extension**, re-derived in the same run:
+
+| check | result |
+|---|---|
+| this cycle's 27 real `slot.path(outline=)` polygons over 16 maps, every vertex resolved from AD's viewport-origin frame into layout coordinates (AD's own `move(to=)`, which uses the same `Coordinates::viewport` conversion, against `Adjust.figure`) | **107/107** identical, worst delta 2.8e-15 |
+| procrustes over 48 (prestyled, adjusted `99.ace`) pairs from this cycle: AD's `(point_no, distance)` list and rms against `Adjust.procrustes_arrows` | **48/48** identical, worst distance delta 5.3e-15, worst rms delta 2.6e-14; NaN distances (disconnected points) agree and produce no arrow on either side |
+| rasterised and looked at | the magenta outline sits on its own magenta-marked selection; arrows start on their points and carry AD-shaped heads |
+| a figure authored in the drawn frame on a rotated projection | re-transforms to exactly the authored coordinates (test) |
+
+The bar met is **same map coordinates, same frame, same arrow endpoints**, plus a visual
+check — not pixel identity, which is not achievable across two renderers and was not chased.
+
+`test/adjust_review.py` locks all of it down on synthetic data only: the recorded vertices
+are the converted ones, the figure reaches the style's `"P"` key and survives an
+export/import round trip, the transformation round-trips, a polygon snapshot is actually
+drawn, self-procrustes yields no arrows, one moved point yields exactly one arrow starting on
+that point with the length the fit reports, and neither figures nor arrows reach `99.ace`.
+40/40 clean runs.
+
+**Still open on this stage** (see `../../../AE-PORT-SSM-ADJUST-AUDIT.md`): the `sp/0do` half
+of the `tal` wiring, and the cycle's `adjust/0do` scripts still import
+`acmacs_py.zero_do_5`. Stage B is **not** done.
 
 **The real gap is one primitive.** All three missing ops are geometry on the layout, and all
 are enabled by **writing layout coordinates** (currently read-only). With a coordinate setter:
@@ -695,7 +738,8 @@ flip_over_line = reflect coords; geometric select = point-in-polygon over the la
    `Slot` and `main` (step directories, `NN` numbering, `final_ace`, slot chaining) on
    `ae_backend.chart_v3`. Snapshots are drawn by `Slot.renderer`, which defaults to
    `ae.adjust_render.SnapshotRenderer` (set it to `None` to keep AD's numbering without
-   drawing); the polygon outline itself is still missing — see "Step 4" above.
+   drawing). The polygon outline and procrustes arrows needed one more C++ primitive — the
+   `semantic::PathElement` figure element — and are in; see "the figure primitive" above.
 
 **Effort:** modest — the chart-engine ops mostly exist; the new work is the coordinate-setter
 primitive (✅ now done — see above) + ~500-line thin-wrapper Python framework. The sole
