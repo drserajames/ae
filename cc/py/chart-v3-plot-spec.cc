@@ -233,6 +233,49 @@ namespace ae::py
         style.modifiers.clear();
     }
 
+    // Add a drawable figure (semantic::PathElement) to a style: the selection polygon of
+    // ae.adjust's slot.path(outline=), or a procrustes arrow. `vertices` are LAYOUT
+    // (untransformed) coordinates -- the same frame Projection.layout() and
+    // ae.adjust.Figure use -- and the renderer transforms them with the points.
+    static inline void add_path(ae::chart::v3::semantic::Style& style, const pybind11::object& vertices, const pybind11::kwargs& kwargs)
+    {
+        auto& path = style.paths.emplace_back();
+        for (const auto& vertex : vertices) {
+            const auto pair = vertex.cast<std::vector<double>>();
+            if (pair.size() < 2)
+                throw std::runtime_error{"Style.add_path: each vertex must be [x, y]"};
+            path.vertices.push_back(ae::chart::v3::semantic::offset_t{pair[0], pair[1]});
+        }
+        if (path.vertices.size() < 2)
+            throw std::runtime_error{"Style.add_path: at least two vertices required"};
+        for (const auto& [keyword_handle, value] : kwargs) {
+            const auto keyword = keyword_handle.cast<std::string_view>();
+            if (keyword == "outline")
+                path.outline = value.cast<std::string>();
+            else if (keyword == "fill")
+                path.fill = value.cast<std::string>();
+            else if (keyword == "outline_width")
+                path.outline_width = value.cast<double>();
+            else if (keyword == "close")
+                path.close = value.cast<bool>();
+            else if (keyword == "arrow_width")
+                path.arrow_width = value.cast<double>();
+            else if (keyword == "arrow_fill")
+                path.arrow_fill = value.cast<std::string>();
+            else if (keyword == "arrow_outline")
+                path.arrow_outline = value.cast<std::string>();
+            else if (keyword == "arrow_outline_width")
+                path.arrow_outline_width = value.cast<double>();
+            else
+                throw std::runtime_error{fmt::format("Style.add_path: unrecognized \"{}\": {}", keyword, static_cast<std::string>(pybind11::repr(value)))};
+        }
+    }
+
+    static inline void remove_paths(ae::chart::v3::semantic::Style& style)
+    {
+        style.paths.clear();
+    }
+
     // ----------------------------------------------------------------------
 
 } // namespace ae::py
@@ -257,6 +300,12 @@ void ae::py::chart_v3_plot_spec(pybind11::module_& chart_v3_submodule)
         .def_readwrite("title", &semantic::Style::title)
         .def_readwrite("priority", &semantic::Style::priority)
         .def("remove_modifiers", &ae::py::remove_modifiers) //
+        .def("remove_paths", &ae::py::remove_paths)         //
+        .def(
+            "add_path", &ae::py::add_path, "vertices"_a,
+            pybind11::doc(R"(Draw a figure on the map above the points: the selection polygon of ae.adjust's slot.path(outline=), or a procrustes arrow.
+vertices: [[x, y], ...] in LAYOUT (untransformed) coordinates -- the frame Projection.layout() uses; the renderer applies the projection transformation, as it does to the points.
+kwargs: outline="black", fill="transparent", outline_width=1.0, close=True, arrow_width=0.0 (>0 draws an arrow head at the last vertex), arrow_fill="", arrow_outline="", arrow_outline_width=1.0)")) //
         .def(
             "add_modifier", &ae::py::add_modifier,
             pybind11::doc(

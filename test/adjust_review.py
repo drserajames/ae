@@ -282,8 +282,8 @@ def path_section(zd):
     return cut
 
 
-def test_path_outline_is_recorded_not_drawn(tmp):
-    "slot.path(outline=...) records the request; ae has no polygon primitive to draw it."
+def test_path_outline_is_recorded_in_layout_coordinates(tmp):
+    "slot.path(outline=...) records the polygon; a bare slot.path (no outline) draws nothing."
     global _source
     _source = tmp / "path-source.ace"
     _chart().write(str(_source))
@@ -292,8 +292,155 @@ def test_path_outline_is_recorded_not_drawn(tmp):
     kinds = [entry["kind"] for entry in styling]
     assert kinds == ["path"], f"expected one recorded path, got {kinds}"
     assert styling[0]["outline"] == "cyan" and styling[0]["outline_width"] == 3, styling
-    assert "polygon" in adjust_render.polygon_support_note()
-    print("OK [test_path_outline_is_recorded_not_drawn]: recorded, and says why")
+
+    # The recorded vertices are the CONVERTED ones -- raw layout coordinates, the frame
+    # pt.inside() tests in -- not the viewport-origin literal the script authored. On a real
+    # map the viewport origin is never (0, 0), so the two differ, and it is the converted
+    # ones that must be drawn or the outline would not sit on its own selection.
+    adj = Adjust(_source)
+    expected = adj.figure([[0, 0], [4, 0], [4, 4], [0, 4]]).vertices
+    assert styling[0]["vertices"] == expected, (styling[0]["vertices"], expected)
+    assert styling[0]["vertices"] != [[0, 0], [4, 0], [4, 4], [0, 4]], \
+        "the authored literal was recorded unconverted"
+    print("OK [test_path_outline_is_recorded_in_layout_coordinates]: converted, not literal")
+
+
+def test_path_becomes_a_drawable_figure_on_the_style(tmp):
+    "A recorded path becomes a P entry on the snapshot style, and survives export/import."
+    chart = _chart()
+    vertices = [[0.5, 0.5], [2.5, 0.5], [2.5, 2.5], [0.5, 2.5]]
+    entries = [{"kind": "path", "vertices": vertices, "outline": "cyan",
+                "outline_width": 3.0, "fill": "magenta", "close": True}]
+    adjust_render.build_style(chart, entries, base_style="")
+    exported = json.loads(chart.export())["c"]["R"][adjust_render.SNAPSHOT_STYLE]
+    paths = exported.get("P", [])
+    assert len(paths) == 1, f"expected one figure on the style, got {paths}"
+    assert paths[0]["v"] == vertices, paths[0]
+    assert paths[0]["O"] == "cyan" and paths[0]["F"] == "magenta" and paths[0]["o"] == 3, paths[0]
+
+    # round trip: write, re-read, re-export -- the figure must come back unchanged
+    source = tmp / "figure.json"
+    source.write_bytes(chart.export())
+    back = json.loads(ae_backend.chart_v3.Chart(source).export())["c"]["R"][adjust_render.SNAPSHOT_STYLE]
+    assert back.get("P") == paths, (back.get("P"), paths)
+    print("OK [test_path_becomes_a_drawable_figure_on_the_style]: exported and re-imported")
+
+
+def test_path_vertices_track_the_projection_transformation(tmp):
+    """A figure is stored in layout coordinates and drawn through the projection
+    transformation, so authoring it in the drawn frame round-trips exactly -- which is
+    what keeps the outline glued to the points through a rotation."""
+    source = tmp / "rotated.ace"
+    _chart().write(str(source))
+    adj = Adjust(source)
+    adj.rotate(0.7)                                   # a non-identity transformation
+    a, b, c, d = adj.transformation
+    assert abs(b) > 1e-6 or abs(c) > 1e-6, "rotate() left the transformation identity"
+
+    drawn = [[1.0, 2.0], [3.0, 2.0], [3.0, 4.0], [1.0, 4.0]]
+    figure = adj.figure(drawn, frame="map-transformed")
+    assert figure.vertices != drawn, "a rotated map should store different layout coordinates"
+    # what the renderer will do to each stored vertex
+    retransformed = [adj.transform(v) for v in figure.vertices]
+    for got, want in zip(retransformed, drawn):
+        assert abs(got[0] - want[0]) < 1e-9 and abs(got[1] - want[1]) < 1e-9, (got, want)
+    print("OK [test_path_vertices_track_the_projection_transformation]: transform round-trips")
+
+
+def test_snapshot_with_a_polygon_is_drawn(tmp):
+    "A slot that cuts a polygon draws a PDF that actually contains it."
+    source = tmp / "drawn-path.ace"
+    _chart().write(str(source))
+    zd = Zd("drawn_path", directory=tmp)
+
+    @zd.slot
+    def cut(slot: Slot):
+        slot.chart_filename = source
+        slot.export_final_ace = False
+        slot.make_final_png = False
+        slot.path([[0, 0], [4, 0], [4, 4], [0, 4]], outline="cyan", outline_width=3)
+        slot.plot()
+        return slot.subdir()
+
+    subdir = cut
+    pdfs = sorted(subdir.glob("*.pdf"))
+    assert pdfs, f"nothing drawn in {subdir}"
+    assert all(pdf.stat().st_size > 1000 for pdf in pdfs), [p.stat().st_size for p in pdfs]
+    print(f"OK [test_snapshot_with_a_polygon_is_drawn]: {len(pdfs)} pdf(s)")
+
+
+# ----------------------------------------------------------------------
+# procrustes arrows (Stage B step 5)
+
+def test_procrustes_against_self_has_no_arrows(tmp):
+    "A chart procrusted against itself moves nothing, so AD draws no arrow."
+    source = tmp / "pc-self.ace"
+    _chart().write(str(source))
+    adj = Adjust(source)
+    result = adj.procrustes_arrows(source, threshold=1e-6)
+    assert result.arrows == [], f"self-procrustes produced arrows: {result.arrows[:3]}"
+    assert result.distances, "no common points at all"
+    worst = max(d for _, d in result.distances)
+    assert worst < 1e-6, f"self-procrustes moved a point by {worst}"
+    print(f"OK [test_procrustes_against_self_has_no_arrows]: {len(result.distances)} points, worst {worst:.2e}")
+
+
+def test_procrustes_arrow_runs_from_primary_to_secondary(tmp):
+    """One point moved far in the secondary gets one arrow, and that arrow starts at the
+    primary point's own position and ends where the procrustes fit puts the secondary one."""
+    source = tmp / "pc-primary.ace"
+    chart = _chart()
+    chart.write(str(source))
+
+    moved_ag, offset = 0, 20.0
+    secondary_path = tmp / "pc-secondary.ace"
+    secondary = ae_backend.chart_v3.Chart(source)
+    projection = secondary.projection(0)
+    x, y = projection.layout()[moved_ag]            # layout() is a COPY: read, then write
+    projection.set_coordinates(moved_ag, [x + offset, y])
+    secondary.write(str(secondary_path))
+
+    adj = Adjust(source)
+    # threshold well above the ~offset/n_points the fit shifts every other point by, so only
+    # the point that really moved qualifies
+    result = adj.procrustes_arrows(secondary_path, threshold=offset / 3.0)
+    assert len(result.arrows) == 1, \
+        f"expected exactly one arrow, got {len(result.arrows)}: {result.arrows[:3]}"
+    over = [(no, dist) for no, dist in result.distances if dist > offset / 3.0]
+    assert [no for no, _ in over] == [moved_ag], over
+
+    start, end = result.arrows[0]
+    layout_xy = list(adj.layout[moved_ag])[:2]
+    assert abs(start[0] - layout_xy[0]) < 1e-9 and abs(start[1] - layout_xy[1]) < 1e-9, \
+        f"arrow does not start on its point: {start} vs {layout_xy}"
+    # the arrow's length in drawn space is the distance the fit reports for that point
+    sx, sy = adj.transform(start)
+    ex, ey = adj.transform(end)
+    drawn_length = ((ex - sx) ** 2 + (ey - sy) ** 2) ** 0.5
+    assert abs(drawn_length - over[0][1]) < 1e-9, (drawn_length, over[0][1])
+    print(f"OK [test_procrustes_arrow_runs_from_primary_to_secondary]: 1 arrow, length {drawn_length:.3f}")
+
+
+def test_procrustes_arrows_do_not_reach_the_final_ace(tmp):
+    "slot.procrustes draws arrows on the snapshot only; 99.ace keeps just the geometry."
+    source = tmp / "pc-slot.ace"
+    _chart().write(str(source))
+    zd = Zd("pc_slot", directory=tmp)
+
+    @zd.slot
+    def compare(slot: Slot):
+        slot.chart_filename = source
+        slot.make_final_png = False
+        slot.procrustes(source, threshold=1e-9)
+        return slot.final_ace()
+
+    final = compare
+    assert final.exists(), f"no 99.ace at {final}"
+    styles = json.loads(ae_backend.chart_v3.Chart(final).export())["c"].get("R", {})
+    assert adjust_render.SNAPSHOT_STYLE not in styles, \
+        f"the snapshot style leaked into 99.ace: {sorted(styles)}"
+    assert (final.parent / "00.pc.pdf").exists(), sorted(p.name for p in final.parent.iterdir())
+    print("OK [test_procrustes_arrows_do_not_reach_the_final_ace]: 00.pc.pdf drawn, 99.ace clean")
 
 
 def reset_section(zd):
@@ -338,7 +485,13 @@ def main():
         test_slot_draws_a_snapshot(tmp)
         test_final_ace_carries_no_snapshot_style(tmp)
         test_renderer_none_numbers_without_drawing(tmp)
-        test_path_outline_is_recorded_not_drawn(tmp)
+        test_path_outline_is_recorded_in_layout_coordinates(tmp)
+        test_path_becomes_a_drawable_figure_on_the_style(tmp)
+        test_path_vertices_track_the_projection_transformation(tmp)
+        test_snapshot_with_a_polygon_is_drawn(tmp)
+        test_procrustes_against_self_has_no_arrows(tmp)
+        test_procrustes_arrow_runs_from_primary_to_secondary(tmp)
+        test_procrustes_arrows_do_not_reach_the_final_ace(tmp)
         test_reset_plot_spec_drops_style_and_history(tmp)
     finally:
         os.chdir(cwd)

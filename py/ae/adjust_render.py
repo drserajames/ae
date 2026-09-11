@@ -28,11 +28,12 @@ into the slot's `99.ace`. The round trip goes through *uncompressed* JSON on pur
 way back in. A whole snapshot of the largest chart in the current report cycle
 (12,737 antigens) takes well under a second.
 
-**Not ported: drawing the polygon itself.** `slot.path(outline=...)` outlines the selection
-polygon on AD's snapshot. ae has no polygon primitive above the Cairo surface — the
-semantic style model (`cc/chart/v3/styles.hh`) has no path/figure/arrow element and
-`cc/map-draw/styled-draw.cc` draws only points, serum circles, the grid, labels, the legend
-and the title — so this needs new C++, not new Python. See `polygon_support_note()`.
+**Figures.** `slot.path(outline=...)` outlines the selection polygon, and
+`slot.procrustes` draws arrows, through the `semantic::PathElement` element added to
+`cc/chart/v3/styles.hh` and drawn by `cc/map-draw/styled-draw.cc`. A figure's vertices are
+LAYOUT (untransformed) coordinates — the frame `ae.adjust.Figure` holds and `Point.inside()`
+tests — and the renderer applies the projection transformation to them exactly as it does to
+the points, so the polygon that is drawn is the polygon that made the selection.
 """
 import os
 import sys
@@ -173,7 +174,7 @@ def build_style(chart, entries, base_style: str = None, style_name: str = SNAPSH
     *entries* are what `ae.adjust.Slot` records — see `Slot.modify` / `Slot.path`:
 
         {"kind": "modify", "selected": [point_no, ...], "modifier": {ae kwargs}}
-        {"kind": "path", ...}          # recorded, not drawn (see polygon_support_note)
+        {"kind": "path", "vertices": [[x, y], ...], <add_path kwargs>}
 
     A `"modify"` entry becomes one modifier per selected point. `selected` holds **point**
     numbers in `ae.adjust`'s convention (a serum is `number_of_antigens + serum_no`), which
@@ -192,10 +193,21 @@ def build_style(chart, entries, base_style: str = None, style_name: str = SNAPSH
     n_sera = chart.number_of_sera()
     style = chart.styles()[style_name]
     style.remove_modifiers()
+    style.remove_paths()
     style.priority = priority
     if base_style:
         style.add_modifier(parent=base_style)
     for entry in entries:
+        if entry.get("kind") == "path":
+            # A drawable figure: the selection polygon of slot.path(outline=), or a
+            # procrustes arrow. Vertices are LAYOUT coordinates (what Figure holds), which is
+            # the frame Style.add_path takes -- the renderer transforms them with the points.
+            vertices = entry.get("vertices") or ()
+            if len(vertices) >= 2:
+                style.add_path([list(v)[:2] for v in vertices],
+                               **{k: v for k, v in entry.items()
+                                  if k not in ("kind", "vertices") and v is not None})
+            continue
         if entry.get("kind") != "modify":
             continue
         modifier = entry.get("modifier") or {}
@@ -288,17 +300,10 @@ class SnapshotRenderer:
 
 # ======================================================================
 
-def polygon_support_note() -> str:
-    """Why `slot.path(outline=...)` draws nothing, in one paragraph — printed once per
-    slot that asks for it, and quoted in the migration notes."""
-    return ("slot.path(outline=…) cannot draw the polygon: ae has no polygon primitive "
-            "above the Cairo surface. The semantic style model (cc/chart/v3/styles.hh) "
-            "carries no path/figure element and cc/map-draw/styled-draw.cc draws only "
-            "points, serum circles, grid, labels, legend and title, so this needs new C++ "
-            "(a Style path element + export/import + a pybind kwarg + a draw call on the "
-            "existing CairoPdf::path_negative_move), not new Python. The points the "
-            "polygon caught ARE marked, by the modify= that normally accompanies it, so "
-            "the select→look→re-cut loop works; only the outline is missing.")
+#: AD's `ArrowPlotSpec` defaults for `slot.procrustes` arrows
+#: (AD/sources/acmacs-map-draw/cc/mapi-procrustes.hh): black, 1px shaft, 5px head.
+ARROW_STYLE = {"outline": "black", "outline_width": 1.0, "arrow_width": 5.0,
+               "arrow_fill": "black", "arrow_outline": "black", "arrow_outline_width": 1.0}
 
 
 def _warn(message: str):

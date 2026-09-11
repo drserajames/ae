@@ -232,6 +232,28 @@ namespace ae::draw
         }
     }
 
+    void CairoPdf::polygon(const double* first, const double* last, bool close, Color outline, double outline_width, Color fill)
+    {
+        if (first + 1 >= last)
+            return; // nothing to draw
+        cairo_new_path(context_);
+        cairo_move_to(context_, first[0], first[1]);
+        for (const double* p = first + 2; p + 1 < last; p += 2)
+            cairo_line_to(context_, p[0], p[1]);
+        if (close)
+            cairo_close_path(context_);
+        if (fill.alpha() > 0.0) { // draw translucent fills too; skip only fully-transparent
+            set_source(context_, fill);
+            cairo_fill_preserve(context_);
+        }
+        if (outline_width > 0.0 && !outline.is_transparent()) {
+            set_source(context_, outline);
+            cairo_set_line_width(context_, outline_width);
+            cairo_stroke(context_);
+        }
+        cairo_new_path(context_);
+    }
+
     void CairoPdf::rectangle(double x, double y, double width, double height, Color outline, double outline_width, Color fill)
     {
         cairo_new_path(context_);

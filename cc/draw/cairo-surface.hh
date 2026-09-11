@@ -70,6 +70,13 @@ namespace ae::draw
         // double array (stride 2 = {x, y}); a pair with x < 0 starts a new subpath (move-to at
         // {|x|, y}), x >= 0 is a line-to. Transparent fill / non-positive outline width are skipped.
         void path_negative_move(const double* first, const double* last, Color outline, double outline_width, Color fill);
+        // Single-subpath polygon/polyline: [first, last) is a flat double array (stride 2 =
+        // {x, y}), every pair a vertex. `close` closes the outline back to the first vertex.
+        // Unlike path_negative_move() no coordinate is overloaded as a subpath marker, so a
+        // vertex at x == 0 (a legal device coordinate) is drawn rather than read as a move-to.
+        // Transparent fill / non-positive outline width are skipped; a fill is always taken
+        // over the implicitly-closed path, as Cairo does.
+        void polygon(const double* first, const double* last, bool close, Color outline, double outline_width, Color fill);
         // Draw UTF-8 text via Cairo's built-in font API. When center is true the text's
         // bounding box is centred on (x, y); otherwise (x, y) is the box's top-left.
         // halo_width > 0 strokes a halo (default white) behind the glyphs so an underlying

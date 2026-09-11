@@ -294,6 +294,7 @@ namespace ae::map_draw
         struct Resolved
         {
             std::vector<const semantic::StyleModifier*> modifiers{};
+            std::vector<const semantic::PathElement*> paths{}; // drawable figures / arrows
             std::optional<ae::draw::v2::Viewport> viewport{};
             semantic::Legend legend{};
             semantic::Title title{};
@@ -332,6 +333,10 @@ namespace ae::map_draw
                 else
                     out.modifiers.push_back(&m);
             }
+            // Paths AFTER the modifier loop, so a parent's figures are collected (and drawn)
+            // before this style's own -- the same "later wins / later on top" order as modifiers.
+            for (const auto& path : st->paths)
+                out.paths.push_back(&path);
         }
 
         // kateri Antigen.withinDateRange (chart.dart): a "!D": [first, last] range test.
@@ -1084,6 +1089,51 @@ namespace ae::map_draw
                 }
                 for (size_t k = 0; k < placed.size(); ++k)
                     draw_label(k);
+            }
+        }
+
+        // ---- paths / arrows (semantic::PathElement): the selection polygon of ae.adjust's
+        //      slot.path(outline=) and procrustes arrows. Drawn above the whole cloud (and its
+        //      labels) so a marked selection stays visible, below only the legend and title.
+        //      Vertices are stored in LAYOUT coordinates, so they go through exactly the same
+        //      transform -> device chain as the points: transformation().transform() then
+        //      dev_x/dev_y. Arrow-head geometry follows AD Surface::arrow_head -- apex at the
+        //      last vertex, base `arrow_width * 2` back along the line, base half-width
+        //      `arrow_width * 0.5` -- and the line stops at the base, as AD's does. ----
+        if (!resolved.paths.empty()) {
+            const auto& transformation = projection.transformation();
+            std::vector<double> device; // flat {x, y}, reused per figure
+            for (const semantic::PathElement* path : resolved.paths) {
+                if (path->vertices.size() < 2)
+                    continue;
+                device.clear();
+                for (const auto& vertex : path->vertices) {
+                    const auto t = transformation.transform(point_coordinates{vertex[0], vertex[1]});
+                    device.push_back(dev_x(t[DIMX]));
+                    device.push_back(dev_y(t[DIMY]));
+                }
+                const ::Color outline = concrete_color_str(path->outline, BLACK);
+                const ::Color fill = concrete_color_str(path->fill, TRANSPARENT);
+                const bool arrow = path->arrow_width > 0.0;
+                if (arrow) {
+                    const size_t last = device.size() - 2;
+                    const double dx = device[last] - device[last - 2], dy = device[last + 1] - device[last - 1];
+                    const double len = std::hypot(dx, dy);
+                    if (len > 0.0) {
+                        const double ux = dx / len, uy = dy / len;
+                        const double head_len = std::min(path->arrow_width * 2.0, len);
+                        const double half = path->arrow_width * 0.5;
+                        const double apex_x = device[last], apex_y = device[last + 1];
+                        const double base_x = apex_x - ux * head_len, base_y = apex_y - uy * head_len;
+                        device[last] = base_x; // the shaft stops where the head begins (AD)
+                        device[last + 1] = base_y;
+                        const std::array<double, 6> head{apex_x,       apex_y,       base_x - uy * half, base_y + ux * half,
+                                                         base_x + uy * half, base_y - ux * half};
+                        surface.polygon(head.data(), head.data() + head.size(), true, concrete_color_str(path->arrow_outline, outline),
+                                        path->arrow_outline_width, concrete_color_str(path->arrow_fill, outline));
+                    }
+                }
+                surface.polygon(device.data(), device.data() + device.size(), path->close && !arrow, outline, path->outline_width, fill);
             }
         }
 

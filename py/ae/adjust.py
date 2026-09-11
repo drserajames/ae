@@ -38,8 +38,9 @@ reproduce AD's `acmacs_py.zero_do_5` step machinery — the `<slot_name>/` step 
 the `NN` snapshot numbering, the `99.ace` final chart and the slot-to-slot chaining that
 `map-adjustments.txt` records as provenance. `slot.modify(...)` styles the selection and
 `slot.plot()` draws the numbered snapshot with ae's native headless renderer (see
-`ae.adjust_render`), so the analyst's select -> look -> re-cut-the-polygon loop works; the
-one piece still missing is the outline of the polygon itself, which needs new C++.
+`ae.adjust_render`), so the analyst's select -> look -> re-cut-the-polygon loop works --
+including the outline of the polygon itself and `slot.procrustes`'s arrows, which are drawn
+through the `semantic::PathElement` figure element on the snapshot style.
 """
 
 import sys
@@ -91,6 +92,32 @@ class Figure:
                 inside = not inside
             j = i
         return inside
+
+
+class ProcrustesArrows:
+    """What `Adjust.procrustes_arrows` returns: the numbers AD returns plus the arrows AD draws.
+
+    * `data` — the `ae_backend.chart_v3.ProcrustesData` (`.rms()`, `.transformation()`,
+      `.secondary_transformed()`), unchanged, so nothing that used `Adjust.procrustes`
+      before loses anything.
+    * `distances` — `[(primary point_no, distance), ...]` for every common point, in AD's
+      order (antigens then sera) and including the ones below the threshold, matching AD's
+      `distances_t`.
+    * `arrows` — `[[[x0, y0], [x1, y1]], ...]` in raw layout coordinates, one per point over
+      the threshold: primary position -> procrustes-mapped secondary position.
+    """
+
+    def __init__(self, data, distances, arrows):
+        self.data = data
+        self.distances = distances
+        self.arrows = arrows
+
+    def rms(self):
+        "The procrustes RMS, straight off `data`."
+        return self.data.rms()
+
+    def __repr__(self):
+        return f"<ProcrustesArrows rms={self.data.rms():.4f} arrows={len(self.arrows)}>"
 
 
 class Point:
@@ -511,6 +538,58 @@ class Adjust:
         return self._be.chart_v3.procrustes(
             self.projection, other.projection(other_projection_no), common, scaling)
 
+    def procrustes_arrows(self, other, threshold: float = 0.3, scaling: bool = False,
+                          match: str = "auto", other_projection_no: int = 0):
+        """Procrustes against *other*, and work out the **arrows** AD draws for it.
+
+        Port of AD's `acmacs::mapi::procrustes_arrows`
+        (`AD/sources/acmacs-map-draw/cc/mapi-procrustes.cc:12`): procrustes-map the
+        secondary layout onto the primary, then for every common point measure the
+        distance between where the primary chart puts it and where the secondary chart
+        (so mapped) does. Points further apart than *threshold* get an arrow, primary
+        position -> secondary position.
+
+        The measurement is in the primary's **transformed** space, as AD's is — that is the
+        space `chart_v3.procrustes` fits in (`cc/chart/v3/procrustes.cc:124` feeds it
+        `primary.transformed_layout()`). The arrow *vertices* are then inverse-transformed
+        back into raw layout coordinates, which is the frame a `PathElement` is stored in
+        and the frame `Figure` uses, so the renderer transforms them with the points.
+
+        *match* defaults to `"auto"`, not `"strict"` as `Adjust.procrustes` does, because
+        AD's `slot.procrustes` builds its `CommonAntigensSera` with no match level at all
+        (`zero_do_5.py:332`) and AD's default is `automatic`. On a secondary chart that has
+        had antigens removed the two levels disagree on how many points are common.
+
+        Returns a `ProcrustesArrows`."""
+        if isinstance(other, (str, Path)):
+            other = self._be.chart_v3.Chart(str(other))
+        common = self._be.chart_v3.CommonAntigensSera(self.chart, other, match)
+        secondary_projection = other.projection(other_projection_no)
+        data = self._be.chart_v3.procrustes(self.projection, secondary_projection, common, scaling)
+        secondary = data.apply(secondary_projection.layout())
+        primary = self.transformed_layout()
+        n_ag_primary = self.number_of_antigens
+        n_ag_secondary = other.number_of_antigens()
+
+        # AD's distances_t order: common antigens, then common sera. A serum is addressed as
+        # number_of_antigens + serum_no on each side -- and the two charts need not have the
+        # same number of antigens, so the two offsets differ.
+        pairs = [(pri, sec) for pri, sec in common.antigens()]
+        pairs += [(n_ag_primary + pri, n_ag_secondary + sec) for pri, sec in common.sera()]
+
+        distances, arrows = [], []
+        for point_no, secondary_no in pairs:
+            src = primary[point_no]
+            dst = secondary[secondary_no]
+            if src is None or dst is None:
+                continue                              # disconnected on either side
+            src, dst = list(src)[:2], list(dst)[:2]
+            distance = math.hypot(dst[0] - src[0], dst[1] - src[1])
+            distances.append((point_no, distance))
+            if distance > threshold:
+                arrows.append([self.inverse_transform(src), self.inverse_transform(dst)])
+        return ProcrustesArrows(data, distances, arrows)
+
     def orient_to(self, master):
         """Re-orient this projection to best match *master* (a Chart or path) via
         procrustes. Only the projection *transformation* (rotation / reflection /
@@ -590,11 +669,9 @@ class Adjust:
 # then rebound that name to the previous slot's return value, conventionally its
 # `final_ace()` path.
 #
-# What is NOT ported yet (Stage B step 4, the review loop): styling and rendering. AD's
-# `slot.modify(...)`, the `modify=` argument of `select_*`, and the `outline`/`fill`
-# arguments of `slot.path` all exist here and are recorded, but draw nothing, and no PDF
-# or PNG is produced. Snapshot *numbering* is still tracked so that the step numbers do
-# not shift once rendering lands.
+# Styling and rendering are in (Stage B step 4): `slot.modify(...)`, the `modify=` argument
+# of `select_*`, and `slot.path(outline=)` / `slot.procrustes` all draw on the numbered
+# snapshots, through a throw-away copy of the chart so that `99.ace` keeps only geometry.
 
 
 class Zd:
@@ -678,7 +755,6 @@ class Slot:
         self.export_final_ace = True
         self.snapshots = []          # [(step, Path)] — every snapshot this slot took
         self.styling = []            # modify()/path() requests, drawn by plot() — see modify()
-        self._warned_path = False
 
     # -- the chart this slot works on -----------------------------------
 
@@ -838,19 +914,20 @@ class Slot:
         way, and AD only passes `close=False` when the "polygon" is a line handed to
         `flip_over_line`, where closure is meaningless.
 
-        **`outline`/`fill` are recorded but not drawn.** AD outlines the polygon on the
-        snapshot; ae has no polygon primitive above the Cairo surface, so that half needs
-        new C++ — see `ae.adjust_render.polygon_support_note`, printed once per slot that
-        asks for it. The points the polygon caught are still marked, by the `modify=` that
-        normally accompanies it, so the select → look → re-cut loop works without it."""
+        When *outline* or *fill* is given the polygon is also **drawn** on this slot's
+        snapshots, as AD's is: the request is appended to `slot.styling` and becomes a
+        `semantic::PathElement` on the throw-away snapshot style, so — like `modify` — it
+        never reaches the chart this slot writes to `99.ace`.
+
+        The vertices that get drawn are `figure.vertices`, i.e. the converted, raw-layout
+        ones the selection itself is tested against, so the outline cannot drift from the
+        polygon that made the selection however the map is transformed."""
         figure = self.adjust.figure(path, frame=coordinates_relative_to)
         if outline or fill:
-            if not self._warned_path:
-                self._warned_path = True
-                print(f">> {self.slot_name}: {adjust_render.polygon_support_note()}",
-                      file=sys.stderr)
-            self.styling.append({"kind": "path", "figure": figure, "outline": outline,
-                                 "outline_width": outline_width, "fill": fill})
+            self.styling.append({"kind": "path",
+                                 "vertices": [list(v) for v in figure.vertices],
+                                 "outline": outline, "fill": fill,
+                                 "outline_width": outline_width, "close": close})
         return figure
 
     def select_antigens(self, predicate=None, report=20, modify: dict = None,
@@ -987,12 +1064,32 @@ class Slot:
         return fn
 
     def procrustes(self, secondary_chart_file=None, step: int = None, threshold: float = 0.3,
-                   png: bool = False, open: bool = False, title=None):
+                   png: bool = False, open: bool = False, title=None, arrow_style: dict = None):
         """Procrustes against *secondary_chart_file* (this slot's own starting chart if
-        None) and return the result. AD draws arrows onto the snapshot instead of
-        returning numbers; the arrows are Stage B step 5."""
+        None), **draw the arrows** on a `NN.pc.pdf` snapshot, and return the result.
+
+        Port of AD's `slot.procrustes` (`zero_do_5.py:325`), which calls
+        `chart_draw.procrustes_arrows(common=…, secondary_chart=…, threshold=…)` and then
+        plots with infix `"pc"`. Each common point whose primary and procrustes-mapped
+        secondary positions are more than *threshold* apart gets one arrow, from the
+        primary position to the secondary one — AD's `ArrowPlotSpec` defaults (black, 1px
+        shaft, 5px head) unless *arrow_style* overrides them.
+
+        Returns `ae.adjust.ProcrustesArrows` — the `procrustes_data_t` AD returns
+        (`.data.rms` / `.transformation()`), plus `.distances` and `.arrows`. Like
+        `modify`, the arrows live on the throw-away snapshot style only: `99.ace` still
+        carries nothing but the geometry."""
         other = secondary_chart_file if secondary_chart_file is not None else self._chart_filename
-        result = self.adjust.procrustes(other)
+        result = self.adjust.procrustes_arrows(other, threshold=threshold)
+        style = dict(adjust_render.ARROW_STYLE)
+        style.update(arrow_style or {})
+        for arrow in result.arrows:
+            self.styling.append({"kind": "path", "vertices": arrow, "close": False, **style})
+        print(f">>> {len(result.arrows)} procrustes arrows over threshold {threshold} "
+              f"(rms {result.data.rms():.4f})", file=sys.stderr)
+        if title:
+            print(f">> {self.slot_name}: procrustes(title=…) not drawn — ae's snapshot title "
+                  f"comes from the chart's style", file=sys.stderr)
         self.plot(step=step, infix="pc", png=png, open=open)
         return result
 
