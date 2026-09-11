@@ -110,6 +110,7 @@ namespace ae::chart::v3
 
         std::string designation() const { return string::join(" ", name(), string::join(" ", annotations()), reassortant(), passage()); }
         size_t designation_size() const { return string::join_size(1, name().size(), annotations().join_size(1), reassortant().size(), passage().size()); }
+        std::string designation_key() const { return fmt::format("{}\x1f{}\x1f{}\x1f{}", *name(), string::join(" ", annotations()), *reassortant(), passage()); }
 
         static inline const char* ag_sr = "AG";
 
@@ -144,6 +145,7 @@ namespace ae::chart::v3
 
         std::string designation() const { return string::join(" ", name(), string::join(" ", annotations()), reassortant(), serum_id()); }
         size_t designation_size() const { return string::join_size(1, name().size(), annotations().join_size(1), reassortant().size(), serum_id().size()); }
+        std::string designation_key() const { return fmt::format("{}\x1f{}\x1f{}\x1f{}", *name(), string::join(" ", annotations()), *reassortant(), *serum_id()); }
 
         static inline const char* ag_sr = "SR";
 
@@ -200,7 +202,7 @@ namespace ae::chart::v3
             for (const auto index : size()) {
                 const auto& ag{operator[](index)};
                 if (!ag.annotations().distinct()) {
-                    auto [pos, inserted] = designations_to_indexes.try_emplace(ag.designation(), map_value_t{});
+                    auto [pos, inserted] = designations_to_indexes.try_emplace(ag.designation_key(), map_value_t{});
                     pos->second.push_back(index);
                 }
             }
