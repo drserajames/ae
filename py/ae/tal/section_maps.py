@@ -85,7 +85,15 @@ SERUM_CIRCLE_THEORETICAL_FLAG = (_os.environ.get("AE_SC_THEORETICAL", "0") != "0
 
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
-MAP_TITLE_SIZE = 26  # kateri px; sits in the top-left band ABOVE the first horizontal gridline (AD)
+# kateri px; sits in the top-left band ABOVE the first horizontal gridline (AD).
+# The map is rendered by kateri at MAP_RENDER_WIDTH_PX and scaled into a ~184 pt panel, so the
+# drawn point size is size_px * panel_pt / render_px. 26 px measured out at 5.99 pt against AD's
+# 9.99 pt (sp.tal asks `text_size: 10`) — a uniform 1.67x shortfall on every page. 43 px puts it
+# on AD's 10 pt: 43 * 184.3 / 800 = 9.90.
+MAP_RENDER_WIDTH_PX = 800.0   # signature_page.render_section_maps_via_kateri default `width`
+MAP_TITLE_PT = 10.0           # AD sp.tal `text_size`
+MAP_PANEL_PT = 184.3          # measured composed panel width (varies ~1% per page)
+MAP_TITLE_SIZE = round(MAP_TITLE_PT * MAP_RENDER_WIDTH_PX / MAP_PANEL_PT)  # -> 43
 
 
 # ======================================================================

@@ -549,7 +549,13 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
     if show_legend is not None:
         schema["legend"] = {"show": show_legend}
     if drop_dash_bars:
-        schema.pop("dash_bars", None)  # remove the aa colour bar (AD's sig page has none)
+        # NB the old comment here claimed "AD's sig page has none". That is wrong: AD's
+        # signature pages do draw the aa-at-position colour-bar columns, between the
+        # time-series matrix and the hz-section markers. Dropping them was hiding a second
+        # bug — `draw-tree.cc`'s clades_before_time_series branch never assigned `x_dash0`,
+        # so had they been kept they would have drawn at x=0 over the tree. Both are fixed;
+        # the flag stays for callers that genuinely want a bar-free tree.
+        schema.pop("dash_bars", None)
     if clades_before_time_series:
         schema["clades_before_time_series"] = True
         schema["hz_section_labels"] = True  # draw section letters (A/B/C) on the right, like AD
@@ -681,7 +687,7 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         # and the grey matches-chart-antigen dash-bar for leaves whose antigen is in the chart.
         matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
         tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
-                                            drop_dash_bars=True, clades_before_time_series=True,
+                                            drop_dash_bars=False, clades_before_time_series=True,
                                             matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes)
         tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size or tal_size or 1000, settings=tree_settings)
 
@@ -870,7 +876,7 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         # from the settings to size the tree panel BEFORE rendering (no probe render needed).
         matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
         tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
-                                            drop_dash_bars=True, clades_before_time_series=True,
+                                            drop_dash_bars=False, clades_before_time_series=True,
                                             matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes)
         tree_schema = json.loads(Path(tree_settings).read_text())
         tree_aspect = float(tree_schema.get("width_to_height_ratio", 1.0)) or 1.0

@@ -454,7 +454,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     const double marker_treeH = height - 2.0 * (0.008 * height)
         - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
                                         : (params.title.empty() ? 0.0 : 0.035 * height))
-        - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.066 * height : 0.017 * height) : 0.0);
+        - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.012 * height : 0.017 * height) : 0.0);
     const double grey_gap = 0.005 * marker_treeH;   // AD time-series → grey-bar gap (was the full 0.012·width)
 
     double cursor = margin + aa_left + tree_w;
@@ -465,6 +465,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         if (label_w > 0.0)     { cursor += gap; x_label0 = cursor;  cursor += label_w; }
         if (clade_w > 0.0)     { cursor += gap; x_clade0 = cursor;  cursor += clade_w; }
         if (ts_w > 0.0)        { cursor += gap; x_ts0 = cursor;     cursor += ts_w; }
+        // AA dash-bar columns (the per-position colour bars AD draws between the time-series
+        // matrix and the maps). This slot was missing: `dash_w` was subtracted from `tree_w`
+        // above, but `x_dash0` was left at 0, so the bars drew at x=0 on top of the tree while
+        // their reserved width sat empty. AD's order past the matrix is dash-bars, then the
+        // grey matches-chart column, then the hz-section markers nearest the maps.
+        if (dash_w > 0.0)      { cursor += gap; x_dash0 = cursor;   cursor += dash_w; }
         if (grey_dash_w > 0.0) { cursor += grey_gap; x_grey0 = cursor;   cursor += grey_dash_w; }
         // hz-section markers on the RIGHT of the time series (AD), hugging the grey-dash/matrix.
         // AD runs the bracket's top/bottom arms right up to (and the section-letter halo slightly
@@ -524,8 +530,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // bottom. Sig pages (hz_section_labels) keep their own deeper bands (out of scope here).
     // r7 item #6: sig-page bottom reserve 0.075 → 0.066, top reserve 0.022 → 0.012 so the tree +
     // time-series fill more of the strip vertically like AD (kept in sync with marker_treeH above).
+    // r8: 0.066 was still ~2.5x what AD leaves — measured, AD's matrix ink ends at 97.5% of page
+    // height (its grid bottom is 98.9%, i.e. flush) while ae stopped at 90.1%, ~40pt short on
+    // every page. The band only has to clear the date-colour key strip under the matrix.
     const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0)
-        ? (params.hz_section_labels ? 0.066 * height : 0.017 * height)
+        ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
         : 0.0;
     const double top_reserve = (ts_w > 0.0 || dash_w > 0.0)
         ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
