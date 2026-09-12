@@ -10,7 +10,7 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 bin="${TAL_DRAW:-$root/build/tal-draw}"
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/test-draw-tree.XXXXXX")   # bare `mktemp -d` ignores TMPDIR on macOS and fails in a sandbox
 trap 'rm -rf "$tmp"' EXIT
 
 [ -x "$bin" ] || { echo "FAIL: $bin not built"; exit 1; }
