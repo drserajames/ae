@@ -978,6 +978,8 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         style.plot_title.text.font_face = "helvetica"
         style.plot_title.text.font_weight = "normal"
         style.plot_title.box.origin = "tl"
-        style.plot_title.box.offset(6, 3)  # hard into the corner; sits in the band above gridline 1
+        style.plot_title.box.offset(16, 3)  # sits in the band above gridline 1, clear of the frame
+        # x: units of the 800px render. 6 put the section letter almost on the frame's left border
+        # (measured inset 0.85mm against AD's 1.69mm); 16 reproduces AD's inset to 0.02mm.
         results.append({"name": name, "title": section_title(section), "n_antigens": len(ag_idx), "n_sera": len(sr_idx)})
     return results

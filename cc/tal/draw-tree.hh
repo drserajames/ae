@@ -167,6 +167,10 @@ namespace ae::tal
         double clades_width_ratio{0.0};  // clade column width as a fraction of height (AD clades width-to-height-ratio); 0 = derived
         bool clades_horizontal_lines{true}; // draw the two faint grey lines at each clade's top & bottom (AD horizontal_line); false = brackets only
         double dash_column_width_ratio{0.0}; // dash-bar column pitch as fraction of drawable width; 0 => 0.022
+        double right_margin_ratio{0.0};      // right page margin as fraction of width; 0 => same as the left (0.03).
+                                            // Signature pages set this small so the rightmost column (the AA
+                                            // colour bars) runs up to the tree panel's edge and the maps can sit
+                                            // beside it, as they do in AD.
         double dash_fill_fraction{0.0};      // coloured bar length as fraction of the column; 0 => 0.6
         bool time_series{false};     // draw the time-series dash column
         std::string time_series_interval{"month"}; // year | month | week | day

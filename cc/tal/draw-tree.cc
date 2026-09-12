@@ -458,7 +458,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     //     The clade column is the RIGHTMOST (acmacs-tal draws it past the time-series, flipped to
     //     the page's right edge), so the bracket/label staircase sits in the right margin like AD. ---
     const double margin = 0.03 * width;
-    const double drawable_w = width - 2.0 * margin;
+    // The RIGHT margin is separately settable. On a signature page the tree panel butts up
+    // against the map grid, so AD's rightmost column (the AA colour bars) has to reach the
+    // panel edge; a symmetric 3% margin parks ~4mm of blank paper between the bars and the
+    // maps that no composition gap can take back.
+    const double margin_r = (params.right_margin_ratio > 0.0 ? params.right_margin_ratio : 0.03) * width;
+    const double drawable_w = width - margin - margin_r;
     const double gap = 0.012 * width;
     // AD reserves NO dedicated left band for the aa-transition labels: the tree fills the whole
     // drawable width (root at the left margin) and the labels are placed into whatever whitespace
@@ -502,8 +507,6 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     const double dash_w = static_cast<double>(params.dash_bars.size()) * dash_col_w;
     const int n_right = (label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0) + (dash_w > 0.0)
                         + (grey_dash_w > 0.0) + (hz_marker_w > 0.0);
-    const double tree_w = drawable_w - aa_left - hz_w - label_w - clade_w - ts_w - dash_w - grey_dash_w - hz_marker_w - gap * n_right;
-
     // AD (conf/tal.json:93-105) sets the grey matches-chart-antigen dash-bar just 0.005·treeH to the
     // RIGHT of the time-series — a thin gap, not a full inter-column gap. treeH = the tree band height
     // (same formula as vmargin/top_reserve/bottom_reserve below; those vars aren't declared yet here).
@@ -517,6 +520,19 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                                         : (params.title.empty() ? 0.0 : 0.035 * height))
         - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.012 * height : 0.017 * height) : 0.0);
     const double grey_gap = 0.005 * marker_treeH;   // AD time-series → grey-bar gap (was the full 0.012·width)
+
+    // The gaps actually consumed on the right differ from `gap * n_right`: the grey dash bar
+    // takes the narrow `grey_gap`, and the hz-marker column takes a NEGATIVE quarter-gap so its
+    // bracket arms overlap the dash table like AD's. Charging the tree a full gap for each of
+    // those anyway left ~2.25 gaps of dead paper at the panel's right edge — which on a
+    // signature page is exactly the space the maps want. Subtract what is really spent.
+    const double gaps_right = params.clades_before_time_series
+        ? gap * static_cast<double>((label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0) + (dash_w > 0.0))
+              + (grey_dash_w > 0.0 ? grey_gap : 0.0)
+              - (hz_marker_w > 0.0 ? gap * 0.25 : 0.0)
+        : gap * static_cast<double>(n_right);
+    const double tree_w = drawable_w - aa_left - hz_w - label_w - clade_w - ts_w - dash_w - grey_dash_w - hz_marker_w - gaps_right;
+
 
     double cursor = margin + aa_left + tree_w;
     double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0}, x_dash0{0.0}, x_grey0{0.0}, x_hzmark0{0.0};
@@ -1191,7 +1207,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         for (const auto& [name, color] : legend_items)
             max_tw = std::max(max_tw, pdf.text_size(name, legend_fs).first);
         const double block_w = swatch + 5.0 + max_tw;
-        const double lx = width - margin - block_w; // right-aligned block
+        const double lx = width - margin_r - block_w; // right-aligned block
         double ly = vmargin + legend_fs;
         for (const auto& [name, color] : legend_items) {
             pdf.rectangle(lx, ly - swatch * 0.85, swatch, swatch, color, 0.4, color);
