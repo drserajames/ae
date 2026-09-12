@@ -179,8 +179,9 @@ namespace ae::tal
         bool legend{false};          // draw a clade colour legend (bottom row)
         bool geo_inset{false};       // draw the continent-coloured world-map inset (lower-left); doubles as the continent legend (acmacs-tal LegendContinentMap)
         bool aa_transitions{false};  // label inodes with their aa-substitution transitions
-        bool aa_transitions_compute{false}; // compute the transitions first (consensus) instead of using the tree's stored ones
-        double aa_transitions_tolerance{0.6}; // consensus non-common tolerance (when computing)
+        bool aa_transitions_compute{false}; // compute the transitions first instead of using the tree's stored ones
+        std::string aa_transitions_method{"consensus"}; // "consensus" | "eu-20200915" (acmacs-tal draw-aa-transitions `method`)
+        double aa_transitions_tolerance{0.6}; // non-common tolerance (when computing)
         int aa_transitions_min_leaves{1};   // only label an inode's transitions if its subtree has >= this many leaves
         std::map<std::string, CladeStyle> clade_styles{}; // clade name -> override
         std::vector<NodeMod> node_mods{};                 // select/apply mods, applied in order
@@ -200,6 +201,11 @@ namespace ae::tal
     // page is portrait (width = image_size * width_to_height_ratio). Takes Tree& because
     // layout computes cumulative edges. Returns the number of leaf labels suppressed by
     // collision avoidance (0 when disabled or none overlap).
+    // Apply only the `hide` node-mods (marking nodes shown=false), as the drawing path does
+    // before computing its layout. For callers that compute a layout themselves — notably
+    // tal-draw's `.names` dump, which otherwise lists every leaf regardless of the settings.
+    void apply_node_hide_mods(ae::tree::Tree& tree, const TreeDrawParameters& params);
+
     std::size_t export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size = 1000.0, const TreeDrawParameters& params = {});
 
     // Shared-surface form of export_tree_pdf (single-canvas signature-page compositor): render the

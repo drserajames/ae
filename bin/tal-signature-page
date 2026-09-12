@@ -34,7 +34,16 @@ def main() -> int:
                         help="antigenic-map PDF to place on the right (repeatable; e.g. pre-rendered by kateri)")
     parser.add_argument("--chart", metavar="CHART.ace", help="chart to render to a map via kateri (requires the kateri executable)")
     parser.add_argument("--settings", metavar="FILE", help="tal-draw JSON settings file for the tree")
-    parser.add_argument("--tal", metavar="CONFIG.tal", help="an acmacs-tal settings-v3 config; translated to the tal-draw schema (structural)")
+    parser.add_argument("--tal", action="append", default=[], dest="tal", metavar="CONFIG.tal",
+                        help="an acmacs-tal settings-v3 config; translated to the tal-draw schema (structural). "
+                             "REPEATABLE, and overlaid exactly as AD's `tal -s a -s b` does (later files win on a "
+                             "name collision, `init` defines accumulate). AD's signature-page command line "
+                             "(sp/0do) passes the whole stack: "
+                             "--tal <lab>/sp.mapi --tal <sub>.sp.tal --tal <sub><infix>.tal --tal sp.tal "
+                             "[--tal spc.tal] --tal <page>.sp.tal")
+    parser.add_argument("--mapi", metavar="sp.mapi",
+                        help="AD's per-lab sp.mapi; its `loc:viewport` frames every section map the way AD's "
+                             "signature page does (default: the chart's own `-reset` viewport)")
     parser.add_argument("-D", "--define", action="append", default=[], metavar="name=value", help="define a $variable used by --tal (repeatable)")
     parser.add_argument("--mark", metavar="ID,ID,...", help="comma-separated seq_ids to highlight on the tree (e.g. vaccine/reference strains)")
     parser.add_argument("--mark-vaccines", metavar="SUBTYPE", help="highlight WHO vaccine strains (red) for SUBTYPE (e.g. BV, BY, 'A(H3N2)') — reads --vaccines-file (needs ae_backend)")
@@ -73,7 +82,8 @@ def main() -> int:
             defines[name] = value if eq else "true"
         try:
             out = make_section_signature_page(
-                args.tree, args.chart, args.tal, args.output,
+                args.tree, args.chart, args.tal[0] if len(args.tal) == 1 else args.tal, args.output,
+                mapi=args.mapi,
                 size=args.size if "--size" in sys.argv[1:] else None, map_width=args.map_width,
                 page_title=args.page_title, tree_caption=args.tree_caption, defines=defines,
                 serum_circles=args.serum_circles, serum_circle_fold=args.serum_circle_fold)
@@ -100,7 +110,8 @@ def main() -> int:
         for d in args.define:
             name, eq, value = d.partition("=")
             defines[name] = value if eq else "true"
-        schema, warnings = load_tal(args.tal, defines)
+        schema, warnings = load_tal(args.tal[0] if len(args.tal) == 1 else args.tal, defines,
+                                    builtin_programs=len(args.tal) > 1)
         for warning in warnings:
             print(f"  [tal] {warning}", file=sys.stderr)
         if "image_size" in schema and "--size" not in sys.argv[1:]:

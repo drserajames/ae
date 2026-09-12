@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <charconv>
 #include <unordered_set>
 #include <memory>
@@ -75,6 +76,50 @@ namespace ae::tree
         void add(char left, sequences::pos1_t pos, char right) { transitions.emplace_back(left, pos, right); }
         void add(sequences::pos1_t pos, char right) { transitions.emplace_back(' ', pos, right); }
         void add(std::string_view source) { transitions.emplace_back(source); }
+
+        // --- lookup/removal, ported from acmacs-tal AA_Transitions (cc/aa-transition.hh) ---
+        // Used by the eu-20200915 transition method (cc/tree/aa-transitions.cc).
+
+        const transition_t* find(sequences::pos1_t pos) const
+        {
+            if (const auto found = std::find_if(std::begin(transitions), std::end(transitions), [pos](const auto& en) { return en.pos == pos; }); found != std::end(transitions))
+                return &*found;
+            else
+                return nullptr;
+        }
+
+        transition_t* find(sequences::pos1_t pos)
+        {
+            if (const auto found = std::find_if(std::begin(transitions), std::end(transitions), [pos](const auto& en) { return en.pos == pos; }); found != std::end(transitions))
+                return &*found;
+            else
+                return nullptr;
+        }
+
+        template <typename Func> bool remove_if(Func predicate)
+        {
+            const auto start = std::remove_if(std::begin(transitions), std::end(transitions), predicate);
+            const bool anything_to_remove = start != std::end(transitions);
+            if (anything_to_remove)
+                transitions.erase(start, std::end(transitions));
+            return anything_to_remove;
+        }
+
+        bool remove(sequences::pos1_t pos)
+        {
+            return remove_if([pos](const auto& en) { return en.pos == pos; });
+        }
+
+        bool remove(sequences::pos1_t pos, char right)
+        {
+            return remove_if([pos, right](const auto& en) { return en.pos == pos && en.right == right; });
+        }
+
+        // AD AA_Transitions::remove_left_right_same (no show-same-left-right-for-pos override here)
+        bool remove_left_right_same()
+        {
+            return remove_if([](const auto& en) { return en.left == en.right; });
+        }
     };
 
     struct Inode : public Node

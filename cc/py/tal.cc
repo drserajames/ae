@@ -52,6 +52,45 @@ void ae::py::tal(pybind11::module_& mdl)
                       pybind11::doc("group shown leaves into per-clade vertically-contiguous sections (headless; reuses leaf clade annotations)"));
 
     // ----------------------------------------------------------------------
+    // section tolerance + hz-sections (port of acmacs-tal Clades::make_sections
+    // + HzSections, used when the `hz` sub-program is absent from a .tal program)
+
+    pybind11::class_<ae::tal::CladeSectionParameters>(tal_submodule, "CladeSectionParameters")                                                        //
+        .def(pybind11::init([](long inclusion_tolerance, long exclusion_tolerance, bool shown, std::string display_name) {
+                 return ae::tal::CladeSectionParameters{.inclusion_tolerance = inclusion_tolerance, .exclusion_tolerance = exclusion_tolerance, .shown = shown,
+                                                        .display_name = std::move(display_name)};
+             }),
+             "inclusion_tolerance"_a = 10, "exclusion_tolerance"_a = 5, "shown"_a = true, "display_name"_a = std::string{})                           //
+        .def_readwrite("inclusion_tolerance", &ae::tal::CladeSectionParameters::inclusion_tolerance)                                                  //
+        .def_readwrite("exclusion_tolerance", &ae::tal::CladeSectionParameters::exclusion_tolerance)                                                  //
+        .def_readwrite("shown", &ae::tal::CladeSectionParameters::shown)                                                                              //
+        .def_readwrite("display_name", &ae::tal::CladeSectionParameters::display_name)                                                                //
+        ;
+
+    pybind11::class_<ae::tal::ComputedHzSection>(tal_submodule, "HzSection")                                                                    //
+        .def_readonly("id", &ae::tal::ComputedHzSection::id, pybind11::doc("AD \"{clade name}-{section no}\""))                                 //
+        .def_readonly("prefix", &ae::tal::ComputedHzSection::prefix, pybind11::doc("A, B, C … in top-to-bottom order"))                         //
+        .def_readonly("label", &ae::tal::ComputedHzSection::label)                                                                              //
+        .def_readonly("first_name", &ae::tal::ComputedHzSection::first_name)                                                                     //
+        .def_readonly("last_name", &ae::tal::ComputedHzSection::last_name)                                                                       //
+        .def_readonly("first_vertical", &ae::tal::ComputedHzSection::first_vertical)                                                             //
+        .def_readonly("last_vertical", &ae::tal::ComputedHzSection::last_vertical)                                                               //
+        .def_readonly("aa_transitions", &ae::tal::ComputedHzSection::aa_transitions)                                                             //
+        .def_readonly("intersect", &ae::tal::ComputedHzSection::intersect)                                                                       //
+        .def_property_readonly("size", &ae::tal::ComputedHzSection::size)                                                                        //
+        ;
+
+    tal_submodule.def(
+        "compute_hz_sections",
+        [](ae::tree::Tree& tree, const ae::tal::per_clade_parameters_t& per_clade, const ae::tal::CladeSectionParameters& all_clades) {
+            return ae::tal::compute_hz_sections(tree, per_clade, all_clades);
+        },
+        "tree"_a, "per_clade"_a = ae::tal::per_clade_parameters_t{}, "all_clades"_a = ae::tal::CladeSectionParameters{},
+        pybind11::doc("derive signature-page hz-sections from the tree's clade annotations, AD-style: clade sections with "
+                      "section-inclusion/exclusion-tolerance applied, sorted top-to-bottom, lettered A.., each with its "
+                      "aa-transitions accumulated from the inodes whose subtree contains it"));
+
+    // ----------------------------------------------------------------------
     // time series (date bucketing)
 
     pybind11::class_<ae::tal::TimeSeriesSlot>(tal_submodule, "TimeSeriesSlot")                                                  //

@@ -489,6 +489,14 @@ def _settings_with_mark_groups(settings: Optional[str], groups, tmpdir: Path) ->
     return str(path)
 
 
+def _tal_program(tal_path) -> str:
+    """The settings program to run for `tal_path`: `"tal"` for a single report `.tal`,
+    `"tal-default"` for an AD settings stack (`tal -s a -s b …`), where `<sub>.sp.tal`'s
+    — or acmacs-tal's builtin — `tal-default` is the entry point and reaches the tree
+    `.tal`'s own `tal` program through `tal-modifications`."""
+    return "tal" if isinstance(tal_path, (str, Path)) else "tal-default"
+
+
 def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
                      title: Optional[str] = None, show_legend: Optional[bool] = None,
                      drop_dash_bars: bool = False, clades_before_time_series: bool = False,
@@ -500,8 +508,20 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
     AD uses, with sig-page overrides matching AD's `layout-with-maps`:
 
       * `title` / `show_legend` — title drawn top-left; no aa-at-pos legend;
-      * `drop_dash_bars` — AD's sig page disables the aa `dash-bar-aa-at` columns
-        (the `155E/156N…` colour bar), so drop them;
+      * `drop_dash_bars` — drop the aa `dash-bar-aa-at` colour-bar columns.
+        **AD's sig page KEEPS them.** They come from the tree `.tal`'s own `tal` program,
+        which AD's `tal-modifications` runs after the `<sub>.sp.tal` layout, and they are
+        plainly there in every `sp/*.sp.pdf` reference — legend `135K/135A 145N/145G …`,
+        drawn between the grey matches-chart bar and the hz-section brackets. The earlier
+        "AD's sig page has no colour bar" reading came from rendering ae with only the tree
+        `.tal`, which never reaches them.
+        They are nonetheless still dropped here, because ae cannot yet PLACE them on a sig
+        page: `cc/tal/draw-tree.cc`'s `clades_before_time_series` branch (the AD
+        `layout-with-maps` column order) assigns `x_label0/x_clade0/x_ts0/x_grey0/x_hzmark0`
+        but no `x_dash0`, so every dash bar renders at x=0, over the tree's left edge —
+        while it does subtract `dash_w` from the tree width. Passing False today therefore
+        produces a garbled page, not AD's. Closing this is a column slot in that branch
+        (between the matrix and the grey bar); once it exists, pass False here;
       * `clades_before_time_series` — AD draws the clades column to the LEFT of the
         time-series matrix on the sig page (tree-only puts it right);
       * `matches_chart_seq_ids` — leaves whose antigen is in the chart, drawn as
@@ -509,7 +529,19 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
     """
     from ae.tal.settings_v3 import load_tal
 
-    schema, warnings = load_tal(str(tal_path), defines or {})
+    # A settings STACK (AD's `tal -s a -s b …`) or a single `.tal`. On a stack the entry
+    # program is `tal-default` — the one `sp/<sub>.sp.tal` defines, or, when that file is
+    # `{}` (B/Vic, B/Yam), acmacs-tal's builtin one, hence `builtin_programs=True`.
+    if isinstance(tal_path, (str, Path)):
+        schema, warnings = load_tal(str(tal_path), defines or {})
+    else:
+        # A signature page always has a chart, and `$chart-present` is what steers AD's
+        # builtin `layout` to `layout-with-maps` (tree + columns + maps) instead of
+        # `layout-tree-only` — which is the branch a B/Vic page takes, `bvic.sp.tal` being
+        # `{}`. Without it the page comes out with the tree-only column order and width.
+        schema, warnings = load_tal([str(one) for one in tal_path],
+                                    {"chart-present": True, **(defines or {})},
+                                    builtin_programs=True)
     for warning in warnings:
         print(f"  [tal] {warning}", file=sys.stderr)
     if title is not None:
@@ -517,7 +549,13 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
     if show_legend is not None:
         schema["legend"] = {"show": show_legend}
     if drop_dash_bars:
-        schema.pop("dash_bars", None)  # remove the aa colour bar (AD's sig page has none)
+        # NB the old comment here claimed "AD's sig page has none". That is wrong: AD's
+        # signature pages do draw the aa-at-position colour-bar columns, between the
+        # time-series matrix and the hz-section markers. Dropping them was hiding a second
+        # bug — `draw-tree.cc`'s clades_before_time_series branch never assigned `x_dash0`,
+        # so had they been kept they would have drawn at x=0 over the tree. Both are fixed;
+        # the flag stays for callers that genuinely want a bar-free tree.
+        schema.pop("dash_bars", None)
     if clades_before_time_series:
         schema["clades_before_time_series"] = True
         schema["hz_section_labels"] = True  # draw section letters (A/B/C) on the right, like AD
@@ -533,10 +571,20 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
     return str(path), size
 
 
-# (Removed `_mapi_viewport_size`: the section maps no longer read AD's sp.mapi — the sig-map
-# viewport is now sourced from ae's own `-reset` style, see make_section_signature_page. AD's
-# sp.mapi files in a report dir are AD data copied from the source report; the port must not
-# depend on them.)
+# The sig-map viewport is sourced from ae's own `-reset` style (see
+# make_section_signature_page). AD framed each section map with the per-lab `sp.mapi`
+# `loc:viewport` that `sp/0do` passes as its first `-s` file; `mapi=` (CLI `--mapi`) reads
+# it via `section_maps.viewport_from_mapi`.
+#
+# Measured 2026-09-11 on this cycle, do NOT reach for `mapi=` to match AD: the `-reset`
+# style ALREADY carries AD's zoom — its size is identical to sp.mapi's for every subtype
+# (B/Vic 13, H1 15, H3 18) — and it is the only one of the two that is correct in ae's
+# frame. sp.mapi's `abs` ORIGIN is in acmacs' own layout frame, so passing it through the
+# kateri/ae style-viewport API lands the box several map units off (B/Vic +4.98/+3.23,
+# H1 +6.44/+8.21, H3 +3.70/+4.66), pushing the cluster into a corner — the raw-vs-
+# transformed frame mismatch of the port audit's §2. Rendered against the AD reference,
+# `-reset` reproduces AD's framing (same zoom, same centring) and `mapi=` does not.
+# `mapi=` therefore stays for a chart with no `-reset` style, and for verification crops.
 
 
 def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int] = None, map_width: float = 800.0,
@@ -557,8 +605,15 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
     (needs the `kateri` executable and a TeX install).
 
     `tree`/`chart` are file paths; `tal` is the acmacs-tal `.tal` settings holding the
-    hz-sections and time-series window. Needs ae_backend (run under the arm64 Python with
-    PYTHONPATH=build); the native path additionally needs the `tal-draw` binary built."""
+    hz-sections and time-series window — a single file, or the whole AD settings **stack**
+    as a list (`sp/0do`'s `-s` sequence: `<lab>/sp.mapi`, `<sub>.sp.tal`, `<sub><infix>.tal`,
+    `sp.tal`, optionally `spc.tal`, `<page>.sp.tal`). `mapi` is a `sp.mapi` file whose
+    `loc:viewport` frames every section map AD's way (overridden by an explicit `viewport`).
+    Needs ae_backend (run under the arm64 Python with PYTHONPATH=build); the native path
+    additionally needs the `tal-draw` binary built."""
+    if viewport is None and mapi is not None:
+        from ae.tal import section_maps as _SM
+        viewport = _SM.viewport_from_mapi(mapi)
     if native:
         return make_section_signature_page_native(
             tree, chart, tal, output, size=size, map_width=map_width, viewport=viewport,
@@ -576,9 +631,15 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
 
     tmpdir = Path(tempfile.mkdtemp(prefix="tal-sigsec-"))
     try:
-        sections = SM.parse_sections(tal)
+        # The `.tal`'s own `hz-sections` when it still specifies them; otherwise AD's
+        # fallback — sections derived from the tree's clade annotations via the `clades`
+        # block (see SM.compute_sections). Every report `.tal` from 2026-0805-tc1 on takes
+        # the fallback: they define `hz-sections` but no longer run the `hz` sub-program,
+        # so every entry is "show": false and AD sections from `clades` instead.
+        sections = SM.sections_for(tal, tree, program=_tal_program(tal))
         if not sections:
-            raise SignaturePageError(f"no shown hz-sections found in {tal}")
+            raise SignaturePageError(
+                f"no shown hz-sections in {tal} and no clade-derived sections from {tree}")
         window = SM.parse_time_series(tal)
         scale = SM.DateColorScale(*window) if window else None
         if scale is None:
@@ -611,7 +672,8 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         print(f"  [sigp] viewport: {('explicit ' if viewport else 'main -reset ') + str([round(x, 2) for x in vp]) if vp else 'kateri auto-fit'}", file=_sys.stderr)
         styled = SM.build_section_styles(chart_obj, sections, match, scale, vp,
                                          available_styles=available_styles, vaccine_marks=vaccine_marks,
-                                         serum_circles=serum_circles, serum_circle_fold=serum_circle_fold)
+                                         serum_circles=serum_circles, serum_circle_fold=serum_circle_fold,
+                                         spc_tal=tal)
         for s in styled:
             print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
 
@@ -621,11 +683,11 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
                                                   width=map_width, viewport_size=0.0)
 
         # Pass 2: the final tree settings with AD sig-page overrides — title top-left,
-        # no aa-at-pos legend, no aa colour-bar dash columns, clades left of the matrix,
+        # no aa-at-pos legend, clades left of the matrix,
         # and the grey matches-chart-antigen dash-bar for leaves whose antigen is in the chart.
         matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
         tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
-                                            drop_dash_bars=True, clades_before_time_series=True,
+                                            drop_dash_bars=False, clades_before_time_series=True,
                                             matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes)
         tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size or tal_size or 1000, settings=tree_settings)
 
@@ -743,6 +805,7 @@ def _sig_page_layout(n_maps: int, tree_aspect: float, *, margin_mm: float = 2.0,
 def make_section_signature_page_native(tree, chart, tal, output, *, size: Optional[int] = None,
                                        map_width: float = 800.0,
                                        viewport: Optional[Sequence[float]] = None,
+                                       mapi: Optional[os.PathLike] = None,
                                        page_title: Optional[str] = None, tree_caption: Optional[str] = None,
                                        defines: Optional[dict] = None,
                                        serum_circles: bool = False, serum_circle_fold: float = 2.0,
@@ -766,11 +829,20 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         raise SignaturePageError("ae_backend.tal.SigPageCanvas missing — rebuild ae (cc/tal/sig-page.cc + meson)")
     from ae.tal import section_maps as SM
 
+    if viewport is None and mapi is not None:
+        viewport = SM.viewport_from_mapi(mapi)
+
     tmpdir = Path(tempfile.mkdtemp(prefix="tal-sigsec-vec-"))
     try:
-        sections = SM.parse_sections(tal)
+        # The `.tal`'s own `hz-sections` when it still specifies them; otherwise AD's
+        # fallback — sections derived from the tree's clade annotations via the `clades`
+        # block (see SM.compute_sections). Every report `.tal` from 2026-0805-tc1 on takes
+        # the fallback: they define `hz-sections` but no longer run the `hz` sub-program,
+        # so every entry is "show": false and AD sections from `clades` instead.
+        sections = SM.sections_for(tal, tree, program=_tal_program(tal))
         if not sections:
-            raise SignaturePageError(f"no shown hz-sections found in {tal}")
+            raise SignaturePageError(
+                f"no shown hz-sections in {tal} and no clade-derived sections from {tree}")
         window = SM.parse_time_series(tal)
         scale = SM.DateColorScale(*window) if window else None
         if scale is None:
@@ -788,23 +860,28 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         print(f"  [sigp] viewport: {('explicit ' if viewport else 'main -reset ') + str([round(x, 2) for x in vp]) if vp else 'native auto-fit'}", file=_sys.stderr)
         styled = SM.build_section_styles(chart_obj, sections, match, scale, vp,
                                          available_styles=available_styles, vaccine_marks=vaccine_marks,
-                                         serum_circles=serum_circles, serum_circle_fold=serum_circle_fold)
+                                         serum_circles=serum_circles, serum_circle_fold=serum_circle_fold,
+                                         spc_tal=tal)
         for s in styled:
             print(f"  [sigp] {s['name']}: {s['n_antigens']} antigens, {s['n_sera']} sera :: {s['title']}", file=_sys.stderr)
 
         # Write the chart carrying the section styles once; SigPageCanvas.render_maps loads it once
         # and renders every section style into its cell as a vector (the kateri replacement — the
         # section<->map coupling lives entirely in the styles).
+        # NB writing this as .json instead (to dodge Chart.write's compress-by-extension) was
+        # tried and measured on h3-hi-guinea-pig-niid: 1.64s vs 1.66s, i.e. no gain. The ~1.6s
+        # is the chart SERIALISATION, not the xz, so there is nothing to win here by changing
+        # the extension. (adjust.py's note about a ~14s write is a 12,737-antigen chart; this
+        # one is 848.)
         styled_ace = tmpdir / "sig-styled.ace"
         chart_obj.write(str(styled_ace))
 
         # Pass 2: final tree settings with AD sig-page overrides (title top-left, no aa-at-pos
-        # legend, no aa colour-bar dash columns, clades left of the matrix, grey matches-chart
-        # dash-bar). The tree page aspect = its width_to_height_ratio (draw-tree.cc) — read it
+        # legend, clades left of the matrix, grey matches-chart dash-bar). The tree page aspect = its width_to_height_ratio (draw-tree.cc) — read it
         # from the settings to size the tree panel BEFORE rendering (no probe render needed).
         matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
         tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
-                                            drop_dash_bars=True, clades_before_time_series=True,
+                                            drop_dash_bars=False, clades_before_time_series=True,
                                             matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes)
         tree_schema = json.loads(Path(tree_settings).read_text())
         tree_aspect = float(tree_schema.get("width_to_height_ratio", 1.0)) or 1.0
@@ -819,7 +896,23 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         # compose_grid's row-major fill order (left to right, then down) — see _sig_page_layout.
         jobs = [(styled[i]["name"], cells[i][0] * _MM2PT, cells[i][1] * _MM2PT,
                  cells[i][2] * _MM2PT, cells[i][3] * _MM2PT, True) for i in range(len(styled))]
-        canvas.render_maps(str(styled_ace), 0, float(map_width), jobs)
+        # Grid line width: each map is rendered internally at `map_width` px and then scaled
+        # into its much smaller cell, which thins the grid by that same factor — a 1 px line
+        # lands at ~0.23 pt, a sub-pixel hairline, where AD (drawing at final page size) shows
+        # ~1 px. Scale the width back up by the cell's own shrink factor so the drawn weight
+        # matches AD's. The renderer takes it as an env knob so the report's golden maps keep
+        # the kateri-matching 1.0 default (see SM.MAP_GRID_LINE_WIDTH).
+        cell_pt = cells[0][2] * _MM2PT if cells else SM.MAP_PANEL_PT
+        grid_lw = SM.MAP_GRID_LINE_WIDTH * (SM.MAP_PANEL_PT / cell_pt) if cell_pt else SM.MAP_GRID_LINE_WIDTH
+        _prev_grid_lw = os.environ.get("AE_MAP_DRAW_GRID_LINE_WIDTH")
+        os.environ["AE_MAP_DRAW_GRID_LINE_WIDTH"] = f"{grid_lw:.4f}"
+        try:
+            canvas.render_maps(str(styled_ace), 0, float(map_width), jobs)
+        finally:
+            if _prev_grid_lw is None:
+                os.environ.pop("AE_MAP_DRAW_GRID_LINE_WIDTH", None)
+            else:
+                os.environ["AE_MAP_DRAW_GRID_LINE_WIDTH"] = _prev_grid_lw
         # Tree: render at the SAME internal image_size the pdfjam/LaTeX baseline uses
         # (`size or tal_size or 1000`, exactly compose_grid's tree render size) and let
         # export_tree_into letterbox-scale it into the panel — reproducing LaTeX's

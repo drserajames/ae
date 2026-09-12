@@ -87,6 +87,80 @@ namespace ae::tal
 
 namespace ae::tal
 {
+    // Does a node-mod's selector match this node? Extracted so the drawing path (which
+    // applies hide + the style overrides) and `apply_node_hide_mods` (which the `.names`
+    // dump uses, and which needs hide only) cannot drift apart.
+    static bool node_mod_selects(const NodeSelect& sel, const ae::tree::Node& base, const std::string* name, const std::string* date)
+    {
+        if (!sel.seq_id.empty() && (name == nullptr || std::find(sel.seq_id.begin(), sel.seq_id.end(), *name) == sel.seq_id.end()))
+            return false;
+        if (sel.cumulative_min && base.cumulative_edge.get() < *sel.cumulative_min)
+            return false;
+        if (sel.edge_min && base.edge.get() < *sel.edge_min)
+            return false;
+        if (!sel.date_min.empty()) {
+            if (name == nullptr)
+                return false;
+            if (const std::string day = canonical_date(*date); day.empty() || day < sel.date_min)
+                return false;
+        }
+        if (!sel.date_max.empty()) {
+            if (name == nullptr)
+                return false;
+            if (const std::string day = canonical_date(*date); day.empty() || !(day < sel.date_max))
+                return false;
+        }
+        return true;
+    }
+
+    // Apply ONLY the `hide` part of the settings' node mods, marking hidden nodes
+    // `shown = false` exactly as the drawing path does before it computes the layout.
+    //
+    // This exists for the `.names` dump, which computes a layout directly and so used to
+    // report every leaf in the tree regardless of the settings — 70002 instead of the shown
+    // subset on a report tree with 547 hide mods. Callers that match chart antigens against
+    // "the leaves on the tree" (the signature page's in-tree grey, its section leaf ranges)
+    // were therefore matching against hidden leaves too.
+    void apply_node_hide_mods(ae::tree::Tree& tree, const TreeDrawParameters& params)
+    {
+        using namespace ae::tree;
+        if (params.node_mods.empty())
+            return;
+        tree.calculate_cumulative();
+        const auto apply_hide = [&](Node& base, const std::string* name, const std::string* date) {
+            for (const auto& mod : params.node_mods) {
+                if (node_mod_selects(mod.select, base, name, date) && mod.apply.hide.value_or(false))
+                    base.shown = false;
+            }
+        };
+        struct Frame
+        {
+            node_index_t index;
+            std::size_t cursor;
+        };
+        std::vector<Frame> stack;
+        stack.push_back({Tree::root_index(), 0});
+        while (!stack.empty()) {
+            Frame& frame = stack.back();
+            const Inode& inode = tree.inode(frame.index);
+            if (frame.cursor < inode.children.size()) {
+                const node_index_t child = inode.children[frame.cursor++];
+                if (is_leaf(child)) {
+                    Leaf& leaf = tree.leaf(child);
+                    apply_hide(leaf, &leaf.name, &leaf.date);
+                }
+                else {
+                    Inode& child_inode = tree.inode(child);
+                    apply_hide(child_inode, nullptr, nullptr);
+                    stack.push_back({child, 0});
+                }
+            }
+            else {
+                stack.pop_back();
+            }
+        }
+    }
+
 // Shared tree-render core: compute the page geometry, then draw the whole tree through a surface
 // obtained from make_surface(width, height). The two public entry points differ ONLY in the surface
 // they supply — a file-bound CairoPdf (export_tree_pdf) or a borrowed sub-rectangle of a shared page
@@ -97,10 +171,17 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
 {
     using namespace ae::tree;
 
-    // --- compute aa-substitution transitions (consensus) when requested, instead of
-    //     using the transitions already stored on the tree's inodes (the `A` field). ---
-    if (params.aa_transitions_compute)
-        set_aa_nuc_transition_labels(tree, AANucTransitionSettings{.set_aa_labels = true, .set_nuc_labels = false, .non_common_tolerance = params.aa_transitions_tolerance});
+    // --- compute aa-substitution transitions when requested, instead of using the
+    //     transitions already stored on the tree's inodes (the `A` field). The method comes
+    //     from the .tal's `draw-aa-transitions` `method` (acmacs-tal names it). ---
+    if (params.aa_transitions_compute) {
+        auto method{aa_nuc_transition_method::consensus};
+        if (params.aa_transitions_method == "eu-20200915" || params.aa_transitions_method == "eu_20200915" || params.aa_transitions_method == "eu-20200915-low-mem")
+            method = aa_nuc_transition_method::eu_20200915;
+        else if (params.aa_transitions_method != "consensus")
+            AD_WARNING("draw-aa-transitions: unsupported method \"{}\" — using consensus", params.aa_transitions_method);
+        set_aa_nuc_transition_labels(tree, AANucTransitionSettings{.set_aa_labels = true, .set_nuc_labels = false, .method = method, .non_common_tolerance = params.aa_transitions_tolerance});
+    }
 
     // --- node select/apply mods (settings DSL): hide nodes + collect per-node style
     //     overrides (keyed by node index, consulted during drawing). Applied before the
@@ -113,21 +194,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         tree.calculate_cumulative();
         const auto apply_mods = [&](node_index_base_t idx, Node& base, const std::string* name, const std::string* date) {
             for (const auto& mod : params.node_mods) {
-                const NodeSelect& sel = mod.select;
-                if (!sel.seq_id.empty() && (name == nullptr || std::find(sel.seq_id.begin(), sel.seq_id.end(), *name) == sel.seq_id.end()))
+                if (!node_mod_selects(mod.select, base, name, date))
                     continue;
-                if (sel.cumulative_min && base.cumulative_edge.get() < *sel.cumulative_min)
-                    continue;
-                if (sel.edge_min && base.edge.get() < *sel.edge_min)
-                    continue;
-                if (!sel.date_min.empty()) {
-                    if (name == nullptr) continue;
-                    if (const std::string day = canonical_date(*date); day.empty() || day < sel.date_min) continue;
-                }
-                if (!sel.date_max.empty()) {
-                    if (name == nullptr) continue;
-                    if (const std::string day = canonical_date(*date); day.empty() || !(day < sel.date_max)) continue;
-                }
                 const NodeApply& ap = mod.apply;
                 if (ap.hide.value_or(false))
                     base.shown = false;
@@ -447,14 +515,15 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     const double marker_treeH = height - 2.0 * (0.008 * height)
         - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
                                         : (params.title.empty() ? 0.0 : 0.035 * height))
-        - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.066 * height : 0.017 * height) : 0.0);
+        - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.012 * height : 0.017 * height) : 0.0);
     const double grey_gap = 0.005 * marker_treeH;   // AD time-series → grey-bar gap (was the full 0.012·width)
 
     double cursor = margin + aa_left + tree_w;
     double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0}, x_dash0{0.0}, x_grey0{0.0}, x_hzmark0{0.0};
     if (params.clades_before_time_series) {
         // AD layout-with-maps order (left→right past the tree): labels, clades, time-series
-        // matrix, grey matches-chart dash, hz-section markers (rightmost, next to the maps).
+        // matrix, grey matches-chart dash, hz-section markers, then the AA dash-bar colour
+        // columns nearest the maps.
         if (label_w > 0.0)     { cursor += gap; x_label0 = cursor;  cursor += label_w; }
         if (clade_w > 0.0)     { cursor += gap; x_clade0 = cursor;  cursor += clade_w; }
         if (ts_w > 0.0)        { cursor += gap; x_ts0 = cursor;     cursor += ts_w; }
@@ -465,6 +534,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // x_hzmark0 sits just inside the grey column's right edge, the arm-left-end overlapping the
         // table dashes like AD rather than floating a gap to its right (Sarah r6 sig section item #5a).
         if (hz_marker_w > 0.0) { cursor -= gap * 0.25; x_hzmark0 = cursor; cursor += hz_marker_w; }
+        // AA dash-bar colour columns go OUTSIDE the hz-section markers, i.e. between the
+        // section brackets/letters and the maps — that is AD's order (matrix, grey dashes,
+        // bracket+letter column, colour bars, maps). Placing them before the markers, as a
+        // first pass at this did, leaves the section letters sitting inboard of the bars
+        // instead of wrapping around them.
+        if (dash_w > 0.0)      { cursor += gap; x_dash0 = cursor;   cursor += dash_w; }
     }
     else {
         // AD layout-tree-only order: labels, time-series matrix, clades, then aa dash-bars.
@@ -517,8 +592,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // bottom. Sig pages (hz_section_labels) keep their own deeper bands (out of scope here).
     // r7 item #6: sig-page bottom reserve 0.075 → 0.066, top reserve 0.022 → 0.012 so the tree +
     // time-series fill more of the strip vertically like AD (kept in sync with marker_treeH above).
+    // r8: 0.066 was still ~2.5x what AD leaves — measured, AD's matrix ink ends at 97.5% of page
+    // height (its grid bottom is 98.9%, i.e. flush) while ae stopped at 90.1%, ~40pt short on
+    // every page. The band only has to clear the date-colour key strip under the matrix.
     const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0)
-        ? (params.hz_section_labels ? 0.066 * height : 0.017 * height)
+        ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
         : 0.0;
     const double top_reserve = (ts_w > 0.0 || dash_w > 0.0)
         ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)

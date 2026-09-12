@@ -11,8 +11,10 @@ date (a viridis time-series gradient), its sera shown, and a title
 ae has no single-canvas renderer (maps are drawn by kateri, the tree by
 `tal-draw`), so the coupling is reproduced in this orchestration layer:
 
-  1. parse the *shown* hz-sections out of the report's `.tal` settings
-     (`parse_sections`) and the time-series window (`parse_time_series`);
+  1. get the sections (`sections_for`): the *shown* hz-sections out of the report's `.tal`
+     settings (`parse_sections`), or — when the `.tal` no longer runs its `hz` sub-program,
+     as every report `.tal` from 2026-0805-tc1 on does not — the clade-derived sections AD
+     falls back to (`compute_sections`); plus the time-series window (`parse_time_series`);
   2. match tree leaves to chart antigens/sera by name (`match_leaves`);
   3. for each section collect the antigens whose leaf falls in its
      ``[first, last]`` leaf range, and its sera (deduped to the section that
@@ -33,10 +35,12 @@ it does not draw or talk to kateri. The kateri/compose step lives in
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from .settings_v3 import _loads_relaxed
 
@@ -67,12 +71,33 @@ WHITE = "#ffffff"
 # kateri px by ~4.03 (in-section 3.5 -> 14.1, matched to AD by isolated-point diameter).
 # AD /all-color color:grey88 => test = solid grey fill + grey88 outline (== fill); reference +
 # sera = HOLLOW (transparent fill, grey88 outline); in-section = date-colour fill + BLACK outline.
-BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": 1.0, "size": 10.1}
-REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": 12.1}
-BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": 12.1}
-# in-tree but off-section: AD's darker gray63 fill with a thin WHITE outline (width 0.5).
-INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE, "outline_width": 0.5}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": 1.5, "size": 14.1}
+# The units->kateri-px conversion was 4.03, measured when the sig page composed its maps
+# differently. Re-measured 2026-09-11 against the published AD page, rasterised at 300 dpi:
+# the in-section dots (the tightest anchor — a sharp cluster, n=41 AD / 44 ae) are 17 px in AD
+# and were 15 px in ae, so every point was a uniform ~13% small. 4.03 -> 4.566 puts them on AD.
+# (Do not re-derive this from grey-cloud dots: overlapping points and antialiasing fringes
+# split into spurious small components there, which is why a first pass at this read the
+# background dots as ~1.8x small. The in-section dots are isolated and measure cleanly.)
+AD_UNITS_TO_KATERI_PX = 4.566
+# NB the base/reference/serum outline_width stays at 1.0 rather than being converted.
+# AD's mapi `/size-reset` authors it as 1.0 in the same units as the sizes, so converting
+# it looks right — but doing so overshoots badly: grey88 ink went to 141% of AD (47k vs
+# 33k) because on a SOLID dot the outline is drawn on the edge and grows the dot, so the
+# unit has different meaning here than in AD's renderer. Left alone until that is
+# understood; the residual is that ae's grey88 ink is ~74% of AD's.
+BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": 1.0, "size": round(2.5 * AD_UNITS_TO_KATERI_PX, 1)}
+REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
+BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
+# Outline widths are in the SAME AD units as the sizes (sp.tal:29 authors
+# `"size": 3.5, "outline_width": 0.5` together), so they go through the same
+# conversion. They did not: the sizes were converted and the widths passed through raw,
+# which left the in-tree dots' WHITE separator outline at 0.5 px instead of ~2.3 —
+# about 4.5x too thin, so overlapping gray63 dots merged into blobs instead of being
+# held apart, and the in-section black outline at 1.5 instead of ~2.3.
+INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE,
+                  "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 1)}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 1),
+                     "size": round(3.5 * AD_UNITS_TO_KATERI_PX, 1)}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 # Sig-page serum circles draw the EMPIRICAL radius (AD spc.tal empirical.show:true). With the
 # kateri root fix (plot_spec.dart: `T ? t : e`, matching ae's `T`=theoretical convention),
@@ -83,7 +108,27 @@ SERUM_CIRCLE_THEORETICAL_FLAG = (_os.environ.get("AE_SC_THEORETICAL", "0") != "0
 
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
-MAP_TITLE_SIZE = 26  # kateri px; sits in the top-left band ABOVE the first horizontal gridline (AD)
+# kateri px; sits in the top-left band ABOVE the first horizontal gridline (AD).
+# The map is rendered by kateri at MAP_RENDER_WIDTH_PX and scaled into a ~184 pt panel, so the
+# drawn point size is size_px * panel_pt / render_px. 26 px measured out at 5.99 pt against AD's
+# 9.99 pt (sp.tal asks `text_size: 10`) — a uniform 1.67x shortfall on every page. 43 px puts it
+# on AD's 10 pt: 43 * 184.3 / 800 = 9.90.
+MAP_RENDER_WIDTH_PX = 800.0   # signature_page.render_section_maps_via_kateri default `width`
+MAP_TITLE_PT = 10.0           # AD sp.tal `text_size`
+MAP_PANEL_PT = 184.3          # measured composed panel width (varies ~1% per page)
+MAP_TITLE_SIZE = round(MAP_TITLE_PT * MAP_RENDER_WIDTH_PX / MAP_PANEL_PT)  # -> 43
+# Grid line width, same scaling problem as the title: the renderer draws the grid at the
+# `map_width` px render size and the map is then SCALED into its much smaller cell, thinning
+# every line by that factor. AD draws at the final page size instead, so its grid lands at its
+# authored width.
+#
+# Calibrated against the published AD page rather than guessed: rasterised at 300 dpi
+# (1 pt = 4.17 px), AD's grid lines measure a consistent 4 px — about 0.96 pt. An earlier
+# value of 2.2 px here was derived from a #CCCCCC ink ratio and came out at half that, giving
+# 2 px lines; thin lines also rasterise inconsistently (a sub-pixel line lands on 2 px or 3 px
+# depending on where it falls), which reads as uneven grid weight.
+MAP_GRID_LINE_PT = 0.96       # AD's drawn grid width, measured at 300 dpi
+MAP_GRID_LINE_WIDTH = MAP_GRID_LINE_PT * MAP_RENDER_WIDTH_PX / MAP_PANEL_PT  # -> ~4.2 px
 
 
 # ======================================================================
@@ -91,15 +136,71 @@ MAP_TITLE_SIZE = 26  # kateri px; sits in the top-left band ABOVE the first hori
 # ======================================================================
 
 
-def _find_command(tal: dict, name: str) -> Optional[dict]:
-    """Find the first command object ``{"N": name, ...}`` anywhere in a parsed
-    `.tal` (a dict of named sub-programs, each a list of command objects)."""
+def load_tal_stack(tal_path) -> dict:
+    """A `.tal` settings environment from one file OR an AD-style settings **stack**.
+
+    `tal_path` is a path, or a sequence of paths to overlay the way AD's
+    ``tal -s a.tal -s b.tal`` does: every file's named arrays go into one environment and a
+    later file wins on key collision. AD's real signature-page command line
+    (``sp/0do``) passes five or six files — ``<lab>/sp.mapi``, ``<sub>.sp.tal``,
+    ``<sub><infix>.tal``, ``sp.tal``, optionally ``spc.tal``, ``<page>.sp.tal`` — and the
+    hz-sections, time-series window and serum-circle rules the section maps need are spread
+    across them, so every reader here takes the whole stack rather than one file.
+
+    (`init` is merged key-wise rather than overwritten, matching AD's accumulating define
+    environment; the readers here only look at named arrays, but keeping `init` whole makes
+    the returned dict a faithful stand-in for the loaded settings.)"""
+    if isinstance(tal_path, (str, Path)):
+        return _loads_relaxed(Path(tal_path).read_text())
+    merged: dict = {}
+    init: list = []
+    for one in tal_path:
+        tal = _loads_relaxed(Path(one).read_text())
+        for key, val in tal.items():
+            if key == "init":
+                init.extend(val if isinstance(val, list) else [val])
+            else:
+                merged[key] = val
+    if init:
+        merged["init"] = init
+    return merged
+
+
+def _stack_paths(tal_path) -> list[Path]:
+    """The stack as a list of paths (a single path becomes a one-element list)."""
+    return [Path(tal_path)] if isinstance(tal_path, (str, Path)) else [Path(one) for one in tal_path]
+
+
+def _stack_name(tal_path) -> str:
+    """A short human name for a stack, for log lines."""
+    return " + ".join(p.name for p in _stack_paths(tal_path))
+
+
+def _find_commands(tal: dict, name: str) -> list[dict]:
+    """Every command object ``{"N": name, ...}`` anywhere in a parsed `.tal` (a dict of
+    named sub-programs, each a list of command objects), in dict/array order."""
+    out = []
     for value in tal.values():
         if isinstance(value, list):
             for cmd in value:
                 if isinstance(cmd, dict) and cmd.get("N") == name:
-                    return cmd
-    return None
+                    out.append(cmd)
+    return out
+
+
+def _find_command(tal: dict, name: str, *, require: Sequence[str] = ()) -> Optional[dict]:
+    """Find a command object ``{"N": name, ...}`` in a parsed `.tal`.
+
+    With `require`, only a command carrying **all** of those keys qualifies. On a settings
+    stack the same element is configured from several files — AD's `Settings::add_element`
+    finds the existing layout element and re-initialises it, so the fields end up unioned —
+    and the first textual match is often the bare re-init: on the sig-page stack
+    `<sub>.sp.tal`'s `tal-default` re-runs `time-series` with no `start`/`end`, while the
+    window itself lives in the tree `.tal`. Taking the first match there silently loses the
+    date colour scale, so `require` selects the command that actually carries the fields."""
+    found = [cmd for cmd in _find_commands(tal, name)
+             if all(key in cmd for key in require)]
+    return found[0] if found else None
 
 
 def parse_sections(tal_path) -> list[dict]:
@@ -109,9 +210,11 @@ def parse_sections(tal_path) -> list[dict]:
     ``prefix`` is the section's letter (AD's ``"L"``), ``first``/``last`` are
     leaf seq_ids bounding the section, and ``aa_transitions`` is its label
     suffix. Only sections with ``"show": true`` are returned (AD draws a map
-    only for shown sections)."""
-    tal = _loads_relaxed(Path(tal_path).read_text())
-    hz = _find_command(tal, "hz-sections")
+    only for shown sections).
+
+    `tal_path` is one `.tal` or a whole AD settings stack (see `load_tal_stack`)."""
+    tal = load_tal_stack(tal_path)
+    hz = _find_command(tal, "hz-sections", require=("sections",))
     if not hz:
         return []
     out = []
@@ -134,12 +237,130 @@ def parse_sections(tal_path) -> list[dict]:
 def parse_time_series(tal_path) -> Optional[tuple[str, str]]:
     """Return ``(start, end)`` "YYYY-MM" of the `.tal` time-series, or None.
 
-    AD samples the date colour-scale over these monthly slots."""
-    tal = _loads_relaxed(Path(tal_path).read_text())
-    ts = _find_command(tal, "time-series")
-    if not ts or "start" not in ts or "end" not in ts:
+    AD samples the date colour-scale over these monthly slots. `tal_path` is one `.tal` or
+    a whole AD settings stack (see `load_tal_stack`) — on the sig-page stack the window
+    comes from the tree `.tal` while the surrounding layout comes from `<sub>.sp.tal`."""
+    tal = load_tal_stack(tal_path)
+    ts = _find_command(tal, "time-series", require=("start", "end"))
+    if not ts:
         return None
     return (str(ts["start"])[:7], str(ts["end"])[:7])
+
+
+# ----------------------------------------------------------------------
+# clade-derived sections — when the `.tal` no longer runs its `hz` sub-program
+# ----------------------------------------------------------------------
+#
+# `parse_sections` above reads the `.tal`'s `hz-sections` list, which is what AD uses only
+# while the `hz` sub-program is still IN the `tal` program. It was dropped from the report
+# `.tal`s between Feb and Aug 2026; with `hz` inert AD's HzSections element receives no
+# sections from settings and its whole list comes from `Clades::make_clades()` instead —
+# the `clades` block's per-clade `show` + section tolerances applied to the clade runs of
+# the *current* tree. `compute_sections` is that path, ported in
+# `ae_backend.tal.compute_hz_sections` (cc/tal/clades.cc) and parameterised here from the
+# `.tal` (`settings_v3.parse_clade_section_parameters`).
+#
+# aa-transitions: AD computes its own (the report `.tal`s ask `draw-aa-transitions` for
+# `method: eu-20200915`) and `sp.tal` appends them to each section's map title
+# (`"{section-prefix}. {section-label} {section-aa-transitions}"`).
+#
+# eu-20200915 is now ported (ae `cc/tree/aa-transitions.cc`, from AD
+# `acmacs-tal/cc/aa-transition-20200915.cc`) and verified against AD as data: on the Feb-2026
+# cycle trees, every internal node's label list is identical to AD's — bvic.after-2021
+# 5376/5376 nodes, h1.asr.after-2021 16734/16734, h3.asr.after-2021 10136/10136, same
+# substitutions, same order, same polarity. So transitions are computed and printed BY DEFAULT
+# again; pass `aa_transitions=False` (or AE_SECTION_AA_TRANSITIONS=0) to blank them.
+#
+# KNOWN RESIDUAL — the `.tal`'s node HIDING is not applied here. AD computes the transitions
+# after the settings stack has applied every `{"N": "nodes", "select": {"seq_id": ...},
+# "apply": {"hide": true}}` mod, and hidden leaves are excluded from the consensus counters,
+# from the leaf counts and from the vertical numbering the section accumulation keys on.
+# `compute_sections` runs on the tree as loaded, so:
+#   B/Vic (2026-0921, 52 hide mods): all 10 section strings identical to AD's real sp/0do run.
+#   H1    (2026-0921, 483 hide mods): sections A-C identical, D-M differ by 1-2 substitutions.
+#     Proven to be the hiding and nothing else: re-running AD's own sp/0do command with every
+#     `"hide": true` flipped to false makes AD and ae agree on all 13/13 section strings.
+# Closing it belongs with the signature-page settings stack (apply the `nodes` hide mods, then
+# reproduce AD's hidden-aware leaf counting and `Tree::set_first_last_next_node_id` vertical
+# numbering), not with the transition method.
+#
+# Two details are needed to reproduce an AD run and are set below:
+#   * method="eu-20200915"   — NOT ae's own `consensus`, which lacks eu-20200915's
+#     root-sequence anchoring and disagrees with AD both on which substitutions appear and on
+#     their polarity.
+#   * reset_labels=False     — AD's `tal` never clears the labels a `.asr` tjz already carries
+#     (`Tal::reset()` runs only in its interactive loop), so the method computes ON TOP of
+#     them and they take part in the ancestor chain. Clearing them changes the computed
+#     labels' left residue (measured: 604 of 16734 h1 nodes differ, 118 of 10136 h3 nodes).
+
+SECTION_AA_TRANSITIONS_ENV = "AE_SECTION_AA_TRANSITIONS"
+
+
+def compute_sections(tree, tal_path, *, aa_transitions: Optional[bool] = None,
+                     program: str = "tal") -> list[dict]:
+    """Derive the hz-sections from `tree`'s clade annotations the way AD does when a
+    `.tal` no longer runs its `hz` sub-program. Same entry shape as `parse_sections`.
+
+    `tree` is a path to a tree file or an already-loaded `ae_backend.tree.Tree`."""
+    import sys as _sys
+
+    import ae_backend
+    from .settings_v3 import parse_clade_section_parameters
+
+    if not hasattr(ae_backend.tal, "compute_hz_sections"):
+        raise RuntimeError("ae_backend.tal.compute_hz_sections missing — rebuild ae (cc/tal/clades.cc + cc/py/tal.cc)")
+    if isinstance(tree, (str, Path)):
+        tree = ae_backend.tree.load(str(tree))
+    if aa_transitions is None:
+        aa_transitions = _os.environ.get(SECTION_AA_TRANSITIONS_ENV, "1") != "0"
+    if aa_transitions:
+        # populates Inode::aa_transitions, which compute_hz_sections accumulates. See the note
+        # above for why the method and reset_labels are what they are.
+        ae_backend.tree.set_aa_nuc_transition_labels(tree, method="eu-20200915", reset_labels=False)
+
+    all_clades, per_clade = parse_clade_section_parameters(load_tal_stack(tal_path), program=program)
+
+    def params(entry: dict):
+        display_name = entry.get("display_name") or []
+        return ae_backend.tal.CladeSectionParameters(
+            inclusion_tolerance=int(entry["inclusion_tolerance"]),
+            exclusion_tolerance=int(entry["exclusion_tolerance"]),
+            shown=bool(entry["shown"]),
+            display_name=str(display_name[0]) if display_name else "")
+
+    computed = ae_backend.tal.compute_hz_sections(
+        tree, {name: params(entry) for name, entry in per_clade.items()}, params(all_clades))
+    if any(section.intersect for section in computed):
+        print("  [sigp] note: clade-derived hz-sections overlap (AD reports the same)", file=_sys.stderr)
+    return [
+        {
+            "id": section.id,
+            "prefix": section.prefix,
+            "first": section.first_name,
+            "last": section.last_name,
+            "label": section.label,
+            # computed by eu-20200915 and verified against AD (see the note above); blank only
+            # if the caller opted out
+            "aa_transitions": section.aa_transitions if aa_transitions else "",
+        }
+        for section in computed
+    ]
+
+
+def sections_for(tal_path, tree, *, aa_transitions: Optional[bool] = None,
+                 program: str = "tal") -> list[dict]:
+    """The signature page's section list: the `.tal`'s *shown* `hz-sections` when it still
+    specifies them, else the clade-derived sections AD falls back to (`compute_sections`)."""
+    import sys as _sys
+
+    sections = parse_sections(tal_path)
+    if sections:
+        return sections
+    sections = compute_sections(tree, tal_path, aa_transitions=aa_transitions, program=program)
+    print(f"  [sigp] {_stack_name(tal_path)} has no shown hz-sections; using {len(sections)} "
+          "clade-derived section(s) (AD's fallback when the `hz` sub-program is not in the `tal` program)",
+          file=_sys.stderr)
+    return sections
 
 
 # ======================================================================
@@ -172,7 +393,9 @@ def _load_serum_circle_hide_rules(spc_tal_path=None) -> list[dict]:
     if env:
         candidates.append(Path(env))
     if spc_tal_path:
-        candidates.append(Path(spc_tal_path))
+        # a whole settings stack: AD's `-s spc.tal` is in it, so read the rules from the
+        # file that was actually passed rather than guessing a path relative to cwd.
+        candidates += _stack_paths(spc_tal_path)
     candidates += [Path.cwd() / "sp" / "spc.tal", Path("sp/spc.tal")]
     for p in candidates:
         try:
@@ -381,10 +604,42 @@ def match_leaf_names(leaf_names, chart) -> LeafMatch:
     return LeafMatch([s or "" for s in leaves], leaf_to_ag, leaf_to_sr, serum_owner, strain_to_leaf)
 
 
-def leaf_names_from_taldraw(tree, settings: Optional[str], tal_draw, tmpdir) -> list[str]:
+def _names_cache_key(tree, settings: Optional[str]) -> str:
+    """Identity of a `.names` result: the tree file (path, size, mtime) and the exact
+    settings content, since node mods — `hide` above all — change which leaves are shown."""
+    import hashlib
+
+    h = hashlib.sha256()
+    tree_path = Path(str(tree))
+    try:
+        st = tree_path.stat()
+        h.update(f"{tree_path.resolve()}|{st.st_size}|{st.st_mtime_ns}".encode())
+    except OSError:  # unstattable: fall back to the path alone (still correct, just colder)
+        h.update(str(tree_path).encode())
+    if settings:
+        try:
+            h.update(Path(settings).read_bytes())
+        except OSError:
+            h.update(str(settings).encode())
+    return h.hexdigest()[:32]
+
+
+def leaf_names_from_taldraw(tree, settings: Optional[str], tal_draw, tmpdir, *, cache: bool = True) -> list[str]:
     """Draw-order leaf seq_ids from `tal-draw <tree> out.names` (ladderized to
     match the rendered tree). Reading from the file dodges the Python tree-leaf
-    iteration that trips libc++ hardening on non-UTF-8 leaf names under py3.14."""
+    iteration that trips libc++ hardening on non-UTF-8 leaf names under py3.14.
+
+    Cached on disk, because a report batch renders one signature page per lab and every
+    lab of a subtype passes the SAME tree and the same settings — the 9 h3 pages of a
+    cycle each re-derived an identical leaf list. The cache is keyed on the tree's
+    (path, size, mtime) and the settings *content*, so editing either misses; it lives
+    under the system temp dir, so it is per-boot and never pollutes the report folder.
+    Pass `cache=False` to force the subprocess."""
+    key = _names_cache_key(tree, settings) if cache else None
+    cached = Path(tempfile.gettempdir()) / "ae-tal-names" / f"{key}.names" if key else None
+    if cached is not None and cached.is_file():
+        return cached.read_text(encoding="utf-8", errors="replace").splitlines()
+
     out = Path(tmpdir) / "leaves.names"
     cmd = [str(tal_draw)]
     if settings:
@@ -392,7 +647,16 @@ def leaf_names_from_taldraw(tree, settings: Optional[str], tal_draw, tmpdir) -> 
     cmd += [str(tree), str(out)]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
     # leaf names may carry non-UTF-8 bytes; decode leniently (they never match a strain)
-    return out.read_text(encoding="utf-8", errors="replace").splitlines()
+    text = out.read_text(encoding="utf-8", errors="replace")
+    if cached is not None:
+        try:  # best-effort: a cache we cannot write is not an error
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cached.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(cached)  # atomic, so concurrent renders cannot read a half-written file
+        except OSError:
+            pass
+    return text.splitlines()
 
 
 def match_leaves(tree, chart) -> LeafMatch:
@@ -556,7 +820,7 @@ def section_title(section: dict) -> str:
 def build_section_styles(chart, sections, match, scale: Optional[DateColorScale], viewport, *,
                          base_priority: int = 50000, available_styles: Optional[set] = None,
                          vaccine_marks: Optional[list] = None, serum_circles: bool = False,
-                         serum_circle_fold: float = 2.0):
+                         serum_circle_fold: float = 2.0, spc_tal=None):
     """Add one semantic style per section to `chart` and return
     ``[{name, title, n_antigens, n_sera}]``. kateri renders each via set_style.
 
@@ -587,7 +851,7 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         # of each serum's EMPIRICAL radius (the drawn circle; AD's empirical.show:true /
         # theoretical.show:false) at the fold in use, plus this chart's lab, so the
         # per-section loop below can drop the sera AD suppresses (else ae draws extras).
-        hide_rules = _load_serum_circle_hide_rules()
+        hide_rules = _load_serum_circle_hide_rules(spc_tal)
         try:
             hide_lab = chart.info().lab()
         except Exception:
