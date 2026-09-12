@@ -78,21 +78,33 @@ WHITE = "#ffffff"
 # (Do not re-derive this from grey-cloud dots: overlapping points and antialiasing fringes
 # split into spurious small components there, which is why a first pass at this read the
 # background dots as ~1.8x small. The in-section dots are isolated and measure cleanly.)
-# A kateri px is NOT a page unit. The section map is rendered by kateri at
-# MAP_RENDER_WIDTH_PX and then scaled into its cell on the composed page, so one kateri px
-# lands on paper as MAP_PANEL_PT / MAP_RENDER_WIDTH_PX points. AD's settings, by contrast,
-# are authored directly in page points: `PointStyle::size` and `PointStyle::outline_width`
-# are both `Pixels`, and `context::convert` divides by the surface scale, so they come out
-# device-constant. One AD unit is one PDF point on the finished page.
+# A kateri px is NOT a page unit, and neither is an AD unit -- each is a unit of ITS OWN
+# renderer's map. Both sides draw the same map; they just draw it at different sizes:
 #
-# So the conversion is that ratio, not a fitted constant. It used to be one -- 4.03, then
-# 4.566 -- calibrated by matching a modal dot diameter on a 300 dpi raster, which resolves
-# to +-1 px (~6%) and so could not see that it was 4% out. The PDF can: ae emitted 0.226181
-# pt per kateri px, giving a cell of 0.226181 * 800 = 180.94 pt, identical on all 38 pages
-# (19 maps x 2 variants) across all three subtypes.
+#   AD     authors in page points on a cell AD_MAP_PANEL_PT wide (`PointStyle::size` and
+#          `outline_width` are both `Pixels`, and `context::convert` divides by the surface
+#          scale, so they land device-constant -- one AD unit is one PDF point there)
+#   ae     authors in kateri px on a render MAP_RENDER_WIDTH_PX wide, which is then scaled
+#          into a cell MAP_PANEL_PT wide
+#
+# So a point of S AD units spans S / AD_MAP_PANEL_PT of AD's map, and to span that same
+# FRACTION of ae's map it needs S * MAP_RENDER_WIDTH_PX / AD_MAP_PANEL_PT kateri px. The
+# conversion is that ratio -- render px per map over AD points per map -- and note the ae
+# cell width does not appear in it at all: matching the map fraction is scale-free.
+#
+# Which is the intent. ae draws its cells 180.945 pt against AD's 171.617 pt, i.e. 5.4%
+# larger, and Sarah's call (2026-09-12) is that the points follow the map: "make the points
+# 5.5% bigger if the maps are 5.5% bigger". Dividing by MAP_PANEL_PT instead would match AD's
+# points in absolute page points and leave them 5.4% small against their own larger map.
+#
+# It is derived, not fitted. It used to be fitted -- 4.03, then 4.566 -- by matching a modal
+# dot diameter on a 300 dpi raster, an instrument that resolves to +-1 px on a 17 px dot
+# (~6%) and so could not see a 4% error. Both cell widths here are read off the emitted PDFs
+# (the map-border `re` operators) and are constant across all 38 pages and all three subtypes.
 MAP_RENDER_WIDTH_PX = 800.0   # signature_page.render_section_maps_via_kateri default `width`
-MAP_PANEL_PT = 180.94         # composed cell width, measured from the emitted PDF (below)
-AD_UNITS_TO_KATERI_PX = MAP_RENDER_WIDTH_PX / MAP_PANEL_PT   # -> 4.421
+MAP_PANEL_PT = 180.945        # ae's composed cell width; title + grid line scale by this
+AD_MAP_PANEL_PT = 171.617     # AD's composed cell width, from its own PDF
+AD_UNITS_TO_KATERI_PX = MAP_RENDER_WIDTH_PX / AD_MAP_PANEL_PT   # -> 4.662
 # The base/reference/serum outline_width IS in AD units and IS converted, like every other
 # width here. It was left raw at 1.0 for a while on the theory that a solid dot's stroke
 # carries a different meaning through kateri than through AD's renderer; that theory is
