@@ -868,6 +868,11 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         # Write the chart carrying the section styles once; SigPageCanvas.render_maps loads it once
         # and renders every section style into its cell as a vector (the kateri replacement — the
         # section<->map coupling lives entirely in the styles).
+        # NB writing this as .json instead (to dodge Chart.write's compress-by-extension) was
+        # tried and measured on h3-hi-guinea-pig-niid: 1.64s vs 1.66s, i.e. no gain. The ~1.6s
+        # is the chart SERIALISATION, not the xz, so there is nothing to win here by changing
+        # the extension. (adjust.py's note about a ~14s write is a 12,737-antigen chart; this
+        # one is 848.)
         styled_ace = tmpdir / "sig-styled.ace"
         chart_obj.write(str(styled_ace))
 

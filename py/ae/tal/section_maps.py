@@ -35,8 +35,10 @@ it does not draw or talk to kateri. The kateri/compose step lives in
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -602,10 +604,42 @@ def match_leaf_names(leaf_names, chart) -> LeafMatch:
     return LeafMatch([s or "" for s in leaves], leaf_to_ag, leaf_to_sr, serum_owner, strain_to_leaf)
 
 
-def leaf_names_from_taldraw(tree, settings: Optional[str], tal_draw, tmpdir) -> list[str]:
+def _names_cache_key(tree, settings: Optional[str]) -> str:
+    """Identity of a `.names` result: the tree file (path, size, mtime) and the exact
+    settings content, since node mods — `hide` above all — change which leaves are shown."""
+    import hashlib
+
+    h = hashlib.sha256()
+    tree_path = Path(str(tree))
+    try:
+        st = tree_path.stat()
+        h.update(f"{tree_path.resolve()}|{st.st_size}|{st.st_mtime_ns}".encode())
+    except OSError:  # unstattable: fall back to the path alone (still correct, just colder)
+        h.update(str(tree_path).encode())
+    if settings:
+        try:
+            h.update(Path(settings).read_bytes())
+        except OSError:
+            h.update(str(settings).encode())
+    return h.hexdigest()[:32]
+
+
+def leaf_names_from_taldraw(tree, settings: Optional[str], tal_draw, tmpdir, *, cache: bool = True) -> list[str]:
     """Draw-order leaf seq_ids from `tal-draw <tree> out.names` (ladderized to
     match the rendered tree). Reading from the file dodges the Python tree-leaf
-    iteration that trips libc++ hardening on non-UTF-8 leaf names under py3.14."""
+    iteration that trips libc++ hardening on non-UTF-8 leaf names under py3.14.
+
+    Cached on disk, because a report batch renders one signature page per lab and every
+    lab of a subtype passes the SAME tree and the same settings — the 9 h3 pages of a
+    cycle each re-derived an identical leaf list. The cache is keyed on the tree's
+    (path, size, mtime) and the settings *content*, so editing either misses; it lives
+    under the system temp dir, so it is per-boot and never pollutes the report folder.
+    Pass `cache=False` to force the subprocess."""
+    key = _names_cache_key(tree, settings) if cache else None
+    cached = Path(tempfile.gettempdir()) / "ae-tal-names" / f"{key}.names" if key else None
+    if cached is not None and cached.is_file():
+        return cached.read_text(encoding="utf-8", errors="replace").splitlines()
+
     out = Path(tmpdir) / "leaves.names"
     cmd = [str(tal_draw)]
     if settings:
@@ -613,7 +647,16 @@ def leaf_names_from_taldraw(tree, settings: Optional[str], tal_draw, tmpdir) -> 
     cmd += [str(tree), str(out)]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
     # leaf names may carry non-UTF-8 bytes; decode leniently (they never match a strain)
-    return out.read_text(encoding="utf-8", errors="replace").splitlines()
+    text = out.read_text(encoding="utf-8", errors="replace")
+    if cached is not None:
+        try:  # best-effort: a cache we cannot write is not an error
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cached.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(cached)  # atomic, so concurrent renders cannot read a half-written file
+        except OSError:
+            pass
+    return text.splitlines()
 
 
 def match_leaves(tree, chart) -> LeafMatch:
