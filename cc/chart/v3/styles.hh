@@ -122,6 +122,34 @@ namespace ae::chart::v3::semantic
 
     inline bool is_default(const Legend& legend) { return legend == Legend{}; }
 
+    // ----------------------------------------------------------------------
+
+    // A figure drawn on the map on top of the points: the selection polygon of AD's
+    // `slot.path(outline=...)`, or a procrustes arrow (AD's `chart_draw.procrustes_arrows`).
+    //
+    // Vertices are in the projection's LAYOUT (untransformed) coordinate space -- the space
+    // `Projection::layout()` and `ae.adjust.Figure` use, NOT the transformed/drawing space.
+    // The renderer applies the projection transformation to them exactly as it applies it to
+    // the points, so a figure stays glued to the map through a re-orientation, and the polygon
+    // that is drawn is literally the polygon that made the selection.
+    struct PathElement
+    {
+        std::vector<offset_t> vertices{};    // {x, y} pairs, layout coordinates
+        std::string outline{"black"};        // outline color ("transparent" -> no outline)
+        std::string fill{"transparent"};     // fill color
+        double outline_width{1.0};
+        bool close{true};                    // close the outline back to vertex 0 (AD's Figure close)
+        // Arrow head at the LAST vertex (AD's ArrowPlotSpec). width <= 0 -> no head.
+        double arrow_width{0.0};
+        std::string arrow_fill{};            // empty -> same as outline
+        std::string arrow_outline{};         // empty -> same as outline
+        double arrow_outline_width{1.0};
+
+        bool operator==(const PathElement&) const = default;
+    };
+
+    // ----------------------------------------------------------------------
+
     struct StyleModifier
     {
         std::string parent{};
@@ -141,6 +169,7 @@ namespace ae::chart::v3::semantic
         int priority{0};
         std::optional<ae::draw::v2::Viewport> viewport{};
         std::vector<StyleModifier> modifiers{};
+        std::vector<PathElement> paths{};
         Legend legend{};
         Title plot_title{};
 

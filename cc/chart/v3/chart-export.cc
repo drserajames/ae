@@ -407,6 +407,42 @@ static inline bool export_semantic_plot_spec_modifiers(fmt::memory_buffer& out, 
 
 // ----------------------------------------------------------------------
 
+// "P": drawable figures on the style -- the selection polygon of slot.path(outline=) and
+// procrustes arrows. Vertices ("v") are LAYOUT (untransformed) coordinates; see
+// semantic::PathElement. Only non-default fields are written.
+static inline bool export_semantic_plot_spec_paths(fmt::memory_buffer& out, const std::vector<ae::chart::v3::semantic::PathElement>& paths, bool comma)
+{
+    if (paths.empty())
+        return comma;
+    const ae::chart::v3::semantic::PathElement dflt{};
+    comma = put_comma(out, comma);
+    fmt::format_to(std::back_inserter(out), "\n    \"P\": [");
+    bool comma_P1{false};
+    for (const auto& path : paths) {
+        comma_P1 = put_comma(out, comma_P1);
+        fmt::format_to(std::back_inserter(out), "\n     {{\"v\": [");
+        bool comma_P2{false};
+        for (const auto& vertex : path.vertices) {
+            comma_P2 = put_comma(out, comma_P2);
+            fmt::format_to(std::back_inserter(out), "[{}, {}]", ae::format_double(vertex[0]), ae::format_double(vertex[1]));
+        }
+        fmt::format_to(std::back_inserter(out), "]");
+        auto comma_P3 = put_str(out, path.outline, [&dflt](const auto& val) { return val != dflt.outline; }, "O", true);
+        comma_P3 = put_str(out, path.fill, [&dflt](const auto& val) { return val != dflt.fill; }, "F", comma_P3);
+        comma_P3 = put_double(out, path.outline_width, [&dflt](auto val) { return !float_equal(val, dflt.outline_width); }, "o", comma_P3);
+        comma_P3 = put_bool(out, path.close, dflt.close, "c", comma_P3);
+        comma_P3 = put_double(out, path.arrow_width, [&dflt](auto val) { return !float_equal(val, dflt.arrow_width); }, "a", comma_P3);
+        comma_P3 = put_str(out, path.arrow_fill, not_empty, "A", comma_P3);
+        comma_P3 = put_str(out, path.arrow_outline, not_empty, "B", comma_P3);
+        comma_P3 = put_double(out, path.arrow_outline_width, [&dflt](auto val) { return !float_equal(val, dflt.arrow_outline_width); }, "b", comma_P3);
+        fmt::format_to(std::back_inserter(out), "}}");
+    }
+    fmt::format_to(std::back_inserter(out), "\n    ]");
+    return comma;
+}
+
+// ----------------------------------------------------------------------
+
 static inline void export_semantic_plot_spec(fmt::memory_buffer& out, const ae::chart::v3::semantic::Styles& styles)
 {
     if (!styles.empty()) {
@@ -423,6 +459,7 @@ static inline void export_semantic_plot_spec(fmt::memory_buffer& out, const ae::
                                ae::format_double(style.viewport->height));
             }
             comma_R2 = export_semantic_plot_spec_modifiers(out, style.modifiers, comma_R2);
+            comma_R2 = export_semantic_plot_spec_paths(out, style.paths, comma_R2);
             comma_R2 = export_semantic_plot_spec_legend(out, style.legend, comma_R2);
             comma_R2 = export_semantic_plot_title(out, style.plot_title, ae::chart::v3::semantic::Title{}, comma_R2);
             fmt::format_to(std::back_inserter(out), "\n   }}");

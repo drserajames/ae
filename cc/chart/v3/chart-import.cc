@@ -795,6 +795,48 @@ inline void read_semantic_plot_style_legend(ae::chart::v3::semantic::Legend& tar
 
 // ----------------------------------------------------------------------
 
+// "P": drawable figures on a style (semantic::PathElement) -- the selection polygon of
+// slot.path(outline=) and procrustes arrows. "v" holds LAYOUT (untransformed) coordinates.
+inline void read_semantic_plot_style_path(ae::chart::v3::semantic::PathElement& target, simdjson::ondemand::object source)
+{
+    for (auto field : source) {
+        if (const std::string_view key = field.unescaped_key(); key == "v") { // vertices
+            for (auto vertex : field.value().get_array()) {
+                auto coords = vertex.get_array();
+                auto it = coords.begin();
+                ae::chart::v3::semantic::offset_t point{0.0, 0.0};
+                if (it != coords.end()) {
+                    point[0] = *it;
+                    ++it;
+                    if (it != coords.end())
+                        point[1] = *it;
+                }
+                target.vertices.push_back(point);
+            }
+        }
+        else if (key == "O")
+            target.outline.assign(static_cast<std::string_view>(field.value()));
+        else if (key == "F")
+            target.fill.assign(static_cast<std::string_view>(field.value()));
+        else if (key == "o")
+            target.outline_width = field.value();
+        else if (key == "c")
+            target.close = field.value();
+        else if (key == "a")
+            target.arrow_width = field.value();
+        else if (key == "A")
+            target.arrow_fill.assign(static_cast<std::string_view>(field.value()));
+        else if (key == "B")
+            target.arrow_outline.assign(static_cast<std::string_view>(field.value()));
+        else if (key == "b")
+            target.arrow_outline_width = field.value();
+        else if (key[0] != '?' && key[0] != ' ' && key[0] != '_')
+            unhandled_key({"c", "R", "<name>", "P", key});
+    }
+}
+
+// ----------------------------------------------------------------------
+
 inline void read_semantic_plot_style(ae::chart::v3::semantic::Style& target, simdjson::ondemand::object source)
 {
     for (auto field : source) {
@@ -819,6 +861,10 @@ inline void read_semantic_plot_style(ae::chart::v3::semantic::Style& target, sim
         else if (key == "A") {  // apply
             for (auto apply_field : field.value().get_array())
                 read_semantic_plot_style_modifier(target.modifiers.emplace_back(), apply_field);
+        }
+        else if (key == "P") {  // paths / arrows
+            for (auto path_field : field.value().get_array())
+                read_semantic_plot_style_path(target.paths.emplace_back(), path_field);
         }
         else if (key == "L") {  // legend
             read_semantic_plot_style_legend(target.legend, field.value());

@@ -540,10 +540,185 @@ identical layout coordinates** (<1e-9). Run twice on charts a day apart (24,804 
 `test/adjust_frames.py` locks the behaviour down on synthetic data, so it does not drift
 with the report charts.
 
-**Still open on this stage** (see `../../../AE-PORT-SSM-ADJUST-AUDIT.md`): the predicate
-object exposes no `aa` / `clade_any_of`; there is no `modify` / drawn `path` / snapshot, so
-no review loop; and the `Zd`/`Slot` chain (step dirs, `final_ace`, slot chaining) is not
-built. Stage B is **not** done.
+#### The viewport is frozen, not recomputed (corrected 2026-09-11)
+
+The frame fix above was right about *how* the viewport is computed and wrong about *when*.
+AD computes it **once and caches it**, invalidating only in `ChartDraw::rotate` and
+`ChartDraw::flip` (`acmacs-map-draw/cc/draw.cc:106,117`) — `MapViewport::calculate` is a
+no-op unless `recalculate_` is set, and moving points and relaxing never set it. So every
+polygon and every move destination in one slot resolves against **one** frame, even after
+earlier steps have moved points around.
+
+`ae.adjust` recomputed it on every call, so a move part-way through a script silently
+shifted the frame under the polygons that followed it — exactly the `path → move → path`
+pattern real `adjust/0do` scripts use. `Adjust.viewport()` now computes once and caches;
+`invalidate_viewport()` drops it, and the new `rotate` / `flip_ew` / `flip_ns` do so for
+you, as AD's do.
+
+Measured against the real AD extension over this cycle's 18 readable maps: after a bulk
+move AD's frame is unchanged on **18/18** maps, and so is ae's now; before the fix ae's
+shifted by **3.7–7.5 map units** and its move destinations disagreed with AD on **18/18**.
+
+#### Steps 2 and 3 — predicate parity and the `Zd`/`Slot` chain (done 2026-09-11)
+
+**Predicates** (audit §3). `ae.adjust.Point` now carries AD's spellings —
+`pt.aa["<pos><AA>"]`, `pt.clade_any_of([...])`, `pt.has_clade(...)`,
+`pt.has_any_clade_of([...])`, plus `pt.clades()` and `pt.is_sequenced()` — over
+`sequence_aa()` and `semantic.clades()`. Pure Python, no C++ rebuild; `has_clade` is
+reimplemented over `clades()` because C++ binds it on `SelectionData` but not on
+`SemanticAttributes`. So the dominant `geometry AND sequence-or-clade` idiom now has an ae
+expression in AD's own spelling, and the 16 AA + 15 clade predicates in the cycle port
+verbatim.
+
+**The chain** (audit §4/§5). `Zd` and `Slot` in `ae/adjust.py` reproduce
+`acmacs_py.zero_do_5`: slot names from the function qualname with `<locals>` replaced by a
+two-digit counter, a `<slot_name>/` directory per slot, `NN` snapshot numbering, `99.ace`
+written on exit (in a `finally`, so a failing step still exports), and chaining by
+assigning the previous slot function to `chart_filename`. `ZD.main()` has an equivalent, so
+an `adjust/0do` script's `exit(ZD.main())` works against `from ae import adjust as ZD`.
+
+**Verified differentially against the real AD extension**, re-deriving the AD side in the
+same run (18 readable maps):
+
+| check | result |
+|---|---|
+| predicates: 12 queries × 18 maps (positive / negated / multi-position AA, clade, multi-clade, clade∧AA, sera) | **216/216** identical index sets, 93,894 selections |
+| clade/AA combinations built from each map's own clades | **72/72** identical, 120,341 selections |
+| one slot, `path → move → path(after the move) → move` | polygon authored after the move: **identical 710-antigen set**; destinations agree to 9e-16; post-relax stress to 2e-11; slot name and `99.ace` path identical |
+| two chained slots | both names, both `99.ace` paths, both selections identical; slot 01 correctly starts from slot 00's `99.ace` |
+
+`test/adjust_slot.py` locks all of this down on synthetic data only.
+
+**One deliberate divergence, where ae is correct.** AD reads **no clades for sera** on
+modern charts: `AceSerum::clades()` reads only the legacy `"c"` field, while
+`AceAntigen::clades()` falls back to the semantic `"T"."C"` where clades actually live
+(`acmacs-chart-2/cc/ace-import.hh:111` vs `ace-import.cc:243`). So AD selects 0 sera by
+clade on every map in the cycle and ae selects the real ones (13–134 per map). **No map
+geometry changes**: every `sr.clade_any_of` in the cycle is commented out or lives in
+`old-adjust/`, and all of them feed `modify=` styling, never a `move`. Worth knowing before
+anyone un-comments one.
+
+#### Step 4 — the review loop: styling and snapshots (done 2026-09-11, minus the polygon)
+
+An `adjust/0do` script's loop is *select -> look -> re-cut the polygon*, and it needs the
+selection **marked on a drawn snapshot**. That is now in, in pure Python — no C++ change,
+no rebuild — as [`py/ae/adjust_render.py`](../adjust_render.py) plus three method bodies in
+`Slot`:
+
+* **`slot.modify(...)` and `modify={...}`** now style points. AD's keys (`fill`, `outline`,
+  `outline_width`, `show`, `shape`, `size`, `aspect`, `rotation`, `order`, `label`,
+  `legend`) are translated to `SemanticStyle.add_modifier` kwargs by
+  `adjust_render.normalize_modify`: most pass straight through (ae's `point_shape` even
+  parses AD's shape names, switching on the first letter), `order` becomes `raise_`/`lower`,
+  and AD's `PointLabel`/`PointLegend` dicts are remapped key by key. What has no ae
+  equivalent (`label.font`; `legend.show_if_none_selected` / `replace` / `show`) is dropped
+  with a message rather than raising.
+* **Each selection becomes modifiers**, one `selector={"!i": <per-side index>}` per point
+  with `only="antigens"`/`"sera"` — the `ae.semantic.select_mark` idiom. A serum arrives as
+  `number_of_antigens + serum_no` and is split back. A selection covering a whole side
+  collapses to one empty-selector modifier, which is the
+  `modify(select_antigens(lambda ag: True), size=10)` line that opens most real scripts.
+* **`slot.plot()` draws a real PDF** (and a `.png` at step 99, as AD does) through
+  `ae_backend.map_draw.export_styled_map` — the same native renderer the report uses. The
+  snapshot is drawn on top of the chart's own clade style (`clades`, or the highest
+  `clades-v<N>`; `Slot.base_style` overrides, `""` for the renderer's grey default), pulled
+  in as the first modifier's `parent`.
+* **The slot's chart is never touched.** The style is built on a throw-away copy, so
+  `99.ace` carries only the geometry the adjust operations produced (asserted in the test).
+  The copy is a JSON round trip, not `Chart.write()`: `write` always xz-compresses, ~14 s on
+  the largest report chart, against ~0.1 s for `export()` + a plain write. A full snapshot of
+  that chart (12,737 antigens) takes ~0.4 s.
+* **`reset_plot_spec()` and `color_by_clade()` are ported by re-pointing the base style.**
+  AD rebuilt its grey baseline point by point; ae's renderer draws exactly that baseline
+  when nothing says otherwise, so `reset_plot_spec` is `base_style = ""` plus forgetting the
+  accumulated styling. `color_by_clade` selects the chart's own clade style instead of
+  re-deriving colours from a `.mapi` file (`mapi_dir=` is accepted and ignored, with a
+  message) — which is why this cycle's scripts dropped `color_by_clade` altogether while the
+  2025 cycle's called it 40 times.
+
+**Verified differentially against the real AD extension**, re-deriving the AD side in the
+same run. For each of the 16 maps in the current cycle that has a real `slot.path(outline=)`
+in its `adjust/0do`, both engines ran that map's **own** polygon and **own** `modify` dict,
+after the `size=10`-on-every-antigen line: AD through `ChartDraw.modify` with the resulting
+per-point style read back from `chart.plot_spec().antigen(i)`, ae through `Zd`/`Slot` with
+the emitted `-adjust` modifiers resolved per point the way `styled-draw.cc`'s
+`point_matches` resolves them.
+
+| check | result |
+|---|---|
+| selection from the map's own polygon | **16/16** identical index sets, 13,080 points |
+| the points each engine restyles, and the values it gives them | **16/16** identical, 67,401 styled points |
+| AD restyling anything outside the selection | never |
+| end to end on a real map (`path -> select+modify -> move -> relax`) | both engines write the same file set — `00/01/02/99.pdf`, `99.png`, `99.ace` — and mark the same 577 antigens |
+
+The bar met is **same points, same styling intent**, plus a visual check of a rendered map;
+not pixel identity, which is not achievable (different renderers) and was not chased. Two
+visible differences, both improvements or pre-existing: ae draws the chart's clade colours
+where AD's snapshot of the same chart is a flat green (AD reads the legacy `c["p"]`, ae the
+`c["R"]` styles), and point sizes differ because the renderer's defaults are 20/32 px against
+AD's 10/15 — which is what the `size=10` line in every script is compensating for.
+
+### Drawing the polygon, and procrustes arrows — the figure primitive (DONE 2026-09-11)
+
+`slot.path(outline=…)` used to only *record* the request: ae had no figure primitive above
+the Cairo surface, so a polygon could not be put on a chart at all. That primitive now
+exists, and with it both the polygon outline (step 4's tail) and **procrustes arrows**
+(step 5) are drawn.
+
+**C++.** `semantic::PathElement` on `Style` (`cc/chart/v3/styles.hh`) — vertices,
+outline/fill/outline-width, `close`, and an optional arrow head at the last vertex — with
+export/import as the style's `"P"` key (documented in `doc/ace-format.js`) and
+`Style.add_path(vertices, **kwargs)` / `remove_paths()` in pybind. `styled-draw.cc` collects
+the resolved style chain's figures (parents first, so later wins and draws on top) and draws
+them above the point cloud and its labels, below only the legend and title. The draw call is
+a new `CairoPdf::polygon()`: the existing `path_negative_move` overloads a negative x as a
+subpath marker, which is unusable in device coordinates where x ≥ 0 is normal and a vertex
+at x = 0 would be misread as a move-to. Arrow-head geometry follows AD's
+`Surface::arrow_head` — apex at the last vertex, base `arrow_width × 2` back along the line,
+base half-width `arrow_width / 2`, with the shaft stopping at the base.
+
+**The coordinate frame is the load-bearing decision.** A `PathElement`'s vertices are stored
+in **layout (untransformed)** coordinates — the frame `Projection::layout()` reports and
+`ae.adjust.Figure` holds after `Adjust.figure()` has converted from AD's viewport-origin
+frame — and the renderer applies the projection transformation to them exactly as it applies
+it to the points. So the polygon that is drawn is literally the polygon that made the
+selection, and it follows the map through a rotation or flip instead of drifting off it.
+(The alternative, storing drawn-space coordinates, would have frozen the figure against a
+re-orientation.)
+
+**Python.** `Slot.path(outline=…, fill=…)` appends the figure's converted vertices to
+`slot.styling`; `Adjust.procrustes_arrows()` ports AD's `acmacs::mapi::procrustes_arrows`
+(procrustes-map the secondary layout onto the primary, measure every common point, arrow the
+ones over the threshold) and `Slot.procrustes()` draws them on `NN.pc.pdf` while still
+returning the numbers — it returns `ProcrustesArrows`, with AD's `ProcrustesData` on `.data`,
+AD's `distances_t` on `.distances` and the segments on `.arrows`. Its match level defaults to
+`"auto"`, not `"strict"`, because AD's `slot.procrustes` builds its `CommonAntigensSera` with
+no match level and AD's default is `automatic`; on a secondary chart with antigens removed
+the two levels disagree about how many points are common. Figures ride the same throw-away
+snapshot style the `modify` modifiers do, so `99.ace` still carries only geometry.
+
+**Verified differentially against the real AD extension**, re-derived in the same run:
+
+| check | result |
+|---|---|
+| this cycle's 27 real `slot.path(outline=)` polygons over 16 maps, every vertex resolved from AD's viewport-origin frame into layout coordinates (AD's own `move(to=)`, which uses the same `Coordinates::viewport` conversion, against `Adjust.figure`) | **107/107** identical, worst delta 2.8e-15 |
+| procrustes over 48 (prestyled, adjusted `99.ace`) pairs from this cycle: AD's `(point_no, distance)` list and rms against `Adjust.procrustes_arrows` | **48/48** identical, worst distance delta 5.3e-15, worst rms delta 2.6e-14; NaN distances (disconnected points) agree and produce no arrow on either side |
+| rasterised and looked at | the magenta outline sits on its own magenta-marked selection; arrows start on their points and carry AD-shaped heads |
+| a figure authored in the drawn frame on a rotated projection | re-transforms to exactly the authored coordinates (test) |
+
+The bar met is **same map coordinates, same frame, same arrow endpoints**, plus a visual
+check — not pixel identity, which is not achievable across two renderers and was not chased.
+
+`test/adjust_review.py` locks all of it down on synthetic data only: the recorded vertices
+are the converted ones, the figure reaches the style's `"P"` key and survives an
+export/import round trip, the transformation round-trips, a polygon snapshot is actually
+drawn, self-procrustes yields no arrows, one moved point yields exactly one arrow starting on
+that point with the length the fit reports, and neither figures nor arrows reach `99.ace`.
+40/40 clean runs.
+
+**Still open on this stage** (see `../../../AE-PORT-SSM-ADJUST-AUDIT.md`): the `sp/0do` half
+of the `tal` wiring, and the cycle's `adjust/0do` scripts still import
+`acmacs_py.zero_do_5`. Stage B is **not** done.
 
 **The real gap is one primitive.** All three missing ops are geometry on the layout, and all
 are enabled by **writing layout coordinates** (currently read-only). With a coordinate setter:
@@ -558,10 +733,13 @@ flip_over_line = reflect coords; geometric select = point-in-polygon over the la
    subsequent `relax()` keeps them fixed). `Layout.__getitem__` (`layout[i]`) now also reads coords
    by index. So **both** the scripted-Python and kateri-centric designs are unblocked on the
    chart-engine side.
-2. **A pure-Python `zero_do` port** (new `py/ae/zero_do/` or `py/ae/report/`): reimplement
-   `Slot`/`Zd` (`move`/`flip`/`select-inside`/`relax`/`procrustes`/`final_ace`) on
-   `ae_backend.chart_v3`; snapshots via **kateri** (optional — the core `adjusted.ace` output
-   needs no renderer). No live-GUI editor required (workflow is scripted batch with review).
+2. ✅ **DONE — A pure-Python `zero_do` port**, landed in `py/ae/adjust.py` rather than a new
+   package: `Adjust` (`move`/`flip`/`select-inside`/`relax`/`procrustes`/frames) plus `Zd`,
+   `Slot` and `main` (step directories, `NN` numbering, `final_ace`, slot chaining) on
+   `ae_backend.chart_v3`. Snapshots are drawn by `Slot.renderer`, which defaults to
+   `ae.adjust_render.SnapshotRenderer` (set it to `None` to keep AD's numbering without
+   drawing). The polygon outline and procrustes arrows needed one more C++ primitive — the
+   `semantic::PathElement` figure element — and are in; see "the figure primitive" above.
 
 **Effort:** modest — the chart-engine ops mostly exist; the new work is the coordinate-setter
 primitive (✅ now done — see above) + ~500-line thin-wrapper Python framework. The sole
@@ -712,7 +890,10 @@ same either way.
       `<subtype>.pdf` (replaces AD `tal -s …`). **✅ Verified** on a real H1 report tree (88 k
       leaves, clades, time-series). A few `.tal` features the translator skips are TAL follow-ups;
       signature-page composition is `bin/tal-signature-page` (TAL).
-- [x] **Adjust stage (Stage B), incl. live relax animation.** kateri point-dragging + ae-side
+- [~] **Adjust stage (Stage B), incl. live relax animation** — the interactive half below is
+      done; the scripted half is done except for styling/rendering (no review loop), so the
+      cycle's `adjust/0do` scripts still run on AD. See
+      [Stage B](#stage-b--interactive-map-adjustment-ported-to-ae--port-plan). kateri point-dragging + ae-side
       free-relax glue (`ae.adjust.adjust_from_kateri`, dispatched from the `RLAX` notification) — both
       front-ends done. Drags are starting seeds, not pins; all points relax freely. The relax now
       **animates**: `Projection.relax_capturing_intermediates` (new pybind binding) feeds the
@@ -753,9 +934,14 @@ same either way.
    dir a report copies wholesale.
 4. **Ownership/sequencing:** this crosses into the team's live workflow code — confirm the
    `2026-0119-tc2` vcm is canonical before copying, and that no newer in-flight vcm exists.
-5. **Phase 4 (`zero_do` / adjust)**: ✅ **landed** — the adjust stage is now ported to ae, no AD
-   dependency. Both front-ends are done on `ae_backend.chart_v3`: programmatic ([`Adjust`](../adjust.py),
-   the scriptable `0do` workflow) and interactive (kateri point-drag → `RLAX` → `handle_relax` →
-   [`adjust_from_kateri`](../adjust.py), free relax + re-orient + push-back). See [Stage B](#stage-b--interactive-map-adjustment-ported-to-ae--port-plan).
-   Residual decision is narrower: **retire the AD `acmacs_py.zero_do_5` path entirely, or keep it as
-   a fallback during the transition?**
+5. **Phase 4 (`zero_do` / adjust)**: 🟡 **mostly landed, not finished** (reopened 2026-09-10 by
+   `AE-PORT-SSM-ADJUST-AUDIT.md`). Both front-ends exist on `ae_backend.chart_v3`: programmatic
+   ([`Adjust`](../adjust.py) + [`Zd`/`Slot`](../adjust.py), the scriptable `0do` workflow) and
+   interactive (kateri point-drag → `RLAX` → `handle_relax` → [`adjust_from_kateri`](../adjust.py),
+   free relax + re-orient + push-back). Coordinate frames, predicate spellings and the step chain
+   are verified against the real AD extension. **Still missing: styling/rendering, so no review
+   loop** — and the cycle's `adjust/0do` scripts are still on `acmacs_py.zero_do_5`, so the AD
+   dependency is not yet actually removed. See
+   [Stage B](#stage-b--interactive-map-adjustment-ported-to-ae--port-plan).
+   Residual decision, once the review loop lands: **retire the AD `acmacs_py.zero_do_5` path
+   entirely, or keep it as a fallback during the transition?**

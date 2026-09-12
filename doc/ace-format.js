@@ -171,6 +171,20 @@
                         "t": "legend row"
                     }
                 },
+                "P": [                                                 // drawable figures on top of the points: the selection
+                    {                                                  //   polygon of ae.adjust slot.path(outline=), procrustes arrows
+                        "v": [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0]],     // vertices, in LAYOUT (untransformed) coordinates -- the renderer
+                                                                       //   applies the projection transformation, as it does to the points
+                        "O": "black",                                  // outline color (default "black"; "transparent" -> no outline)
+                        "F": "transparent",                            // fill color (default "transparent")
+                        "o": 1.0,                                      // outline width (default 1.0)
+                        "c": true,                                     // close the outline back to the first vertex (default true)
+                        "a": 0.0,                                      // arrow head width at the LAST vertex; 0 (default) -> no head
+                        "A": "black",                                  // arrow head fill (absent -> same as "O")
+                        "B": "black",                                  // arrow head outline (absent -> same as "O")
+                        "b": 1.0                                       // arrow head outline width (default 1.0)
+                    }
+                ],
                 "T" {                                                  // Title
                     "-": false,                                        // hidden
                     "B": {                                             // box area
