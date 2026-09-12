@@ -78,7 +78,21 @@ WHITE = "#ffffff"
 # (Do not re-derive this from grey-cloud dots: overlapping points and antialiasing fringes
 # split into spurious small components there, which is why a first pass at this read the
 # background dots as ~1.8x small. The in-section dots are isolated and measure cleanly.)
-AD_UNITS_TO_KATERI_PX = 4.566
+# A kateri px is NOT a page unit. The section map is rendered by kateri at
+# MAP_RENDER_WIDTH_PX and then scaled into its cell on the composed page, so one kateri px
+# lands on paper as MAP_PANEL_PT / MAP_RENDER_WIDTH_PX points. AD's settings, by contrast,
+# are authored directly in page points: `PointStyle::size` and `PointStyle::outline_width`
+# are both `Pixels`, and `context::convert` divides by the surface scale, so they come out
+# device-constant. One AD unit is one PDF point on the finished page.
+#
+# So the conversion is that ratio, not a fitted constant. It used to be one -- 4.03, then
+# 4.566 -- calibrated by matching a modal dot diameter on a 300 dpi raster, which resolves
+# to +-1 px (~6%) and so could not see that it was 4% out. The PDF can: ae emitted 0.226181
+# pt per kateri px, giving a cell of 0.226181 * 800 = 180.94 pt, identical on all 38 pages
+# (19 maps x 2 variants) across all three subtypes.
+MAP_RENDER_WIDTH_PX = 800.0   # signature_page.render_section_maps_via_kateri default `width`
+MAP_PANEL_PT = 180.94         # composed cell width, measured from the emitted PDF (below)
+AD_UNITS_TO_KATERI_PX = MAP_RENDER_WIDTH_PX / MAP_PANEL_PT   # -> 4.421
 # The base/reference/serum outline_width IS in AD units and IS converted, like every other
 # width here. It was left raw at 1.0 for a while on the theory that a solid dot's stroke
 # carries a different meaning through kateri than through AD's renderer; that theory is
@@ -102,9 +116,9 @@ AD_UNITS_TO_KATERI_PX = 4.566
 # antialiases to *no* exactly-#E0E0E0 pixel at all, so the hollow reference/serum rings
 # scored ~0; converting made them 4.2 px wide and they suddenly scored in full. Neither 74%
 # nor 141% measured ink. Compare stroke widths in the PDF instead (tools/compare-sigpage-ink.py).
-BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 1), "size": round(2.5 * AD_UNITS_TO_KATERI_PX, 1)}
-REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 1), "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
-BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 1), "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
+BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 3), "size": round(2.5 * AD_UNITS_TO_KATERI_PX, 3)}
+REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 3), "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 3)}
+BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 3), "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 3)}
 # Outline widths are in the SAME AD units as the sizes (sp.tal:29 authors
 # `"size": 3.5, "outline_width": 0.5` together), so they go through the same
 # conversion. They did not: the sizes were converted and the widths passed through raw,
@@ -112,9 +126,9 @@ BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": round(1
 # about 4.5x too thin, so overlapping gray63 dots merged into blobs instead of being
 # held apart, and the in-section black outline at 1.5 instead of ~2.3.
 INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE,
-                  "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 1)}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 1),
-                     "size": round(3.5 * AD_UNITS_TO_KATERI_PX, 1)}
+                  "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 3)}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 3),
+                     "size": round(3.5 * AD_UNITS_TO_KATERI_PX, 3)}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 # Sig-page serum circles draw the EMPIRICAL radius (AD spc.tal empirical.show:true). With the
 # kateri root fix (plot_spec.dart: `T ? t : e`, matching ae's `T`=theoretical convention),
@@ -126,14 +140,15 @@ SERUM_CIRCLE_THEORETICAL_FLAG = (_os.environ.get("AE_SC_THEORETICAL", "0") != "0
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
 # kateri px; sits in the top-left band ABOVE the first horizontal gridline (AD).
-# The map is rendered by kateri at MAP_RENDER_WIDTH_PX and scaled into a ~184 pt panel, so the
-# drawn point size is size_px * panel_pt / render_px. 26 px measured out at 5.99 pt against AD's
-# 9.99 pt (sp.tal asks `text_size: 10`) — a uniform 1.67x shortfall on every page. 43 px puts it
-# on AD's 10 pt: 43 * 184.3 / 800 = 9.90.
-MAP_RENDER_WIDTH_PX = 800.0   # signature_page.render_section_maps_via_kateri default `width`
+# Same scaling as the point sizes: the title is authored in kateri px and shrinks by
+# MAP_PANEL_PT / MAP_RENDER_WIDTH_PX on the way to paper. 26 px measured out at 5.99 pt
+# against AD's 9.99 pt (sp.tal asks `text_size: 10`) — a uniform 1.67x shortfall on every
+# page — which is what deriving it from the panel width fixes.
+# (MAP_RENDER_WIDTH_PX and MAP_PANEL_PT are defined above, with the unit conversion; they
+# used to be repeated here with a stale 184.3, from before the 13.6 gutter change shrank
+# the cell, which left the title ~2% small.)
 MAP_TITLE_PT = 10.0           # AD sp.tal `text_size`
-MAP_PANEL_PT = 184.3          # measured composed panel width (varies ~1% per page)
-MAP_TITLE_SIZE = round(MAP_TITLE_PT * MAP_RENDER_WIDTH_PX / MAP_PANEL_PT)  # -> 43
+MAP_TITLE_SIZE = round(MAP_TITLE_PT * MAP_RENDER_WIDTH_PX / MAP_PANEL_PT)  # -> 44
 # Grid line width, same scaling problem as the title: the renderer draws the grid at the
 # `map_width` px render size and the map is then SCALED into its much smaller cell, thinning
 # every line by that factor. AD draws at the final page size instead, so its grid lands at its
