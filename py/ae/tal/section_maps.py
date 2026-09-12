@@ -79,15 +79,32 @@ WHITE = "#ffffff"
 # split into spurious small components there, which is why a first pass at this read the
 # background dots as ~1.8x small. The in-section dots are isolated and measure cleanly.)
 AD_UNITS_TO_KATERI_PX = 4.566
-# NB the base/reference/serum outline_width stays at 1.0 rather than being converted.
-# AD's mapi `/size-reset` authors it as 1.0 in the same units as the sizes, so converting
-# it looks right — but doing so overshoots badly: grey88 ink went to 141% of AD (47k vs
-# 33k) because on a SOLID dot the outline is drawn on the edge and grows the dot, so the
-# unit has different meaning here than in AD's renderer. Left alone until that is
-# understood; the residual is that ae's grey88 ink is ~74% of AD's.
-BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": 1.0, "size": round(2.5 * AD_UNITS_TO_KATERI_PX, 1)}
-REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
-BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
+# The base/reference/serum outline_width IS in AD units and IS converted, like every other
+# width here. It was left raw at 1.0 for a while on the theory that a solid dot's stroke
+# carries a different meaning through kateri than through AD's renderer; that theory is
+# WRONG, and the evidence is in the emitted PDF operators rather than in a raster ink ratio:
+#
+#   class (h3-hi-guinea-pig-niid.sp)          AD `w`   ae `w`
+#   in-tree      white sep., gray63 fill      0.5      0.520   <- already converted, matches
+#   in-section   black outline                0.5      0.520   <- already converted, matches
+#   base/ref/serum grey88                     1.0      0.226   <- raw 1.0, 4.4x too thin
+#
+# Both renderers stroke CENTRED on a path of diameter `size` (kateri: draw_on_pdf.point ->
+# _drawShape(radius=size/2) then fill+stroke; AD: surface-cairo s_circle_filled, cairo's
+# default centred stroke), and in AD `size` and `outline_width` are both `Pixels`, converted
+# identically by `context::convert`. So one AD unit is one PDF point on the finished page,
+# and the two classes that were already converted land within 4% of AD -- which is the whole
+# proof that the conversion applies to this class too.
+#
+# What produced the old "converting overshoots to 141% of AD's ink" reading was the
+# measurement, not the drawing: `checkall.sh`'s ink() counted pixels EXACTLY #E0E0E0, which
+# is audit trap 13.3.3 applied to itself. At 0.226 pt a 300 dpi stroke is 0.94 px wide and
+# antialiases to *no* exactly-#E0E0E0 pixel at all, so the hollow reference/serum rings
+# scored ~0; converting made them 4.2 px wide and they suddenly scored in full. Neither 74%
+# nor 141% measured ink. Compare stroke widths in the PDF instead (tools/compare-sigpage-ink.py).
+BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 1), "size": round(2.5 * AD_UNITS_TO_KATERI_PX, 1)}
+REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 1), "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
+BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 1), "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
 # Outline widths are in the SAME AD units as the sizes (sp.tal:29 authors
 # `"size": 3.5, "outline_width": 0.5` together), so they go through the same
 # conversion. They did not: the sizes were converted and the widths passed through raw,
