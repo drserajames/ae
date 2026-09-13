@@ -1501,32 +1501,72 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const auto mark_h = [&](double xa, double xb, double y) { const int r = row(y); const int c0 = col(std::min(xa, xb)), c1 = col(std::max(xa, xb)); for (int c = c0; c <= c1; ++c) occ[static_cast<std::size_t>(r) * GX + c] = 1; };
             const auto mark_v = [&](double x, double ya, double yb) { const int c = col(x); const int r0 = row(std::min(ya, yb)), r1 = row(std::max(ya, yb)); for (int r = r0; r <= r1; ++r) occ[static_cast<std::size_t>(r) * GX + c] = 1; };
             const auto mark_box = [&](double rx, double ry, double rw, double rh) { const int c0 = col(rx), c1 = col(rx + rw), r0 = row(ry), r1 = row(ry + rh); for (int r = r0; r <= r1; ++r) for (int c = c0; c <= c1; ++c) occ[static_cast<std::size_t>(r) * GX + c] = 1; };
+            // How much BLACK TREE the leader has to cross to reach its label. Walking the occupancy
+            // grid costs O(length/cell) instead of O(branches), which is what makes it affordable to
+            // charge every shortlisted candidate for it. A leader that traverses the whole tree reads as
+            // a line ruled across the page — the sweep below will happily produce those, because the
+            // roomiest whitespace on a tree page is the sparse right-hand side, on the far side of
+            // everything. This is what keeps the labels on the near side.
+            const auto leader_ink_cells = [&](double x0, double y0, double x1, double y1) -> int {
+                const int steps = std::clamp(static_cast<int>(std::hypot(x1 - x0, y1 - y0) / cell) + 1, 1, 2000);
+                int hits = 0, pr = -1, pc = -1;
+                for (int k = 0; k <= steps; ++k) {
+                    const double t = static_cast<double>(k) / steps;
+                    const int r = row(y0 + (y1 - y0) * t), c = col(x0 + (x1 - x0) * t);
+                    if (r == pr && c == pc) continue;
+                    pr = r; pc = c;
+                    if (occ[static_cast<std::size_t>(r) * GX + c]) ++hits;
+                }
+                return hits;
+            };
             const auto box_free = [&](double rx, double ry, double rw, double rh) -> bool {
                 if (rx < gx0 || rx + rw > gx1 || ry < gy0 || ry + rh > gy1) return false;
                 const int c0 = col(rx), c1 = col(rx + rw), r0 = row(ry), r1 = row(ry + rh);
                 for (int r = r0; r <= r1; ++r) for (int c = c0; c <= c1; ++c) if (occ[static_cast<std::size_t>(r) * GX + c]) return false;
                 return true;
             };
-            // tree ink: every node's horizontal edge (parent.x -> node.x) + inode vertical connectors
+            // tree ink: every node's horizontal edge (parent.x -> node.x) + inode vertical connectors.
+            // Recorded EXACTLY as axis-aligned rectangles (segment + the drawn line's half-width) as
+            // well as rasterised into `occ`: the grid is the fast candidate filter, but its cell is
+            // ~fs/3 wide, so "free in the grid" only means "no ink within about a cell". The exact
+            // rects give a crossing test that is true to the rendered stroke — used to VETO any
+            // candidate whose text box touches a branch (constraint #1: the aa text must never
+            // intersect the black tree lines) and to report the metric below.
+            struct InkRect { double x0, y0, x1, y1; };
+            std::vector<InkRect> ink;
+            ink.reserve(layout.leaves.size() + 2 * layout.inodes.size());
+            const double hw = tree_line_width * 0.5; // drawn half-width of a branch (the stroke pdf.line() lays down)
+            const auto add_h = [&](double xa, double xb, double y) { ink.push_back({std::min(xa, xb), y - hw, std::max(xa, xb), y + hw}); };
+            const auto add_v = [&](double x, double ya, double yb) { ink.push_back({x - hw, std::min(ya, yb), x + hw, std::max(ya, yb)}); };
             for (const auto& ln : layout.leaves) {
                 node_index_t self{ln.node};
                 if (*self == root) continue;
                 const auto p = pos.find(*tree.parent(self));
-                mark_h(p != pos.end() ? dev_x(p->second.first) : dev_x(ln.x), dev_x(ln.x), dev_y(ln.y));
+                const double px = p != pos.end() ? dev_x(p->second.first) : dev_x(ln.x);
+                mark_h(px, dev_x(ln.x), dev_y(ln.y));
+                add_h(px, dev_x(ln.x), dev_y(ln.y));
             }
             for (const auto& in : layout.inodes) {
                 node_index_t self{in.node};
                 if (*self != root) {
                     const auto p = pos.find(*tree.parent(self));
-                    mark_h(p != pos.end() ? dev_x(p->second.first) : dev_x(in.x), dev_x(in.x), dev_y(in.y));
+                    const double px = p != pos.end() ? dev_x(p->second.first) : dev_x(in.x);
+                    mark_h(px, dev_x(in.x), dev_y(in.y));
+                    add_h(px, dev_x(in.x), dev_y(in.y));
                 }
                 double ymin = 1e18, ymax = -1e18;
                 for (const node_index_t ch : tree.inode(node_index_t{in.node}).children) {
                     const auto f = pos.find(*ch);
                     if (f != pos.end()) { const double cy = dev_y(f->second.second); ymin = std::min(ymin, cy); ymax = std::max(ymax, cy); }
                 }
-                if (ymax >= ymin) mark_v(dev_x(in.x), ymin, ymax);
+                if (ymax >= ymin) { mark_v(dev_x(in.x), ymin, ymax); add_v(dev_x(in.x), ymin, ymax); }
             }
+            // exact "does this (padded) text box touch any branch?" — the constraint-#1 veto.
+            const auto box_hits_ink = [&](double bx0, double by0, double bx1, double by1) -> bool {
+                for (const InkRect& r : ink)
+                    if (r.x0 < bx1 && bx0 < r.x1 && r.y0 < by1 && by0 < r.y1) return true;
+                return false;
+            };
             // keep labels clear of the top-left title and the positioned strain-name labels
             if (!params.title.empty()) mark_box(gx0, gy0, 0.18 * width, mrca_fs * 1.6);
             for (const auto& b : text_label_boxes) mark_box(b[0], b[1], b[2] - b[0], b[3] - b[1]);
@@ -1569,11 +1609,45 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 }
                 return t1 > t0 ? std::hypot(dx, dy) * (t1 - t0) : 0.0;
             };
-            struct Cand { double x0, y0, x1, y1, cx, cy, base; };
+            // `tier` records which envelope the candidate came from — 1 = the target shape
+            // (short, 22°..72° diagonal), 2 = the relaxed envelope, 3 = the whole-band sweep, 0 = a
+            // pinned label's authored spot. Carried only so the metrics line can say how much of a
+            // layout had to leave the ideal envelope; nothing in the search reads it.
+            struct Cand { double x0, y0, x1, y1, cx, cy, base; int tier; };
             std::vector<std::vector<Cand>> cands(anchors.size());
-            const double rmax = 0.35 * height;
             const double gapL = mrca_fs * 0.45; // min gap between the label's right edge and the branch
-            const double pad = mrca_fs * 0.3;   // clearance kept clear of tree ink around each label
+            // Clearance kept clear of tree ink around each label. Held at AD's 0.3: widening it to
+            // 0.45 measurably squeezed the top-of-tree labels out of the thin left-hand gaps they
+            // had been using and exiled them to the right of their branches. Text/branch separation
+            // is enforced exactly by box_hits_ink, so pad only has to look right, not to be safe.
+            const double pad = mrca_fs * 0.3;
+            // --- leader-line shape targets (constraints #3 and #4) -------------------------------
+            // #4 "the lines should not be too long": `len_soft` is the length a leader may reach for
+            // free; beyond it the cost grows QUADRATICALLY, so the search will accept a slightly
+            // worse angle rather than a leader twice as long, and `len_max` is a hard ceiling.
+            // The old code had neither: its only length term was linear (len*1.8) against a 0.35*height
+            // reach, so a far-flung candidate could always buy its way out of a local conflict.
+            const double len_soft = 0.030 * height;
+            const double len_max  = 0.110 * height;
+            // #3 "leader lines should be NE-SW, and not exactly horizontal": measure the leader's angle
+            // from the horizontal and aim it at 45°. `ang_min` is a HARD floor — a candidate shallower
+            // than this is not generated at all, which is what actually removes the near-horizontal
+            // leaders (the old code only added a soft penalty when |dy| < 1.6*fs, which a long leader
+            // satisfied while still running at 5°). `ang_max` keeps them off the vertical, which reads
+            // as a stray tick rather than a leader.
+            const double ang_target = 45.0 * PI / 180.0;
+            const double ang_min    = 22.0 * PI / 180.0;
+            const double ang_max    = 72.0 * PI / 180.0;
+            // Cost weights, chosen by sweeping each one over the three report trees and reading the
+            // metrics line below (h1/h3/bvic `*.after-2021`). They are only a preference ordering: every
+            // term here is worth far less than one overlap, which the search scores at 1e6.
+            const double K_len_max2 = 0.30 * height; // tier-2 reach
+            const double K_t2       = 700.0;         // flat surcharge for leaving the target envelope
+            const double K_nw       = 400.0;         // flat surcharge for the NW-SE mirror (label above the branch)
+            const double K_wlen     = 1.8;           // per-point leader length
+            const double K_wquad    = 6.0;           // per (length - len_soft)/fs, squared
+            const double K_wang     = 10.0;          // per degree away from the 45 degree target
+            const double K_t3d      = 4.0;           // per point of distance for a band-sweep spot
             // PINNED labels (user dragged them in the WYSIWYG editor) are NOT auto-placed: each sits at
             // its authored offset (box top-left = node point + offset*page — the editor's exact inverse)
             // and is RESERVED in the occupancy grid up-front, so the auto search for the remaining labels
@@ -1589,33 +1663,203 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 if (anchors[i].pinned) {
                     // one fixed candidate at the authored offset; mid-right attach (same as the auto attach).
                     const double x0 = anchors[i].nx + anchors[i].off_x * width, y0 = anchors[i].ny + anchors[i].off_y * height;
-                    cands[i].push_back({x0, y0, x0 + tw, y0 + th, x0 + tw, (2.0 * y0 + th) * 0.5, 0.0});
+                    cands[i].push_back({x0, y0, x0 + tw, y0 + th, x0 + tw, (2.0 * y0 + th) * 0.5, 0.0, 0});
                     continue;
                 }
                 const double ax = anchors[i].mid_x, ay = anchors[i].ny;
-                for (double r = mrca_fs * 0.7; r <= rmax; r += mrca_fs * 0.5) {
-                    const int na = 28;
-                    for (int k = 0; k < na; ++k) {
-                        const double ang = -PI + (2.0 * PI) * k / na;
-                        const double cxr = ax + r * std::cos(ang), cyr = ay + r * std::sin(ang);
-                        const double x0 = cxr - tw * 0.5, y0 = cyr - th * 0.5;
-                        if (x0 + tw > ax - gapL) continue;                                       // box must sit LEFT of the branch (#3,#5)
-                        if (!box_free(x0 - pad, y0 - pad, tw + 2.0 * pad, th + 2.0 * pad)) continue; // clear of tree ink, with margin (#6)
-                        double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);       // mid-right attach (#4,#5)
-                        double base = std::hypot(ax - cx, ay - cy) * 1.8;                        // leader length, weighted: prefer SHORT leaders (#3) and, by keeping labels near their branch, branch-y order (#5)
-                        const double dyl = std::abs(ay - cy);
-                        if (dyl < fs * 1.6) base += (fs * 1.6 - dyl) * 4.5;                       // avoid near-HORIZONTAL leaders (#4)
-                        if (cy < ay) base += (ay - cy) * 0.8;                                     // prefer the label BELOW the branch -> leader slopes up-right, bottom-left to top-right (#4)
-                        cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, base});
+                // Sample the LEADER itself (polar around the anchor), not the box centre: the leader's
+                // length and angle ARE the constraints, so generating them directly means every
+                // candidate satisfies #3/#4 by construction instead of being talked into it by a
+                // penalty. The attach point is the mid-height of the box's right edge (attach_pt), so
+                // fixing (angle, length) fixes the box: right edge at ax - L·cosθ, centre at ay ± L·sinθ.
+                //   down == true  -> attach BELOW the anchor (device +y is DOWN) -> box sits lower-left
+                //                    of the branch, so the leader runs up-and-right: a NE-SW line (#3).
+                //   down == false -> the NW-SE mirror; generated too (a tight tree may have no room
+                //                    below) but carried at a flat penalty so it is only ever a fallback.
+                const auto emit = [&](double L, double theta, bool down, double extra) {
+                    const double cx = ax - L * std::cos(theta);
+                    const double cy = ay + (down ? 1.0 : -1.0) * L * std::sin(theta);
+                    if (cx > ax - gapL) return;                                                   // box must sit LEFT of the branch (#3,#5)
+                    const double x0 = cx - tw, y0 = cy - th * 0.5;
+                    if (!box_free(x0 - pad, y0 - pad, tw + 2.0 * pad, th + 2.0 * pad)) return;     // clear of tree ink, with margin (#1)
+                    if (box_hits_ink(x0 - pad, y0 - pad, x0 + tw + pad, y0 + th + pad)) return;    // exact re-check against the drawn stroke (#1)
+                    double base = L * K_wlen;                                                        // prefer SHORT leaders (#4)
+                    if (L > len_soft) { const double o = (L - len_soft) / fs; base += o * o * K_wquad; } // ...and grow the cost QUADRATICALLY past the comfortable length (#4)
+                    base += std::abs(theta - ang_target) * (180.0 / PI) * K_wang;                    // aim the leader at 45° (#3)
+                    if (!down) base += K_nw;                                                     // NW-SE mirror: allowed, but only as a fallback (#3)
+                    base += extra;
+                    cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, base, extra > 0.0 ? 2 : 1});
+                };
+                // Tier 1 — inside the target envelope: 22°..72°, up to len_max. Every candidate here
+                // is a well-formed diagonal leader of bounded length.
+                const int NTH = 16, NL = 26;
+                for (int s = 0; s < 2; ++s) {
+                    for (int t = 0; t <= NTH; ++t) {
+                        const double theta = ang_min + (ang_max - ang_min) * t / NTH;
+                        const double lmin = std::max(gapL / std::cos(theta), fs * 0.9);
+                        if (lmin > len_max) continue;
+                        for (int k = 0; k <= NL; ++k) emit(lmin + (len_max - lmin) * k / NL, theta, s == 0, 0.0);
                     }
                 }
-                if (cands[i].empty()) { // far-left whitespace fallback (always clear, left of the branch)
-                    const double x0 = gx0, y0 = std::clamp(ay - th * 0.5, gy0, gy1 - th);
-                    double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);
-                    cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, 1.0e5});
+                // Tier 2 — the relaxed envelope (8°..86°, reach out to 0.30·height), ALWAYS generated.
+                // The shape rules (#3, #4) are what the user wants "ideally"; not overlapping (#1, #2)
+                // is what they want absolutely. Withholding the far/shallow placements to enforce the
+                // ideal costs the search the room it needs to untangle a congested cluster and trades a
+                // hard constraint for a soft one — measurably so: gating tier 2 on "tier 1 came up
+                // short" took h3's residual conflicts from 10 to 14. So offer them always, at a flat
+                // surcharge that no in-envelope candidate can ever lose to, and let the conflict terms
+                // (weighted ~1e6) spend it only where they must.
+                const double len_max2 = K_len_max2;
+                {
+                    const double ang_min2 = 8.0 * PI / 180.0, ang_max2 = 86.0 * PI / 180.0;
+                    for (int s = 0; s < 2; ++s)
+                        for (int t = 0; t <= NTH; ++t) {
+                            const double theta = ang_min2 + (ang_max2 - ang_min2) * t / NTH;
+                            const double lmin = std::max(gapL / std::cos(theta), fs * 0.9);
+                            if (lmin > len_max2) continue;
+                            for (int k = 0; k <= NL; ++k) emit(lmin + (len_max2 - lmin) * k / NL, theta, s == 0, K_t2);
+                        }
+                }
+                // Tier 3 — whole-band sweep, for labels the leader-shaped tiers leave STARVED.
+                // A label on a BASAL branch sits near the left edge of the tree band, so almost all of
+                // the left half-plane those tiers search is off-page or under the root's own connectors.
+                // Measured on the H3 report tree, the worst-placed basal label reached the search with
+                // FIVE candidates and the next with 18, against 100+ for a mid-tree label — and those
+                // starved labels accounted for four of the nine residual conflicts, because with five
+                // placements to choose from there is nothing to move them to. So the trigger is
+                // starvation, not emptiness. The sweep also returns a SPREAD of free boxes rather than
+                // the single nearest, because two labels can hang off the SAME MRCA node (the B/Vic tree
+                // has such a pair): the old one-box fallback handed both the identical box, and with one
+                // candidate each no amount of searching could separate them.
+                if (cands[i].size() < 24) {
+                    const double step = std::max(fs * 0.6, 2.0);
+                    struct Spot { double x0, y0, d; };
+                    std::vector<Spot> spots;
+                    for (double y0 = gy0; y0 + th <= gy1; y0 += step) {
+                        for (double x0 = gx0; x0 + tw <= gx1; x0 += step) {
+                            if (!box_free(x0 - pad, y0 - pad, tw + 2.0 * pad, th + 2.0 * pad)) continue;
+                            if (box_hits_ink(x0 - pad, y0 - pad, x0 + tw + pad, y0 + th + pad)) continue;
+                            spots.push_back({x0, y0, std::hypot(ax - (x0 + tw * 0.5), ay - (y0 + th * 0.5))});
+                        }
+                    }
+                    std::sort(spots.begin(), spots.end(), [](const Spot& a, const Spot& b) { return a.d < b.d; });
+                    std::vector<Spot> pick;                                  // nearest first, thinned so they are genuinely different places
+                    for (const Spot& sp : spots) {
+                        bool dup = false;
+                        // Spread these WIDE. Two labels hanging off the SAME MRCA node get near-identical
+                        // spot lists, so if the list only covers one small pocket they cannot be separated
+                        // however hard the search tries.
+                        for (const Spot& q : pick) if (std::abs(sp.x0 - q.x0) < tw * 0.8 && std::abs(sp.y0 - q.y0) < th * 2.0) { dup = true; break; }
+                        if (!dup) pick.push_back(sp);
+                        if (pick.size() >= 40) break;
+                    }
+                    for (const Spot& sp : pick) {
+                        // Attach on the edge that FACES the branch, so the leader stops at the text
+                        // instead of running across it. When the anchor is horizontally inside the box's
+                        // span neither vertical edge faces it — a sweep spot directly under a basal node
+                        // is exactly that case — so meet the nearer horizontal edge at the anchor's own x.
+                        double cx, cy;
+                        if (ax > sp.x0 && ax < sp.x0 + tw) { cx = ax; cy = (ay < sp.y0) ? sp.y0 : sp.y0 + th; }
+                        else { cx = (sp.x0 + tw * 0.5 < ax) ? sp.x0 + tw : sp.x0; cy = sp.y0 + th * 0.5; }
+                        // A sweep spot is chosen for being FREE, not for the leader it implies, so charge
+                        // it the same shape cost the leader-shaped tiers pay. Without this the sweep
+                        // spots come out at whatever angle the whitespace happens to sit at — measured:
+                        // enabling the sweep alone took h3's leaders below 22° from 1 to 8. Ranking the
+                        // spots by shape as well as distance keeps the rescue and the house style.
+                        const double theta = std::atan2(std::abs(ay - cy), std::max(std::abs(ax - cx), 1e-9));
+                        // Charge distance the same way the leader tiers do — linear plus a quadratic
+                        // past the comfortable length. A flat linear term is far too weak against the
+                        // 1e4 tier surcharge: on the B/Vic tree a rescued label flew 204pt
+                        // clear across the page (a 20%-of-page leader crossing two others) because the
+                        // extra distance cost only a few hundred.
+                        double base = 1.0e4 + sp.d * K_t3d + std::abs(theta - ang_target) * (180.0 / PI) * K_wang;
+                        if (sp.d > len_soft) { const double o = (sp.d - len_soft) / fs; base += o * o * K_wquad; }
+                        if (cy < ay) base += K_nw;                      // above the branch: the NW-SE mirror
+                        // ...and keep it on the LEFT, where every other label lives. Free space is easiest
+                        // to find on the sparse right of a tree, so without this the sweep exiles the
+                        // starved labels into the right margin on leaders ruled across the whole page.
+                        if (sp.x0 + tw > ax) base += 5000.0 + (sp.x0 + tw - ax) * 10.0;
+                        // ramp, not a step: a sweep spot at 0deg (dead horizontal) must cost much more
+                        // than one at 20deg, while still costing far less than a conflict, so the rescue
+                        // takes the most diagonal free spot it can and a flat leader only as a last resort.
+                        if (theta < ang_min) base += 600.0 + (ang_min - theta) * (180.0 / PI) * 200.0;
+                        cands[i].push_back({sp.x0, sp.y0, sp.x0 + tw, sp.y0 + th, cx, cy, base, 3});
+                    }
+                }
+                // Last resort — not one position but a COLUMN of them down the left edge, ignoring ink.
+                // On a full-size tree (~10k leaves at a fraction of a point per row) the canopy
+                // is solid black at grid resolution, so nothing above finds anywhere free and every label
+                // arrives here. The historical single position put all of them at their own anchor's
+                // height against gx0 — which on the full H1 tree meant 51 labels on top of each other
+                // (measured: 123 text/text overlaps, every leader dead horizontal). The ink is
+                // unavoidable on such a tree; labels landing on each other is not. Offering a spread lets
+                // the ordinary conflict search stack them in branch order on sloped leaders.
+                if (cands[i].empty()) {
+                    for (int xs = 0; xs < 3; ++xs) {
+                        const double x0 = gx0 + xs * tw * 0.35;
+                        for (int k = -12; k <= 12; ++k) {
+                            const double y0 = std::clamp(ay - th * 0.5 + k * th * 1.3, gy0, gy1 - th);
+                            const double cx = x0 + tw, cy = y0 + th * 0.5;
+                            if (cx > ax - gapL * 0.5) continue;               // still left of the branch
+                            const double theta = std::atan2(std::abs(ay - cy), std::max(ax - cx, 1e-9));
+                            double base = 1.0e5 + std::hypot(ax - cx, ay - cy) * K_wlen
+                                        + std::abs(theta - ang_target) * (180.0 / PI) * K_wang;
+                            if (cy < ay) base += K_nw;
+                            cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, base, 3});
+                        }
+                    }
+                    if (cands[i].empty()) { // not even that fits: one position, as before
+                        const double x0 = gx0, y0 = std::clamp(ay - th * 0.5, gy0, gy1 - th);
+                        double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);
+                        cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, 1.0e5, 3});
+                    }
                 }
                 std::sort(cands[i].begin(), cands[i].end(), [](const Cand& a, const Cand& b) { return a.base < b.base; });
-                if (cands[i].size() > 56) cands[i].resize(56);
+                // Thin the sweep down to a shortlist the search can afford — but thin it so the
+                // shortlist still SPANS the envelope. Taking the N cheapest (what the old code did, and
+                // what a plain nearest-neighbour thinning still does) is a trap: `base` is dominated by
+                // leader length, so the N cheapest are all the short ones clustered round the anchor,
+                // and every far placement — the one a congested label actually needs — is cut before the
+                // search ever sees it. That is why widening the reach changed nothing: the extra reach
+                // was pruned away again here. So bucket by (side, angle, log-length) and keep the best
+                // candidate in each bucket: the shortlist then covers near AND far, shallow AND steep,
+                // above AND below, and `base` still ranks within each bucket.
+                // Two passes, because the search needs two different things and neither alone works:
+                //   near field — many finely-spaced placements around the anchor, which is how a label
+                //     shuffles by a few points to clear a neighbour it *nearly* fits past;
+                //   far field  — a few placements at every angle and every distance out to the full
+                //     reach, which is how a label in a hopelessly congested pocket gets out of it.
+                // Thinning by nearest-neighbour alone keeps only the near field (everything far is
+                // costlier, so the cap eats it — measured: widening the reach then changed nothing).
+                // Bucketing alone keeps only a sparse skeleton of the near field (measured: h3's
+                // conflicts went 11 -> 15). Take the union.
+                {
+                    std::vector<Cand> keep;
+                    keep.reserve(300);
+                    const double sep = fs * 0.5;
+                    for (const Cand& c : cands[i]) {            // pass 1: near field, finely spaced
+                        bool dup = false;
+                        for (const Cand& k : keep) if (std::hypot(c.cx - k.cx, c.cy - k.cy) < sep) { dup = true; break; }
+                        if (!dup) keep.push_back(c);
+                        if (keep.size() >= 110) break;
+                    }
+                    const int ABINS = 10, LBINS = 8;            // pass 2: one representative per (side, angle, log-distance) cell
+                    const double lo = std::log(std::max(fs * 0.9, 1.0)), hi = std::log(std::max(len_max2, fs * 2.0));
+                    const auto cell = [&](const Cand& d) {
+                        const double ddx = anchors[i].mid_x - d.cx, ddy = anchors[i].ny - d.cy;
+                        const double th_ = std::atan2(std::abs(ddy), std::max(std::abs(ddx), 1e-9));
+                        const int ab = std::clamp(static_cast<int>(th_ / (PI * 0.5) * ABINS), 0, ABINS - 1);
+                        const int lb = std::clamp(static_cast<int>((std::log(std::max(std::hypot(ddx, ddy), 1.0)) - lo) / (hi - lo) * LBINS), 0, LBINS - 1);
+                        return static_cast<std::size_t>(((d.cy > anchors[i].ny ? 0 : 1) * ABINS + ab) * LBINS + lb);
+                    };
+                    std::vector<char> have(static_cast<std::size_t>(2 * ABINS * LBINS), 0);
+                    for (const Cand& k : keep) have[cell(k)] = 1;
+                    for (const Cand& c : cands[i]) { const std::size_t k = cell(c); if (!have[k]) { have[k] = 1; keep.push_back(c); } }
+                    for (Cand& c : keep)
+                        c.base += std::min(leader_ink_cells(anchors[i].mid_x, anchors[i].ny, c.cx, c.cy), 80) * 22.0;
+                    std::sort(keep.begin(), keep.end(), [](const Cand& a, const Cand& b) { return a.base < b.base; });
+                    cands[i].swap(keep);
+                }
             }
             const std::size_t n = anchors.size();
             const double m = mrca_fs * 0.08;  // min separation between label boxes (#7)
@@ -1684,6 +1928,31 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // scoreA tracks which restart to keep; it carries the same terms as acost_i (including the
             // leader-length base) so the best-layout tracker and the per-label descent agree.
             const auto scoreA = [&]() -> double { return static_cast<double>(conf_total()) * 1.0e6 + soft_total() * WSOFT + static_cast<double>(inv_total()) * static_cast<double>(WO) + base_total(); };
+            // SEED — sweep the labels down the tree in branch-y order and give each one the cheapest
+            // candidate that clashes with nothing already placed and keeps the column running downward.
+            // Both the all-zeros start (every label on its own shortest leader, so the crowded ones all
+            // pile into the same pocket) and the random restarts below hand Phase A a layout with dozens
+            // of conflicts to unpick, and descent then has to fix them one label at a time while every
+            // neighbour is also wrong. A left column of labels in the same order as their branches is
+            // the arrangement whose leaders *cannot* cross, so building that first starts the search
+            // inside — or next to — the feasible region instead of far outside it.
+            {
+                std::vector<int> seed(n, 0);
+                for (int r = 0; r < static_cast<int>(n); ++r) {
+                    const std::size_t i = ordA[r];
+                    int bc = 0; double bv = std::numeric_limits<double>::max();
+                    const double prev_cy = r > 0 ? (cands[ordA[r - 1]][seed[ordA[r - 1]]].y0 + cands[ordA[r - 1]][seed[ordA[r - 1]]].y1) * 0.5
+                                                 : -std::numeric_limits<double>::max();
+                    for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) {
+                        double v = cands[i][ci].base;
+                        for (int q = 0; q < r; ++q) { const std::size_t j = ordA[q]; v += static_cast<double>(pconf(i, ci, j, seed[j])) * 1.0e6; }
+                        if ((cands[i][ci].y0 + cands[i][ci].y1) * 0.5 < prev_cy) v += 3000.0; // keep the column descending
+                        if (v < bv) { bv = v; bc = ci; }
+                    }
+                    seed[i] = bc;
+                }
+                choice = seed;
+            }
             // PHASE A — find a CONFLICT-FREE layout, and among those prefer one in branch-y ORDER
             // (ordered labels over ordered branches cannot cross, so order both fixes #5 and removes
             // the otherwise-stubborn crossings). Score = conflicts >> inversions >> leader length;
@@ -1692,7 +1961,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             double best_scoreA = scoreA();
             int stale = 0;
             for (int restart = 0; restart <= 400; ++restart) {
-                if (restart > 0) for (std::size_t i = 0; i < n; ++i) choice[i] = rnd(std::min<int>(28, static_cast<int>(cands[i].size())));
+                // Restart 0 descends from the ordered seed above; the rest are random, which is what
+                // escapes a local minimum the seed cannot.
+                if (restart > 0) for (std::size_t i = 0; i < n; ++i) choice[i] = rnd(std::min<int>(40, static_cast<int>(cands[i].size())));
                 bool restart_improved = false;
                 for (int iter = 0; iter < 60; ++iter) {
                     bool improved = false;
@@ -1790,8 +2061,59 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             { int cc = 0;
               for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) {
                   const int c = pconf(i, choice[i], j, choice[j]);
-                  if (c > 0) { cc += c; fmt::print(stderr, ">>> aa-label placement: residual conflict — '{}' (y={:.0f}%) vs '{}' (y={:.0f}%)\n", anchors[i].text, 100.0 * (cands[i][choice[i]].y0 + cands[i][choice[i]].y1) * 0.5 / height, anchors[j].text, 100.0 * (cands[j][choice[j]].y0 + cands[j][choice[j]].y1) * 0.5 / height); } }
+                  if (c > 0) { cc += c;
+                      const Cand& A = cands[i][choice[i]]; const Cand& B = cands[j][choice[j]];
+                      std::string kinds;
+                      if (A.x0 - m < B.x1 && B.x0 - m < A.x1 && A.y0 - m < B.y1 && B.y0 - m < A.y1) kinds += "box/box ";
+                      if (segs_cross(anchors[i].mid_x, anchors[i].ny, A.cx, A.cy, anchors[j].mid_x, anchors[j].ny, B.cx, B.cy)) kinds += "leader/leader ";
+                      if (seg_box(anchors[i].mid_x, anchors[i].ny, A.cx, A.cy, B.x0 - mt, B.y0 - mt, B.x1 + mt, B.y1 + mt)) kinds += "i-leader/j-text ";
+                      if (seg_box(anchors[j].mid_x, anchors[j].ny, B.cx, B.cy, A.x0 - mt, A.y0 - mt, A.x1 + mt, A.y1 + mt)) kinds += "j-leader/i-text ";
+                      fmt::print(stderr, ">>> aa-label placement: residual conflict [{}] — '{}' anchor({:.0f},{:.0f}) box({:.0f},{:.0f} {:.0f}x{:.0f}) tier{} cands={} vs '{}' anchor({:.0f},{:.0f}) box({:.0f},{:.0f} {:.0f}x{:.0f}) tier{} cands={}\n",
+                                 kinds, anchors[i].text, anchors[i].mid_x, anchors[i].ny, A.x0, A.y0, A.x1 - A.x0, A.y1 - A.y0, A.tier, cands[i].size(),
+                                 anchors[j].text, anchors[j].mid_x, anchors[j].ny, B.x0, B.y0, B.x1 - B.x0, B.y1 - B.y0, B.tier, cands[j].size()); } }
               if (cc > 0) fmt::print(stderr, ">>> aa-label placement: WARNING — {} residual conflict(s) (overlaps/crossings) could not be removed\n", cc); }
+            // --- placement METRICS over the final layout ------------------------------------------
+            // One line per render, always printed, so a change to the placer is judged on numbers
+            // rather than on how the page looks at a glance. Each counter maps to one stated
+            // constraint; all four counters should read 0, and the length/angle summary says how
+            // close the leaders got to "short, diagonal, never horizontal".
+            {
+                int ink_hits = 0, text_ovl = 0, lead_text = 0, lead_x = 0, shallow = 0, nonsw = 0, overlong = 0, t2 = 0, t3 = 0;
+                std::vector<double> lens, angs, xings;
+                lens.reserve(n); angs.reserve(n); xings.reserve(n);
+                for (std::size_t i = 0; i < n; ++i) {
+                    const Cand& a = cands[i][choice[i]];
+                    if (box_hits_ink(a.x0, a.y0, a.x1, a.y1)) ++ink_hits;                    // #1 text over a black branch
+                    const double dx = anchors[i].mid_x - a.cx, dy = anchors[i].ny - a.cy;
+                    const double L = std::hypot(dx, dy);
+                    const double th_deg = std::atan2(std::abs(dy), std::max(std::abs(dx), 1e-9)) * 180.0 / PI;
+                    lens.push_back(L); angs.push_back(th_deg);
+                    xings.push_back(leader_ink_cells(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy));
+                    if (th_deg < 22.0) ++shallow;                                            // #3 too near horizontal
+                    if (a.cy < anchors[i].ny) ++nonsw;                                       // #3 label NOT below-left (not a NE-SW leader)
+                    if (L > len_max) ++overlong;                                             // #4 past the length ceiling
+                    if (a.tier == 2) ++t2;                                                   // left the target envelope to fit
+                    if (a.tier == 3) ++t3;                                                   // no leader-shaped spot at all
+                    for (std::size_t j = 0; j < n; ++j) {
+                        if (j == i) continue;
+                        const Cand& b = cands[j][choice[j]];
+                        if (j > i && a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1) ++text_ovl;                    // #2 text over text
+                        if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0, b.y0, b.x1, b.y1)) ++lead_text;        // #2 leader over another label's text
+                        if (j > i && segs_cross(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy)) ++lead_x; // #2 leader over leader
+                    }
+                }
+                std::sort(lens.begin(), lens.end()); std::sort(angs.begin(), angs.end()); std::sort(xings.begin(), xings.end());
+                const auto med = [](const std::vector<double>& v) { return v.empty() ? 0.0 : v[v.size() / 2]; };
+                fmt::print(stderr, ">>> aa-label metrics: n={} | text-over-branch={} text-over-text={} leader-over-text={} leader-over-leader={}"
+                                   " | leader len %page: med={:.1f} max={:.1f} over-{:.0f}px={}"
+                                   " | leader angle deg: min={:.0f} med={:.0f} below-22deg={} not-NE/SW={}"
+                                   " | leader crosses tree cells: med={:.0f} max={:.0f}"
+                                   " | off-envelope={} band-sweep={}\n",
+                           n, ink_hits, text_ovl, lead_text, lead_x,
+                           100.0 * med(lens) / height, lens.empty() ? 0.0 : 100.0 * lens.back() / height, len_max, overlong,
+                           angs.empty() ? 0.0 : angs.front(), med(angs), shallow, nonsw,
+                           med(xings), xings.empty() ? 0.0 : xings.back(), t2, t3);
+            }
         }
         else {
             // legacy: honour each label's manual offset, then nudge overlaps downward
