@@ -16,6 +16,31 @@ The project compiles to:
 
 ---
 
+## Committing to this repo — read before your first commit
+
+**`ae` is a public GitHub repo, and it is worked on from a workspace full of
+pre-publication WHO Collaborating Centre data. A leak here is permanent.**
+
+- **Never commit WHO data**: no strain names, sequences, titers, clade tokens, AA
+  substitutions, or real `.ace` charts. Tests use tiny invented values. Real charts stay
+  referenced from their private locations — read, never copied in. Output rendered from real
+  data (a labelled antigenic map carries strain names and titer-derived coordinates) belongs
+  outside the repo.
+- **Run the gate before every commit:**
+  ```sh
+  python3 tools/who-data-gate.py --staged --message "<your commit message>"
+  ```
+  Exit `0` clean, `1` blocked, `2` usage error. Full mechanism — rules, the private strain
+  list, allowlist vs. baseline, hook wiring, CI — in [`tools/WHO-DATA-GATE.md`](tools/WHO-DATA-GATE.md).
+  Enable the hooks once per clone: `git config core.hooksPath .githooks`.
+- **Never bypass it.** No `git commit --no-verify`, no deleting baseline entries to silence a
+  hit, no weakening a rule to get something past. A genuine false positive goes in the
+  allowlist and gets said out loud in review; a real hit means the gate worked.
+- If no private strain list is configured the scanner **warns and falls back to regex rules
+  only** — a clean run without it is weaker evidence than it looks. Check for the warning.
+
+---
+
 ## Architecture overview
 
 ```
@@ -54,6 +79,19 @@ shelved by architecture decision) — **the bulk of the AD→ae port is now comp
 **Multiple agents work different subsystems in parallel** — the master plan, ownership
 table, per-subsystem milestones, and coordination rules live in [`TODO.md`](TODO.md).
 **Read `TODO.md` and claim a subsystem there before starting any porting work.**
+
+### The verification bar for port work
+
+A parity claim without a number is not a result. State the measurement:
+`27/27 polygons select identical antigen-index sets`, `61 = 61`, `ok=19 fail=0`. Where
+something was not measured, say "not verified" rather than letting an unmeasured claim stand.
+
+**Compare index sets, never counts — and re-derive both sides in the same run.** The report
+maps are re-optimised between runs: the same polygon on the same map gave 211 antigens one day
+and 10 the next, with AD and ae agreeing both times. A number remembered from a previous run is
+not a baseline, it is a different map. Lock a result in with a regression test built on
+**synthetic data only** (`test/chart1.ace` plus transformations applied in the test), as
+`test/adjust_frames.py` does, so it cannot drift with the report charts.
 
 **Core, already ported:** chart engine (relax/optimize, merge, grid-test, procrustes,
 serum circles, stress), sequences/seqdb, virus name/passage parsing, locationdb, tree
@@ -591,6 +629,9 @@ bin/chart-grid-test input.ace
 ## Common gotchas
 
 - `ae_backend` must be on `PYTHONPATH` (from `build/`) — it is **not** installed system-wide.
+- **A change under `py/ae/` is pure Python — no rebuild.** Put your worktree's `py/` first and the prebuilt extension second: `PYTHONPATH=<your-worktree>/py:<ae>/build`. Only C++ under `cc/` needs ninja. Checking this first saves the whole compile.
+- **Never use bare `git stash`** — the stash stack is **shared across worktrees**, and the porting workflow expects you to be in one. Use a WIP commit instead.
+- **Rasterised ink ratios are not ink.** Counting pixels of one exact colour is non-linear in stroke width: a 0.94px stroke antialiases to no exact-`#E0E0E0` pixel and scores ~0, while widening it to 4.2px makes it score in full — that artefact, not the drawing, produced the "74% of AD's ink" and "141%" numbers. Measure geometry instead: [`tools/compare-sigpage-ink.py`](tools/compare-sigpage-ink.py) (stroke widths from the PDF content streams, reported against the expected cell-width ratio, so **"0% off" means correct, not identical**) or [`tools/sigpage-grey-coverage.py`](tools/sigpage-grey-coverage.py) (coverage with the map grid masked structurally). For renderer milestones use [`tools/p2-fidelity/`](tools/p2-fidelity/README.md).
 - **No third-party runtime deps in `py/ae`** — it is pure-stdlib. `py/ae/adjust.py` `_kabsch_align` (the kateri move→relax alignment in `adjust_from_kateri`) previously needed `numpy` for one 2×2 SVD; that was replaced with a closed-form pure-Python 2D orthogonal-Procrustes solution (`_nearest_orthogonal_2x2`, verified to reproduce the numpy result to machine precision), so **numpy is no longer required** — nothing to `pip install`, and it survives Python minor-version bumps. (Historically the fix was `pip install --user --break-system-packages numpy`; that is obsolete.)
 - `build/` is a **symlink** to `build-py314/` (the Python 3.14 build; `build-arm64/` is the 3.10 fallback). Repoint with `ln -sfn build-py314 build`. To remove it: `rm build` (not `rm -rf build`, which would delete the build directory contents).
 - `.ace` files are usually XZ-compressed; opening with a text editor or `cat` will show binary garbage. Use `xz -d -c file.ace` to inspect raw JSON.
