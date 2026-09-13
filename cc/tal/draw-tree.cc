@@ -1712,8 +1712,14 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                                                      // H1, wrong-direction leaders 8 (at 400) -> 0.
             const double K_wlen     = 2.5;           // per-point leader length
             const double K_wquad    = 6.0;           // per (length - len_soft)/fs, squared           // per (length - len_soft)/fs, squared
-            const double K_wang     = 10.0;          // per degree away from the target          // per degree away from the 45 degree target
+            const double K_wang     = 10.0;          // per degree away from the target
             const double K_t3d      = 4.0;           // per point of distance for a band-sweep spot
+            const double K_wink     = 22.0;          // per tree-ink cell the leader crosses. NOTE (measured):
+                                                     // the hand layout's leaders cross a median of 9-11 cells,
+                                                     // the placer's 3-4 — a leader that stays beside its branch
+                                                     // runs along the branch, one that escapes into the band
+                                                     // crosses nothing. So this term charges for exactly the
+                                                     // short placements the hand layout prefers.
             // PINNED labels (user dragged them in the WYSIWYG editor) are NOT auto-placed: each sits at
             // its authored offset (box top-left = node point + offset*page — the editor's exact inverse)
             // and is RESERVED in the occupancy grid up-front, so the auto search for the remaining labels
@@ -1936,7 +1942,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     for (const Cand& k : keep) have[cell(k)] = 1;
                     for (const Cand& c : cands[i]) { const std::size_t k = cell(c); if (!have[k]) { have[k] = 1; keep.push_back(c); } }
                     for (Cand& c : keep)
-                        c.base += std::min(leader_ink_cells(anchors[i].mid_x, anchors[i].ny, c.cx, c.cy), 80) * 22.0;
+                        c.base += std::min(leader_ink_cells(anchors[i].mid_x, anchors[i].ny, c.cx, c.cy), 80) * K_wink;
                     std::sort(keep.begin(), keep.end(), [](const Cand& a, const Cand& b) { return a.base < b.base; });
                     cands[i].swap(keep);
                 }
@@ -1988,7 +1994,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 if (r + 1 < static_cast<int>(n)) { const std::size_t nb = ordA[r + 1]; c += static_cast<long>(WA * std::abs(ang(i, ci) - ang(nb, choice[nb]))); }
                 return c;
             };
-            std::uint32_t rng = 2463534242u;
+            // The restart RNG is fixed so a render is reproducible. AEL_RNG re-seeds it, which is the
+            // only way to tell a real improvement from one restart schedule getting lucky: a weight
+            // change moves the landscape, and which local optimum the restarts happen to land in can
+            // swing the fit by more than the change itself. TEMPORARY knob.
+            std::uint32_t rng = std::getenv("AEL_RNG") ? static_cast<std::uint32_t>(std::strtoul(std::getenv("AEL_RNG"), nullptr, 10)) : 2463534242u;
             const auto rnd = [&](int mm) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return static_cast<int>(rng % static_cast<std::uint32_t>(mm)); };
             const auto conf_i = [&](std::size_t i, int ci) { int c = 0; for (std::size_t j = 0; j < n; ++j) if (j != i) c += pconf(i, ci, j, choice[j]); return c; };
             const auto conf_total = [&]() { int c = 0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) c += pconf(i, choice[i], j, choice[j]); return c; };
@@ -1997,6 +2007,70 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const auto soft_i = [&](std::size_t i, int ci) { double s = 0.0; for (std::size_t j = 0; j < n; ++j) if (j != i) s += psoft(i, ci, j, choice[j]); return s; };
             const auto soft_total = [&]() { double s = 0.0; for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) s += psoft(i, choice[i], j, choice[j]); return s; };
             const auto base_total = [&]() { double b = 0.0; for (std::size_t i = 0; i < n; ++i) b += cands[i][choice[i]].base; return b; };
+            // ---- DIAGNOSTIC (AEL_REF) — is a reference layout reachable, and does the objective
+            // prefer it?  AEL_REF names a TSV of one (first \t last \t text \t box_x0 \t box_y0),
+            // normally the hand-placed layout dumped from the geometry sidecar. For each label we take
+            // the CANDIDATE NEAREST the reference box and score that whole assignment with the same
+            // objective the search minimises. Two numbers then settle the open question about leader
+            // length: if the reference assignment scores BETTER than the search's answer, the search is
+            // failing to reach a solution it should (fix the search or the seed); if it scores WORSE,
+            // the objective genuinely prefers the long-leader layout and the objective is what must
+            // change. Read-only unless AEL_SEEDREF is also set (1 = seed Phase A from it, 2 = seed and
+            // skip the random restarts, i.e. pure local descent from the reference).
+            std::vector<int> ref_choice; std::vector<double> ref_snap;
+            const int seedref = std::getenv("AEL_SEEDREF") ? std::atoi(std::getenv("AEL_SEEDREF")) : 0;
+            if (const char* refpath = std::getenv("AEL_REF")) {
+                std::unordered_map<std::string, std::pair<double, double>> ref;
+                std::ifstream in{refpath};
+                std::string line;
+                while (std::getline(in, line)) {
+                    std::size_t t[4]{}; std::size_t p = 0; bool ok = true;
+                    for (int f = 0; f < 4; ++f) { const std::size_t q = line.find('\t', p); if (q == std::string::npos) { ok = false; break; } t[f] = q; p = q + 1; }
+                    if (!ok) continue;
+                    ref[line.substr(0, t[2])] = {std::stod(line.substr(t[2] + 1, t[3] - t[2] - 1)), std::stod(line.substr(t[3] + 1))};
+                }
+                // AEL_REFEXACT appends the reference box ITSELF as a candidate, costed by the same
+                // formula emit_at uses, instead of snapping to the nearest generated one. Snapping is
+                // a confound: the lattice is ~2.5pt coarse near the anchor, and a 2.5pt shift is
+                // enough to turn boxes that merely touch in the reference into a counted overlap.
+                const bool exact = std::getenv("AEL_REFEXACT") != nullptr;
+                ref_choice.assign(n, 0); ref_snap.assign(n, 0.0);
+                int rejected_free = 0, rejected_ink = 0, rejected_side = 0;
+                for (std::size_t i = 0; i < n; ++i) {
+                    const auto it = ref.find(anchors[i].first + "\t" + anchors[i].last + "\t" + anchors[i].text);
+                    if (it == ref.end()) { fmt::print(stderr, ">>> aa-label REF: no reference row for label {} — diagnostic skipped\n", i); ref_choice.clear(); break; }
+                    const double rx = it->second.first, ry = it->second.second;
+                    if (exact) {
+                        const double fs = anchors[i].fs, th = anchors[i].nlines * fs * 1.18, tw = anchors[i].tw;
+                        const double ax = anchors[i].mid_x, ay = anchors[i].ny;
+                        // which of the generator's filters, if any, would have vetoed this box
+                        double tx, ty; attach_pt(ax, ay, rx, ry, rx + tw, ry + th, tx, ty);
+                        if (tx > ax - gapL) ++rejected_side;
+                        if (!box_free(rx - pad, ry - pad, tw + 2.0 * pad, th + 2.0 * pad)) ++rejected_free;
+                        if (box_hits_ink(rx - pad, ry - pad, rx + tw + pad, ry + th + pad)) ++rejected_ink;
+                        const double La = std::hypot(ax - tx, ay - ty);
+                        const double tha = std::atan2(std::abs(ay - ty), std::max(std::abs(ax - tx), 1e-9));
+                        double base = La * K_wlen;
+                        if (La > len_soft) { const double o = (La - len_soft) / fs; base += o * o * K_wquad; }
+                        base += std::abs(tha - ang_target_for(La)) * (180.0 / PI) * K_wang;
+                        if (La < fs * 0.6) base += K_noleader;
+                        if (ty < ay) base += K_nw;
+                        base += std::min(leader_ink_cells(ax, ay, tx, ty), 80) * K_wink; // the thinning pass's surcharge
+                        cands[i].push_back({rx, ry, rx + tw, ry + th, tx, ty, base, 1});
+                        ref_choice[i] = static_cast<int>(cands[i].size()) - 1; ref_snap[i] = 0.0;
+                        continue;
+                    }
+                    int bc = 0; double bd = std::numeric_limits<double>::max();
+                    for (int ci = 0; ci < static_cast<int>(cands[i].size()); ++ci) {
+                        const double d = std::hypot(cands[i][ci].x0 - rx, cands[i][ci].y0 - ry);
+                        if (d < bd) { bd = d; bc = ci; }
+                    }
+                    ref_choice[i] = bc; ref_snap[i] = bd;
+                }
+                if (exact && !ref_choice.empty())
+                    fmt::print(stderr, ">>> aa-label REF: reference boxes the generator would have VETOED — right-of-branch={} grid-not-free={} hits-ink={} (of {})\n",
+                               rejected_side, rejected_free, rejected_ink, n);
+            }
             // Phase-A objective (double): hard conflicts dominate, then the SOFT penetration gradient
             // (this is the key change — it lets a move that merely *reduces* interference win, so the
             // search flows toward feasibility instead of stalling on a flat all-or-nothing landscape),
@@ -2032,6 +2106,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     seed[i] = bc;
                 }
                 choice = seed;
+                if (seedref && !ref_choice.empty()) choice = ref_choice; // AEL_SEEDREF: start from the reference instead
             }
             // PHASE A — find a CONFLICT-FREE layout, and among those prefer one in branch-y ORDER
             // (ordered labels over ordered branches cannot cross, so order both fixes #5 and removes
@@ -2040,7 +2115,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             best = choice;
             double best_scoreA = scoreA();
             int stale = 0;
-            for (int restart = 0; restart <= 400; ++restart) {
+            for (int restart = 0; restart <= (seedref == 2 ? 0 : 400); ++restart) {
                 // Restart 0 descends from the ordered seed above; the rest are random, which is what
                 // escapes a local minimum the seed cannot.
                 if (restart > 0) for (std::size_t i = 0; i < n; ++i) choice[i] = rnd(std::min<int>(40, static_cast<int>(cands[i].size())));
@@ -2133,6 +2208,68 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     if (bc != cur) { choice[i] = bc; improved = true; }
                 }
                 if (!improved) break;
+            }
+            if (!ref_choice.empty()) { // AEL_REF diagnostic: score the reference assignment against the search's
+                const std::vector<int> saved = choice;
+                const auto lead = [&](std::size_t i, int ci) { return std::hypot(anchors[i].mid_x - cands[i][ci].cx, anchors[i].ny - cands[i][ci].cy); };
+                for (std::size_t i = 0; i < n; ++i) {
+                    choice = ref_choice; const int cfr = conf_i(i, ref_choice[i]); const double sfr = soft_i(i, ref_choice[i]);
+                    choice = saved;      const int cfs = conf_i(i, saved[i]);
+                    fmt::print(stderr, ">>> aa-label REF[{:>3}] snap={:5.1f} | ref lead={:5.1f} base={:7.0f} conf={} soft={:6.1f} tier{} | auto lead={:5.1f} base={:7.0f} conf={} tier{} | moved={:5.1f}\n",
+                               i, ref_snap[i], lead(i, ref_choice[i]), cands[i][ref_choice[i]].base, cfr, sfr, cands[i][ref_choice[i]].tier,
+                               lead(i, saved[i]), cands[i][saved[i]].base, cfs, cands[i][saved[i]].tier,
+                               std::hypot(cands[i][ref_choice[i]].x0 - cands[i][saved[i]].x0, cands[i][ref_choice[i]].y0 - cands[i][saved[i]].y0));
+                }
+                const auto med = [](std::vector<double> v) { std::sort(v.begin(), v.end()); return v.empty() ? 0.0 : v[v.size() / 2]; };
+                std::vector<double> lr, ls, sn;
+                for (std::size_t i = 0; i < n; ++i) { lr.push_back(lead(i, ref_choice[i])); ls.push_back(lead(i, saved[i])); sn.push_back(ref_snap[i]); }
+                // Break the conflict count down by kind, and re-count it with the search's extra
+                // separation margins (m between boxes, mt around text) REMOVED — that is exactly the
+                // test the metrics line applies, so a layout that is clean there and dirty here is
+                // being rejected by the margins alone, not by a real overlap.
+                const auto totals = [&](const char* tag, double leadmed) {
+                    int bb = 0, ll = 0, lt = 0, bb0 = 0, ll0 = 0, lt0 = 0;
+                    for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) {
+                        const Cand& a = cands[i][choice[i]]; const Cand& b = cands[j][choice[j]];
+                        if (a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - m < b.y1 && b.y0 - m < a.y1) ++bb;
+                        if (a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1) ++bb0;
+                        if (segs_cross(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy)) { ++ll; ++ll0; }
+                        if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0 - mt, b.y0 - mt, b.x1 + mt, b.y1 + mt)) ++lt;
+                        if (seg_box(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0 - mt, a.y0 - mt, a.x1 + mt, a.y1 + mt)) ++lt;
+                        if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0, b.y0, b.x1, b.y1)) ++lt0;
+                        if (seg_box(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0, a.y0, a.x1, a.y1)) ++lt0;
+                    }
+                    // and break `base` into the terms that make it up, so a layout that loses on base
+                    // says WHICH preference it lost on rather than just by how much
+                    double t_len = 0, t_quad = 0, t_ang = 0, t_nol = 0, t_nw = 0, t_ink = 0, t_tier = 0, t_res = 0;
+                    int n_nw = 0, n_t2 = 0, n_t3 = 0;
+                    for (std::size_t i = 0; i < n; ++i) {
+                        const Cand& c = cands[i][choice[i]];
+                        const double fs = anchors[i].fs, ax = anchors[i].mid_x, ay = anchors[i].ny;
+                        const double La = std::hypot(ax - c.cx, ay - c.cy);
+                        const double tha = std::atan2(std::abs(ay - c.cy), std::max(std::abs(ax - c.cx), 1e-9));
+                        const double e_len = La * K_wlen;
+                        const double e_quad = La > len_soft ? ((La - len_soft) / fs) * ((La - len_soft) / fs) * K_wquad : 0.0;
+                        const double e_ang = std::abs(tha - ang_target_for(La)) * (180.0 / PI) * K_wang;
+                        const double e_nol = La < fs * 0.6 ? K_noleader : 0.0;
+                        const double e_nw = c.cy < ay ? K_nw : 0.0;
+                        const double e_ink = std::min(leader_ink_cells(ax, ay, c.cx, c.cy), 80) * K_wink;
+                        const double e_tier = c.tier == 2 ? K_t2 : 0.0;
+                        t_len += e_len; t_quad += e_quad; t_ang += e_ang; t_nol += e_nol; t_nw += e_nw; t_ink += e_ink; t_tier += e_tier;
+                        t_res += c.base - (e_len + e_quad + e_ang + e_nol + e_nw + e_ink + e_tier);
+                        if (e_nw > 0) ++n_nw;
+                        if (c.tier == 2) ++n_t2;
+                        if (c.tier == 3) ++n_t3;
+                    }
+                    fmt::print(stderr, ">>> aa-label REF totals {:<12} conflicts={:<3} (box/box={} leader/leader={} leader/text={}; with NO margins: {}/{}/{}) soft={:8.1f} inversions={:<3} base={:9.0f} scoreA={:12.0f} leader med={:.1f}pt\n",
+                               tag, conf_total(), bb, ll, lt, bb0, ll0, lt0, soft_total(), inv_total(), base_total(), scoreA(), leadmed);
+                    fmt::print(stderr, ">>> aa-label REF  base {:<12} length={:.0f} quad={:.0f} angle={:.0f} no-leader={:.0f} above-branch={:.0f}(n={}) leader-ink={:.0f} tier2={:.0f}(n={}) tier3-residual={:.0f}(n={})\n",
+                               tag, t_len, t_quad, t_ang, t_nol, t_nw, n_nw, t_ink, t_tier, n_t2, t_res, n_t3);
+                };
+                choice = ref_choice; totals("REFERENCE", med(lr));
+                choice = saved;      totals("SEARCH", med(ls));
+                fmt::print(stderr, ">>> aa-label REF snap-to-candidate distance: med={:.1f}pt max={:.1f}pt (how well the candidate set can even express the reference)\n",
+                           med(sn), *std::max_element(sn.begin(), sn.end()));
             }
             for (std::size_t i = 0; i < n; ++i) {
                 const Cand& c = cands[i][choice[i]];
