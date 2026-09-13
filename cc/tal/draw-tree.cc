@@ -1656,7 +1656,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // layout had to leave the ideal envelope; nothing in the search reads it.
             struct Cand { double x0, y0, x1, y1, cx, cy, base; int tier; };
             std::vector<std::vector<Cand>> cands(anchors.size());
-            const double gapL = mrca_fs * 0.45; // min gap between the label's right edge and the branch
+            const double gapL = mrca_fs * 0.45; // min gap between the label's right edge and the branch // min gap between the label's right edge and the branch
             // Clearance kept clear of tree ink around each label. Held at AD's 0.3: widening it to
             // 0.45 measurably squeezed the top-of-tree labels out of the thin left-hand gaps they
             // had been using and exiled them to the right of their branches. Text/branch separation
@@ -1668,7 +1668,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // worse angle rather than a leader twice as long, and `len_max` is a hard ceiling.
             // The old code had neither: its only length term was linear (len*1.8) against a 0.35*height
             // reach, so a far-flung candidate could always buy its way out of a local conflict.
-            const double len_soft = 0.030 * height;
+            const double len_soft = 0.018 * height;
             const double len_max  = 0.110 * height;
             // #3 "leader lines should be NE-SW, and not exactly horizontal": measure the leader's angle
             // from the horizontal and aim it at 45°. `ang_min` is a HARD floor — a candidate shallower
@@ -1676,21 +1676,25 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // leaders (the old code only added a soft penalty when |dy| < 1.6*fs, which a long leader
             // satisfied while still running at 5°). `ang_max` keeps them off the vertical, which reads
             // as a stray tick rather than a leader.
-            const double ang_target = 45.0 * PI / 180.0;
-            const double ang_min    = 22.0 * PI / 180.0;
+            // Angles FITTED to Sarah's hand layout (121 labels over the three report trees), not invented.
+            // The previous 45 degree target with a hard 22 degree floor was a guess, and the hand layout
+            // disagrees with it flatly: her median leader is 25 degrees and 45% of her labels sit
+            // SHALLOWER than the old floor, which the old rules could not produce at all.
+            const double ang_target = 27.0 * PI / 180.0;
+            const double ang_min    = 8.0 * PI / 180.0;
             const double ang_max    = 72.0 * PI / 180.0;
             // Cost weights, chosen by sweeping each one over the three report trees and reading the
             // metrics line below (h1/h3/bvic `*.after-2021`). They are only a preference ordering: every
             // term here is worth far less than one overlap, which the search scores at 1e6.
             const double K_len_max2 = 0.30 * height; // tier-2 reach
             const double K_t2       = 700.0;         // flat surcharge for leaving the target envelope
-            const double K_nw       = 3000.0;        // flat surcharge for the NW-SE mirror (label ABOVE the branch).
+            const double K_nw       = 250.0;         // label ABOVE the branch: a mild preference, not a ban --        // flat surcharge for the NW-SE mirror (label ABOVE the branch).
                                                      // Stiff on purpose: with the band there is nearly always a
                                                      // below-the-branch spot, and this is what takes it. Measured on
                                                      // H1, wrong-direction leaders 8 (at 400) -> 0.
-            const double K_wlen     = 1.8;           // per-point leader length
-            const double K_wquad    = 6.0;           // per (length - len_soft)/fs, squared
-            const double K_wang     = 10.0;          // per degree away from the 45 degree target
+            const double K_wlen     = 2.5;           // per point of leader length           // per-point leader length
+            const double K_wquad    = 6.0;           // per (length - len_soft)/fs, squared           // per (length - len_soft)/fs, squared
+            const double K_wang     = 10.0;          // per degree away from the target          // per degree away from the 45 degree target
             const double K_t3d      = 4.0;           // per point of distance for a band-sweep spot
             // PINNED labels (user dragged them in the WYSIWYG editor) are NOT auto-placed: each sits at
             // its authored offset (box top-left = node point + offset*page — the editor's exact inverse)
