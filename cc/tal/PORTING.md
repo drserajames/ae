@@ -733,22 +733,30 @@ because ae has **two** section implementations and they do not agree:
 | | `clades.cc` `apply_section_tolerance` (sig pages) | `draw-tree.cc` clade_plan (the tree) |
 |---|---|---|
 | merge gap `<= inclusion` | same | same |
-| all bands small | AD behaviour: keep them **all** | keeps only the **largest** |
+| all bands small | AD behaviour: keep them **all** | same (fixed 2026-09-13; had kept only the largest) |
 | `all-clades` tolerances | inherited as the per-clade default | **not read**; per-clade only, 0/missing → AD's 10/5 |
 
-Neither divergence changes this round's h1/h3/bvic output — the "every band was small" branch
-never fires on them (the diagnostic prints an explicit `NOTE:` when it does), and no report
-`.tal` sets `all-clades` tolerances. They are recorded here, and surfaced at runtime, rather
-than silently "fixed": changing either alters what gets drawn and is a report-data decision.
+The remaining divergence (`all-clades` tolerances) changes nothing on this round's h1/h3/bvic —
+no report `.tal` sets them. It is recorded rather than silently "fixed": changing it alters what
+gets drawn and is a report-data decision.
 
-### The drawing path draws ONE bracket per clade
+### One bracket per BAND (changed 2026-09-13)
 
-`draw-tree.cc` draws a single arrow + label per clade, spanning its **largest** band; AD draws
-one per *section*. So an ae-rendered tree cannot double-label a clade — where AD would draw a
-second bracket for a second section, ae silently omits it. This is why the diagnostic reports
-both the drawn bands **and** the bands dropped by `section-exclusion-tolerance`: a clade shown
-`(1)` may be one genuine run, or several runs whose strays were dropped, and §10.5's
-"does this resemble last round?" check needs to tell those apart.
+`draw-tree.cc` now draws an arrow + arms + label for **every** band that survives the
+include/exclude tolerances, all of a clade's bands sharing the clade's slot — AD's per-section
+draw (`Clades::draw`, acmacs-tal `clades.cc`). Previously it drew a single arrow over the clade's
+**largest** band, so a fragmented clade rendered as one short bracket and the other bands vanished
+silently. That hid exactly what §10.5 asks the user to notice; a fragmented clade must *show* as
+several brackets, and bringing it back to one is the user's job via the tolerances.
+
+Bands removed by `section-exclusion-tolerance` are still not drawn — that is what exclusion means —
+which is why the diagnostic reports them separately: a clade shown `(1)` may be one genuine run, or
+several runs whose strays were dropped, and §10.5's "does this resemble last round?" check needs to
+tell those apart.
+
+Measured: `bvic.after-2021` C.1 (two kept bands) now renders **two** brackets in the clade column,
+at page y≈28 and y≈804 (slot 4, x≈659) — band centres at ~1% and ~83% of the tree. h1 is unchanged
+(every clade there has one kept band); its render is byte-identical before and after this change.
 
 Measured on `2026-0921-ssm` (`tree/bvic.after-2021.tal`, `tree/h1.after-2021.tal`):
 

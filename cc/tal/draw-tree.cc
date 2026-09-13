@@ -280,8 +280,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     struct CladePlan { std::size_t rank; std::vector<CladeBand> bands; int slot; long first_v; long last_v; std::size_t longest; double label_scale; int rotation; double offset_x; double offset_y;
                        // the rest is carried purely for the clade-section diagnostic below:
                        double incl; double excl;      // the tolerances actually applied
-                       std::vector<CladeBand> dropped; // post-merge bands the exclusion tolerance removed
-                       bool kept_largest{false}; };    // every band was small, so only the largest was kept (AD keeps them ALL)
+                       std::vector<CladeBand> dropped; }; // post-merge bands the exclusion tolerance removed
     std::vector<CladePlan> clade_plan;
     int clade_max_slot = 0;
     {
@@ -324,13 +323,13 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 else
                     dropped.push_back(b); // reported by the clade-section diagnostic, so a `(1)` that is
             }                             // really "several runs, the strays dropped" is not mistaken for monophyly
-            bool kept_largest{false};
+            // AD clades.cc:118-120 drops the small sections only when at least one survives; when EVERY
+            // section is small nothing is dropped and the clade keeps them all. ae used to keep only the
+            // LARGEST here, which silently hid the rest — now matched to AD (and to clades.cc's
+            // apply_section_tolerance, so the drawing and signature-page paths agree).
             if (kept.empty()) {
-                const CladeBand* big = &bands.front();
-                for (const auto& b : bands) if (b.size > big->size) big = &b;
-                kept.push_back(*big);
-                kept_largest = true;
-                std::erase_if(dropped, [big](const CladeBand& b) { return b.first_v == big->first_v && b.last_v == big->last_v; });
+                kept = bands;
+                dropped.clear();
             }
             std::size_t longest = 0;
             for (const auto& b : kept) longest = std::max(longest, b.size);
@@ -348,7 +347,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const int rot = style ? style->rotation_degrees : 90;
             const double offx = style ? style->label_offset_x : 0.002;
             const double offy = style ? style->label_offset_y : 0.0;
-            clade_plan.push_back({k, std::move(kept), slot, 0, 0, longest, lscale, rot, offx, offy, incl, excl, std::move(dropped), kept_largest});
+            clade_plan.push_back({k, std::move(kept), slot, 0, 0, longest, lscale, rot, offx, offy, incl, excl, std::move(dropped)});
             clade_plan.back().first_v = clade_plan.back().bands.front().first_v;
             clade_plan.back().last_v = clade_plan.back().bands.back().last_v;
         }
@@ -430,11 +429,6 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     fmt::format_to(app, " [{}] {}..{}", band.size, band.first_v, band.last_v);
                 fmt::format_to(app, "\n");
             }
-            if (plan.kept_largest)
-                fmt::format_to(app,
-                               "   NOTE: every band was <= the exclusion tolerance. ae keeps only the LARGEST; AD keeps them ALL "
-                               "(acmacs-tal clades.cc:118-120) and would draw {} brackets here. Lower \"section-exclusion-tolerance\" to see them.\n",
-                               plan.bands.size() + plan.dropped.size());
         }
         fmt::format_to(app, ">>> ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n");
 
@@ -926,13 +920,22 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         //     labels centred on their bands overprint into garbled text ("C.1.C1.7.2"). Spread each
         //     overlapping cluster apart with a small gap, centred on the cluster's mean, so the labels
         //     read cleanly like AD. Only the TEXT moves — the brackets stay on their true bands. ---
-        std::vector<double> label_cy(clade_plan.size());
-        std::vector<double> label_half(clade_plan.size()); // half text-extent along the leaf axis
-        for (std::size_t i = 0; i < clade_plan.size(); ++i) {
-            const auto& pl = clade_plan[i];
-            const CladeBand* mb = &pl.bands.front();
-            for (const auto& b : pl.bands) if (b.size > mb->size) mb = &b;
-            label_cy[i] = dev_y(static_cast<double>(mb->first_v + mb->last_v) / 2.0) + pl.offset_y * height;
+        // One bracket + label per BAND (AD Clades::draw draws the arrow, the arms and the label per
+        // SECTION, all sections of a clade sharing the clade's slot — acmacs-tal clades.cc:248-... ).
+        // A clade left fragmented by its tolerances therefore SHOWS as several brackets, which is the
+        // signal the `.tal` needs tuning; it is the user's job to bring it back to one via
+        // section-inclusion/exclusion-tolerance (RUNNING-THE-REPORT.md §10.5).
+        struct BandLabel { std::size_t plan_index; std::size_t band_index; };
+        std::vector<BandLabel> band_labels;
+        for (std::size_t i = 0; i < clade_plan.size(); ++i)
+            for (std::size_t b = 0; b < clade_plan[i].bands.size(); ++b)
+                band_labels.push_back({i, b});
+        std::vector<double> label_cy(band_labels.size());
+        std::vector<double> label_half(band_labels.size()); // half text-extent along the leaf axis
+        for (std::size_t i = 0; i < band_labels.size(); ++i) {
+            const auto& pl = clade_plan[band_labels[i].plan_index];
+            const CladeBand& bd = pl.bands[band_labels[i].band_index];
+            label_cy[i] = dev_y(static_cast<double>(bd.first_v + bd.last_v) / 2.0) + pl.offset_y * height;
             const double fs = std::max(slot_px * pl.label_scale, 2.5);
             const std::string nm = clade_display_for(clade_sections[pl.rank].name);
             const double tw = pdf.text_size(nm, fs).first;
@@ -942,7 +945,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         }
         {
             std::unordered_map<int, std::vector<std::size_t>> by_slot;
-            for (std::size_t i = 0; i < clade_plan.size(); ++i) by_slot[clade_plan[i].slot].push_back(i);
+            for (std::size_t i = 0; i < band_labels.size(); ++i) by_slot[clade_plan[band_labels[i].plan_index].slot].push_back(i);
             const double decl_gap = 0.004 * height; // gap between separated labels (~4px @1000)
             for (auto& [slot, idxs] : by_slot) {
                 if (idxs.size() < 2) continue;
@@ -966,8 +969,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 }
             }
         }
-        for (std::size_t plan_index = 0; plan_index < clade_plan.size(); ++plan_index) {
-            const auto& plan = clade_plan[plan_index];
+        for (std::size_t label_index = 0; label_index < band_labels.size(); ++label_index) {
+            const auto& plan = clade_plan[band_labels[label_index].plan_index];
+            const CladeBand& band = plan.bands[band_labels[label_index].band_index];
             const Clade& clade = clade_sections[plan.rank];
             const double cx = clades_left
                 ? clade_right_edge - slot_px * (static_cast<double>(plan.slot) + 1.0)
@@ -977,15 +981,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // slot_px*label_scale <= 0.02*clades_area_h (<= ~20px) by construction, so no guard needed
             // beyond a tiny floor. H3/BVic slot_px (7-9.8) are unaffected (well below the old cap).
             const double clade_fs = std::max(slot_px * plan.label_scale, 2.5);
-            // ONE arrow per clade, spanning its LARGEST band. After the AD-default merge (incl=10)
-            // above, every SHOWN H1/H3/BVic clade collapses to exactly ONE kept band, so largest ==
-            // the full section extent (C.1.7 now [10118..11646], not the old [10776..11096] stub).
-            // The largest-band pick is retained purely as a safety net: it still excludes any stray
-            // distant run that survives merge+exclude (e.g. B(5a.1)) from over-stretching the bracket,
-            // matching AD's per-section draw for the single kept section.
-            const CladeBand* main_band = &plan.bands.front();
-            for (const auto& b : plan.bands) if (b.size > main_band->size) main_band = &b;
-            const long ext_first = main_band->first_v, ext_last = main_band->last_v;
+            // One arrow per BAND, spanning exactly that band — AD's per-section draw. (ae previously
+            // drew a single arrow over the clade's LARGEST band only, which made a fragmented clade
+            // look like one short bracket instead of several, hiding the very thing §10.5 asks you
+            // to fix. The brackets never span across a gap: each is its own band's extent.)
+            const long ext_first = band.first_v, ext_last = band.last_v;
             {
                 // AD's clade double-arrow spans the FULL vertical extent of the section: from
                 // pos_y_above(first) = the TOP edge of the first leaf's row (half a row above its
@@ -1031,7 +1031,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 const std::string name = clade_display_for(clade.name);
                 // label centred on the clade's vertical extent (AD vpos=middle), shifted by the
                 // per-clade offset, then decluttered (see pre-pass) so same-slot labels don't overlap.
-                const double center_y = label_cy[plan_index];
+                const double center_y = label_cy[label_index];
                 // NO halo behind the clade name (r7 item #3): AD draws the clade labels with a plain
                 // transparent background (acmacs-tal Clades::draw calls surface.text with no halo) —
                 // the label sits in the white clade column beside its arrow. The r3 white-halo box was
