@@ -129,8 +129,8 @@ get_report = report           # alias to avoid renaming report argument in find(
 
 def set_semantic(vaccines_found: list[Vaccine], current_vaccine_years: list[str] = [], disable: dict[str, dict[str, list[str]]] = {}, choose: dict[str, list[dict[str, str|int]]] = {}):
     """
-    disable: {"any": {"name": ["SOUTH AUSTRALIA/34/2019"]}, "egg": {"name": ["CAMBODIA/E0826360/2020"]}} use "name" or "year" as a selector
-    choose: {"egg": [{"name": "VICTORIA/2570/2019", "index": 1}]} use "name" or "year" as a selector to choose index (default is 0) to get from list for passage
+    disable: {"any": {"name": ["EXAMPLEA/34/2019"]}, "egg": {"name": ["EXAMPLEB/826360/2020"]}} use "name" or "year" as a selector
+    choose: {"egg": [{"name": "EXAMPLEC/2570/2019", "index": 1}]} use "name" or "year" as a selector to choose index (default is 0) to get from list for passage
     """
 
     def is_disbaled(vac: Vaccine, selector: dict[str, list[str]]) -> bool:

@@ -17,31 +17,99 @@ Scanning file contents **and** commit messages, it flags:
 | AA substitution | `<AA><2–3 digits><AA>` | `K160T` |
 | Clade (3C) | `3C.<...>` | `3C.2a1b.2a.2` |
 | Clade (generic) | `<digit><letter>.<digit>...` | `5a.1` |
-| **Private strain list** | exact names from an **external** file | (see below) |
+| **Private strain list** | normalised substring match against an **external** file | (see below) |
 
 Hex colour codes (`#rrggbb`) and `0x..` literals are masked before the rules run, so they
 never trip the gate.
 
 ## The private strain list (the high-signal check)
 
-The authoritative, current-season sensitive strain names are **never stored in this repo**
-(that would itself be the leak). They are sourced at runtime from, in order:
+The regex rules above match anything *shaped* like `LOCATION/isolate/year`. The private
+list exists for the names they **structurally cannot** match — and for nothing else.
 
-1. `$WHO_STRAIN_LIST` — path to a newline-delimited file of strain names, or
-2. a gitignored local file at repo root: `.who-strain-list` (or `.who-strain-list.txt`).
+**It is the complement of the rules, not a name dump.** A name already caught by a regex
+rule must **not** be added: it buys no coverage, and every entry costs time on every
+commit. Enforced by construction — the generator drops any candidate the rules already
+match. (Measured 2026-09-13: a 6,486-name dump was 89.8% redundant and reduced to 54
+genuine residuals, cutting a full-tree scan from ~37 s to ~1.5 s.)
 
-Matches against this list are **case-insensitive substring** and **unconditional** — they
-fail the gate even if they would otherwise be allowlisted or baselined. If no list is found
-the scanner prints a warning and falls back to the regex rules only.
+### Where it lives
+
+The names themselves are **never stored in this repo** — that would itself be the leak.
+They live in the **private** `acmacs-data` repo, gitignored even there, and are found at
+runtime via:
+
+1. **`$WHO_STRAIN_LIST`** — an explicit override. `ae-env.sh` exports it as
+   `$ACMACS_DATA/.who-strain-list` when that file exists.
+2. **`$ACMACS_DATA/.who-strain-list`, else `../acmacs-data/.who-strain-list`** beside this
+   checkout — found automatically, with no environment set up at all. This matters: **git
+   hooks do not inherit a shell that sourced `ae-env.sh`**, so without this the pre-commit
+   hook would quietly fall back to regex-only at the exact moment the check matters most.
+   A silently degraded gate is the failure mode this tool exists to prevent.
+3. A gitignored `.who-strain-list` / `.who-strain-list.txt` at **this repo's root** — a
+   legacy fallback that still works but **must not be used**. A file of pre-publication
+   names sitting in a public checkout is one `git add -f` away from a permanent leak.
+   Keep the list in `acmacs-data`.
+
+Note that `--all` scans **git-tracked** files, so a gitignored list sitting in this repo's
+root is not scanned even though it is there. A clean `--all` is **not** evidence that no
+strain data is present in the checkout — check that with `ls`, not with the gate.
+
+If no list is found the scanner warns and falls back to the regex rules only; `--strict`
+turns that warning into a failure (use it in CI and hooks).
+
+### How matching works
+
+- **Case-insensitive substring**, and **unconditional** — a private-list hit fails the gate
+  even if the token would otherwise be allowlisted or baselined. It is never grandfathered.
+- **Whitespace and underscores are normalised** to single spaces on both sides (list entry
+  and scanned text) before comparing. This is not cosmetic: seq_ids write spaces as
+  underscores, so a multi-word location stored as `EXAMPLE TOWN/…` would otherwise
+  **silently miss** the `EXAMPLE_TOWN/…` form that actually appears in the data — a false
+  negative, the one failure class this gate exists to prevent.
+- Entries shorter than `PRIVATE_MIN_LEN` (8 characters) are **rejected with a warning**, not
+  matched. A short entry substring-matches ordinary English words and would fail the gate
+  everywhere.
+
+### Regenerating it
+
+In `acmacs-data`, from a per-round candidate dump:
+
+```sh
+# 1. dump every candidate name from the round's charts (+ current vaccine strains)
+./who-strain-candidates-make.py <path-to-round> -o .who-strain-candidates
+# 2. keep only the names the gate's regex rules do NOT already match
+./who-strain-list-make.py .who-strain-candidates -o .who-strain-list
+```
+
+Step 1 derives its season cutoff from the round label (`2026-0921-ssm` → strains collected
+on/after 2025-09-01, vaccines recommended on/after 202509); `--since` / `--vaccines-since`
+override it, and `--all-dates` takes every name in the round's charts as a superset.
+`ae/ae-env.sh` must be sourced first, for `ae_backend`.
+
+Both files are gitignored in `acmacs-data`; the two generator scripts are clean and are
+tracked. Re-run after each round, and whenever the regex rules change — the list shrinks on
+its own as the rules improve.
 
 ## Allowlist mechanism
 
-Two files, both **WHO-data-clean** (no strain/AA/clade plaintext):
+Two files. Neither ever holds a **strain name** in plaintext:
 
-- **`tools/who-data-gate-allowlist.txt`** — hand-edited. Sections:
+- **`tools/who-data-gate-allowlist.txt`** — hand-edited. Entries here are **unscoped and
+  permanent**: one line passes that token in every file, for good. Only two kinds of token
+  qualify — invented placeholders, and nomenclature that is published and can never become
+  pre-publication. **A real strain name never qualifies**, however long it has been
+  published; it goes in the baseline instead, where it is hashed and scoped to one path.
+  Sections:
   - `[allow-literal]` — exact non-WHO false-positive tokens (e.g. a code identifier that
-    trips the AA rule), passed now and in future, anywhere.
-  - `[allow-regex]` — categorical false-positive patterns (`fullmatch`).
+    trips the AA rule), passed now and in future, anywhere. Also the home of **published
+    clade designations**, which are public by definition. They are listed **one by one**,
+    deliberately: a categorical clade regex here would disable the clade rule outright,
+    whereas an unlisted — i.e. newly designated — clade token still fails the gate.
+  - `[allow-regex]` — categorical false-positive patterns (`fullmatch`). Also the home of
+    path- and URL-shaped false positives, which look like `LOCATION/isolate/year` to the
+    strain rules — build paths (`Cellar/<pkg>/<version>`) and FTP URL segments are
+    allowlisted here rather than baselined, because they are categorical, not grandfathered.
   - `[skip-path]` — extra `fnmatch` globs not to scan (`subprojects/**` is skipped by default).
 - **`tools/who-data-gate-baseline.txt`** — **auto-generated**. Holds `sha256(uppercased
   token)[:16]` hashes of tokens that were **already public** in the tree when the gate was
@@ -57,6 +125,13 @@ Two files, both **WHO-data-clean** (no strain/AA/clade plaintext):
 
   Prefer `[allow-literal]`/`[skip-path]` for genuine false positives; use the baseline only
   for grandfathering already-public content.
+
+  Every entry needs a justification that says **what the tokens are in that file**, and an
+  expiry that reflects that file's own risk — a live config that gets regenerated against
+  current data earns a much shorter one than a frozen fixture. A shared blanket sentence
+  satisfies `--strict` and tells a later reader nothing; `tools/WHO-DATA-GATE-AUDIT.md`
+  records how the baseline was taken apart once for exactly that reason, and what each
+  entry now covers.
 
 ## How to run
 

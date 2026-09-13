@@ -51,15 +51,19 @@ from fnmatch import fnmatch
 # Detection rules
 # --------------------------------------------------------------------------- #
 # An isolate id is usually numeric but labs also use alphanumerics (R10785, 16V-9267,
-# NIC-NIH-1721). The trailing (?![0-9_A-Za-z-]) — rather than \b — is what lets the year
+# NIC-NIH-1721) — note these may start with a LETTER. Requiring a leading digit here was a
+# false-negative hole: it hid every letter-initial isolate (RV02127-26, SWL13396, BPH3048742,
+# and NIC-NIH-1721 above) from the strain rules, which is why the private list had to carry
+# ~600 names that the regexes should have caught by themselves.
+# The trailing (?![0-9_A-Za-z-]) — rather than \b — is what lets the year
 # be followed by a seq_id passage/hash suffix (…/2021_MDCK1_A1B2C3D4) and still match:
 # \b failed there because "_" is a word character, which hid every seq_id from the gate.
-_ISOLATE = r"[0-9][0-9A-Za-z_-]{0,19}"
+_ISOLATE = r"[0-9A-Za-z][0-9A-Za-z_-]{0,19}"
 _YEAR = r"(?:19|20)?[0-9]{2}"
 _END = r"(?![0-9])"
 # Strain names: A/Location/123/2021, B/Some Place/7/17  (2- or 4-digit year)
 RE_STRAIN = re.compile(rf"\b[AB]/[A-Za-z][A-Za-z .'_-]*/{_ISOLATE}/{_YEAR}{_END}")
-# Bare strain names WITHOUT an A/B prefix: Location/number/year, e.g. VICTORIA/2570/2019.
+# Bare strain names WITHOUT an A/B prefix: Location/number/year, e.g. EXAMPLETOWN/2570/2019.
 # Requires a Capitalised location word (>=3 alpha) so lowercase paths ("results/2/2024")
 # don't match; "_" and "-" are allowed because seq_ids write spaces as underscores
 # (SOUTH_AFRICA/…, NIIGATA-C/…).
@@ -241,22 +245,54 @@ def load_baseline(path: str, cfg: Config) -> None:
                 rel, set_hash.lower(), count, expires, justification.strip())
 
 
+# Private-list matching is normalised: seq_ids write spaces as underscores
+# (GUANGXI JIANGZHOU/... vs GUANGXI_JIANGZHOU/...), so a raw substring test on the
+# space form silently MISSES the underscore form — a false negative, which is the one
+# failure class this gate exists to prevent. Collapse both sides to single spaces.
+def norm_private(s: str) -> str:
+    return re.sub(r"[\s_]+", " ", s.lower())
+
+
+# Entries shorter than this are rejected: a very short name substring-matches
+# ordinary words and would fail the gate everywhere.
+PRIVATE_MIN_LEN = 8
+
+
 def load_private_list(cfg: Config, root: str) -> str | None:
     """Return the source path used, or None if no private list was found."""
     candidates = []
     env = os.environ.get("WHO_STRAIN_LIST")
     if env:
         candidates.append(env)
-    # gitignored local fallbacks (never committed)
+    # The list lives in the private acmacs-data repo. Look for it there directly, so the
+    # check still runs when the environment is not set up -- git hooks do NOT inherit a
+    # shell that sourced ae-env.sh, and a silently regex-only gate is the failure this
+    # whole file exists to prevent. Mirrors ae-env.sh's own $ACMACS_DATA / sibling logic.
+    data_dir = os.environ.get("ACMACS_DATA") or os.path.join(root, os.pardir, "acmacs-data")
+    candidates.append(os.path.join(data_dir, ".who-strain-list"))
+    # gitignored local fallbacks (legacy; keeping the list inside this public repo is
+    # discouraged -- see WHO-DATA-GATE.md)
     candidates.append(os.path.join(root, ".who-strain-list"))
     candidates.append(os.path.join(root, ".who-strain-list.txt"))
     for cand in candidates:
+        cand = os.path.normpath(cand) if cand else cand
         if cand and os.path.exists(cand):
+            too_short = []
             with open(cand, "r", encoding="utf-8") as fh:
                 for raw in fh:
                     name = raw.strip()
-                    if name and not name.startswith("#"):
-                        cfg.private_list.append(name.lower())
+                    if not name or name.startswith("#"):
+                        continue
+                    if len(name) < PRIVATE_MIN_LEN:
+                        too_short.append(name)
+                        continue
+                    cfg.private_list.append(norm_private(name))
+            cfg.private_list = sorted(set(cfg.private_list))
+            if too_short:
+                print(f"who-data-gate: WARNING — {len(too_short)} private-list "
+                      f"entr{'y' if len(too_short) == 1 else 'ies'} shorter than "
+                      f"{PRIVATE_MIN_LEN} chars ignored (too generic to match safely)",
+                      file=sys.stderr)
             return cand
     return None
 
@@ -317,15 +353,15 @@ def scan_text(text: str, source: str, cfg: Config, collect_tokens=None) -> list[
     # and NEVER suppressed by the allowlist or the baseline.
     if collect_tokens is None and cfg.private_list:
         lines = text.splitlines()
-        low = text.lower()
-        for i, line in enumerate(lines, 1):
-            ll = line.lower()
+        norm_lines = [norm_private(l) for l in lines]
+        whole = norm_private(text)
+        for i, (line, nl) in enumerate(zip(lines, norm_lines), 1):
             for name in cfg.private_list:
-                if name in ll:
+                if name in nl:
                     findings.append(Finding(source, i, "private-list", name, line))
         # also catch names split across the whole blob but not a single line (rare)
         for name in cfg.private_list:
-            if name in low and not any(name in l.lower() for l in lines):
+            if name in whole and not any(name in nl for nl in norm_lines):
                 findings.append(Finding(source, 0, "private-list", name, "(multi-line)"))
     return findings
 
