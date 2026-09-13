@@ -2,6 +2,7 @@
 
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "tree/tree-iterator.hh" // node_index_base_t
@@ -104,6 +105,13 @@ namespace ae::tal
     // HzSections::set_aa_transitions). Transitions are read from `Inode::aa_transitions`,
     // so populate them first (ae::tree::set_aa_nuc_transition_labels) if the tree carries none.
     std::vector<ComputedHzSection> compute_hz_sections(ae::tree::Tree& tree, const per_clade_parameters_t& per_clade, const CladeSectionParameters& all_clades = {});
+
+    // AD HzSections::set_aa_transitions, on its own: for each `[first_vertical, last_vertical]`
+    // span of shown-leaf rows, the accumulated aa-transitions of every inode whose subtree fully
+    // contains that span, formatted the way AD's `display_most_important(0)` does (entries with an
+    // unresolved residue dropped). The result is parallel to `spans`. Used by compute_hz_sections
+    // and by tal-draw's clade-section diagnostic (cc/tal/draw-tree.cc), so both report identically.
+    std::vector<std::string> section_aa_transitions(ae::tree::Tree& tree, const std::vector<std::pair<std::size_t, std::size_t>>& spans);
 
 } // namespace ae::tal
 

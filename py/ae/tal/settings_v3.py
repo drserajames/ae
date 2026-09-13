@@ -522,6 +522,13 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                 # Emit only when explicitly disabled; absent => C++ default (drawn).
                 if cmd.get("horizontal-lines") is False:
                     clades["horizontal_lines"] = False
+                # AD Clades::Parameters::report (acmacs-tal clades.hh:99) defaults to TRUE — the
+                # clade-section diagnostic (band counts, gaps, hz dump, intersect warnings) prints
+                # on every render. Emit only when explicitly disabled; absent => C++ default (on).
+                if cmd.get("report") is False:
+                    clades["report"] = False
+                if isinstance(cmd.get("report-file"), str):
+                    clades["report_file"] = cmd["report-file"]
                 all_clades = cmd.get("all-clades")
                 if isinstance(all_clades, dict):
                     al = all_clades.get("label")

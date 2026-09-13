@@ -276,8 +276,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // (bridge gaps) and drop sections <= section-exclusion-tolerance (both in leaf-index units);
     // then assign a horizontal slot — the explicit per-clade slot when given, else set_slots
     // (smallest clade -> slot 0 nearest the matrix, larger/parent clades bumped rightward).
-    struct CladeBand { long first_v; long last_v; std::size_t size; };
-    struct CladePlan { std::size_t rank; std::vector<CladeBand> bands; int slot; long first_v; long last_v; std::size_t longest; double label_scale; int rotation; double offset_x; double offset_y; };
+    struct CladeBand { long first_v; long last_v; std::size_t size; std::string first_name; std::string last_name; };
+    struct CladePlan { std::size_t rank; std::vector<CladeBand> bands; int slot; long first_v; long last_v; std::size_t longest; double label_scale; int rotation; double offset_x; double offset_y;
+                       // the rest is carried purely for the clade-section diagnostic below:
+                       double incl; double excl;      // the tolerances actually applied
+                       std::vector<CladeBand> dropped; }; // post-merge bands the exclusion tolerance removed
     std::vector<CladePlan> clade_plan;
     int clade_max_slot = 0;
     {
@@ -306,20 +309,34 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 const long fv = static_cast<long>(section.first_vertical), lv = static_cast<long>(section.last_vertical);
                 if (!bands.empty() && static_cast<double>(fv - bands.back().last_v) <= incl) {
                     bands.back().last_v = lv;
-                    bands.back().size += section.size();
+                    bands.back().last_name = section.last_name; // the merged band now ends at this run's last leaf
+                    // A merged band's size is its SPAN, not the sum of the runs it bridged — AD
+                    // clade_section_t::size() is last->node_id.vertical - first->node_id.vertical + 1,
+                    // recomputed from the merged first/last (acmacs-tal clades.hh:40-47), and ae's own
+                    // clades.cc CladeSection::size() is span-based too. Accumulating run sizes instead
+                    // made merged bands look far smaller than they are, so section-exclusion-tolerance
+                    // dropped bands AD keeps and draws: on this round's h1, C.1.9's band 98235..98289 is
+                    // span 55 (AD keeps it, excl=20) but summed only 2 (ae dropped it).
+                    bands.back().size = static_cast<std::size_t>(bands.back().last_v - bands.back().first_v + 1);
                 }
                 else
-                    bands.push_back({fv, lv, section.size()});
+                    bands.push_back({fv, lv, section.size(), section.first_name, section.last_name});
             }
             // drop bands whose size <= exclusion tolerance; if all drop, keep the largest
-            std::vector<CladeBand> kept;
-            for (const auto& b : bands)
+            std::vector<CladeBand> kept, dropped;
+            for (const auto& b : bands) {
                 if (static_cast<double>(b.size) > excl)
                     kept.push_back(b);
+                else
+                    dropped.push_back(b); // reported by the clade-section diagnostic, so a `(1)` that is
+            }                             // really "several runs, the strays dropped" is not mistaken for monophyly
+            // AD clades.cc:118-120 drops the small sections only when at least one survives; when EVERY
+            // section is small nothing is dropped and the clade keeps them all. ae used to keep only the
+            // LARGEST here, which silently hid the rest — now matched to AD (and to clades.cc's
+            // apply_section_tolerance, so the drawing and signature-page paths agree).
             if (kept.empty()) {
-                const CladeBand* big = &bands.front();
-                for (const auto& b : bands) if (b.size > big->size) big = &b;
-                kept.push_back(*big);
+                kept = bands;
+                dropped.clear();
             }
             std::size_t longest = 0;
             for (const auto& b : kept) longest = std::max(longest, b.size);
@@ -337,7 +354,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const int rot = style ? style->rotation_degrees : 90;
             const double offx = style ? style->label_offset_x : 0.002;
             const double offy = style ? style->label_offset_y : 0.0;
-            clade_plan.push_back({k, std::move(kept), slot, 0, 0, longest, lscale, rot, offx, offy});
+            clade_plan.push_back({k, std::move(kept), slot, 0, 0, longest, lscale, rot, offx, offy, incl, excl, std::move(dropped)});
             clade_plan.back().first_v = clade_plan.back().bands.front().first_v;
             clade_plan.back().last_v = clade_plan.back().bands.back().last_v;
         }
@@ -369,6 +386,147 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             place(p, slot);
         }
     }
+
+    // --- clade-section diagnostic: AD Clades::report_clades + HzSections::report/detect_intersect ---
+    //
+    // Ported from acmacs-tal cc/clades.cc:221 and cc/hz-sections.cc:112/196. Reported from the
+    // `clade_plan` built immediately above — i.e. from the bands THIS renderer actually draws, not
+    // from cc/tal/clades.cc's compute_hz_sections (the signature-page path). The two agree on the
+    // merge rule but NOT on two points, so reporting the sig-page numbers here would mislead:
+    //   * exclusion: AD (and compute_hz_sections) drop small sections only when at least one
+    //     section survives, otherwise they keep them ALL; the loop above keeps only the LARGEST.
+    //   * all-clades tolerances: compute_hz_sections inherits `all-clades`
+    //     section-inclusion/exclusion-tolerance as the per-clade default, the loop above reads
+    //     only the per-clade style (a missing/0 value falls back to AD's 10/5).
+    // Both are noted in cc/tal/PORTING.md; this block deliberately mirrors the drawing path.
+    //
+    // Printed BEFORE the drawing below so the RUNNING-THE-REPORT.md §10.5 tuning loop can read it
+    // without waiting out a full render, and also written to `<output>.taleg`.
+    if (params.clades_report && !clade_plan.empty()) {
+        fmt::memory_buffer rep;
+        const auto app = std::back_inserter(rep);
+
+        // ---- AD Clades::report_clades ----
+        fmt::format_to(app, ">>> Clades ({}) vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n", clade_plan.size());
+        for (const CladePlan& plan : clade_plan) {
+            const Clade& clade = clade_sections[plan.rank];
+            const auto style_it = params.clade_styles.find(clade.name);
+            const CladeStyle* style = style_it != params.clade_styles.end() ? &style_it->second : nullptr;
+            const std::string display = (style && !style->display_name.empty()) ? style->display_name : clade.name;
+            fmt::format_to(app, "Clade {} ({})    {{\"name\": \"{}\", \"display_name\": \"{}\", \"section-inclusion-tolerance\": {:.0f}, \"section-exclusion-tolerance\": {:.0f}, \"show\": {}}}\n",
+                           clade.name, plan.bands.size(), clade.name, display, plan.incl, plan.excl, !(style && style->hide));
+            for (std::size_t bno{0}; bno < plan.bands.size(); ++bno) {
+                const CladeBand& band = plan.bands[bno];
+                fmt::format_to(app, "  ({}) \"{}\" [{}] slot:{} {} \"{}\" .. {} \"{}\"\n", bno, display, band.size, plan.slot, band.first_v, band.first_name, band.last_v,
+                               band.last_name);
+                if (bno + 1 < plan.bands.size()) {
+                    // AD reports the COUNT OF INTERVENING LEAVES (next.first - this.last - 1) while the
+                    // merge test compares (next.first - this.last) against the tolerance — so merging this
+                    // pair needs a tolerance of gap+1. Spell that out: it is the number §10.5 asks for.
+                    const long gap = plan.bands[bno + 1].first_v - band.last_v - 1;
+                    fmt::format_to(app, "   gap {}  (to merge: \"section-inclusion-tolerance\" >= {})\n", gap, gap + 1);
+                }
+            }
+            // Bands the exclusion tolerance removed. Without these a clade reported `(1)` is
+            // ambiguous: genuinely one run, or several runs with the strays silently dropped —
+            // and §10.5's "usually resembles the previous report" cross-check needs to tell them apart.
+            if (!plan.dropped.empty()) {
+                fmt::format_to(app, "   dropped {} band(s) by \"section-exclusion-tolerance\" {:.0f} (NOT drawn):", plan.dropped.size(), plan.excl);
+                for (const CladeBand& band : plan.dropped)
+                    fmt::format_to(app, " [{}] {}..{}", band.size, band.first_v, band.last_v);
+                fmt::format_to(app, "\n");
+            }
+        }
+        fmt::format_to(app, ">>> ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n");
+
+        // ---- AD Clades::make_clades -> HzSections::add_section, then sort / detect_intersect /
+        //      set_prefix / set_aa_transitions (cc/hz-sections.cc) ----
+        struct ReportSection
+        {
+            std::string id, prefix, label, first_name, last_name, aa_transitions;
+            long first_v{0}, last_v{0};
+            bool intersect{false};
+            std::size_t size{0};
+        };
+        std::vector<ReportSection> sections;
+        for (const CladePlan& plan : clade_plan) {
+            const Clade& clade = clade_sections[plan.rank];
+            const auto style_it = params.clade_styles.find(clade.name);
+            const CladeStyle* style = style_it != params.clade_styles.end() ? &style_it->second : nullptr;
+            const std::string display = (style && !style->display_name.empty()) ? style->display_name : clade.name;
+            for (std::size_t bno{0}; bno < plan.bands.size(); ++bno) {
+                const CladeBand& band = plan.bands[bno];
+                sections.push_back(ReportSection{.id = fmt::format("{}-{}", clade.name, bno),
+                                                 .label = display,
+                                                 .first_name = band.first_name,
+                                                 .last_name = band.last_name,
+                                                 .first_v = band.first_v,
+                                                 .last_v = band.last_v,
+                                                 .size = band.size});
+            }
+        }
+        std::sort(std::begin(sections), std::end(sections), [](const ReportSection& s1, const ReportSection& s2) { return s1.first_v < s2.first_v; });
+        for (auto sect = std::begin(sections); sect != std::end(sections); ++sect) {
+            for (auto other = std::next(sect); other != std::end(sections); ++other) {
+                if (sect->first_v <= other->last_v && other->first_v <= sect->last_v) {
+                    // AD_WARNING in AD; a parent clade containing a child is expected, siblings overlapping is not.
+                    fmt::format_to(app, ">> WARNING: HZ Sections \"{}\" and \"{}\" intersect\n", sect->id, other->id);
+                    sect->intersect = other->intersect = true;
+                }
+            }
+        }
+        for (std::size_t no{0}; no < sections.size(); ++no)
+            sections[no].prefix.assign(1, static_cast<char>('A' + (no % 26)));
+        {
+            std::vector<std::pair<std::size_t, std::size_t>> spans;
+            spans.reserve(sections.size());
+            for (const ReportSection& section : sections)
+                spans.emplace_back(static_cast<std::size_t>(section.first_v), static_cast<std::size_t>(section.last_v));
+            const std::vector<std::string> transitions = section_aa_transitions(tree, spans);
+            for (std::size_t no{0}; no < sections.size(); ++no)
+                sections[no].aa_transitions = transitions[no];
+        }
+
+        // AD HzSections::report: a `[ … ]` block in the `.tal`'s own `hz` "sections" array shape,
+        // column-aligned, so it can be pasted straight back into a `.tal`.
+        std::size_t w_id{0}, w_first{0}, w_last{0}, w_label{0}, w_subs{0};
+        for (const ReportSection& section : sections) {
+            w_id = std::max(w_id, section.id.size());
+            w_first = std::max(w_first, section.first_name.size());
+            w_last = std::max(w_last, section.last_name.size());
+            w_label = std::max(w_label, section.label.size());
+            w_subs = std::max(w_subs, section.aa_transitions.size());
+        }
+        const bool any_intersect = std::any_of(std::begin(sections), std::end(sections), [](const ReportSection& section) { return section.intersect; });
+        fmt::format_to(app, ">>> HZ sections ({})\n[\n", sections.size());
+        for (const ReportSection& section : sections)
+            fmt::format_to(app, "    {{\"show\": true,  \"id\": {:{}s} \"L\": \"{:1s}\", \"V\": [{:5d}, {:5d}], \"N\": {:5d}, {}\"first\": {:{}s} \"last\": {:{}s} \"label\": {:{}s} \"aa_transitions\": {:{}s} \"All transitions\": \"{}\"}},\n",
+                           fmt::format("\"{}\",", section.id), w_id + 3, section.prefix, section.first_v, section.last_v, section.size,
+                           section.intersect ? "\"INTRSCT\":1, " : (any_intersect ? "             " : ""), fmt::format("\"{}\",", section.first_name), w_first + 3,
+                           fmt::format("\"{}\",", section.last_name), w_last + 3, fmt::format("\"{}\",", section.label), w_label + 3,
+                           fmt::format("\"{}\",", section.aa_transitions), w_subs + 3, section.aa_transitions);
+        fmt::format_to(app, "]\n\n");
+
+        const std::string report = fmt::to_string(rep);
+        fmt::print(stderr, "{}", report);
+        // …and to <output>.taleg, which RUNNING-THE-REPORT.md §10.5 documents reading instead of
+        // watching the terminal. `clades.report_file` overrides the path; "-" writes no file.
+        // The shared-surface entry point (signature pages) passes an empty `output` — no file then.
+        std::filesystem::path taleg{params.clades_report_file};
+        if (taleg.empty() && !output.empty())
+            taleg = std::filesystem::path{output}.replace_extension(".taleg");
+        if (!taleg.empty() && taleg != std::filesystem::path{"-"}) {
+            if (std::ofstream out{taleg}; out)
+                out << report;
+            else
+                AD_WARNING("cannot write clade-section diagnostic to {}", taleg.string());
+        }
+    }
+
+    // --clades-report: the diagnostic above is all the caller wanted. Return before make_surface,
+    // so no PDF is created and the minutes of drawing below are skipped entirely.
+    if (params.clades_report_only)
+        return 0;
 
     // clade colour/name with optional per-clade overrides from the settings DSL
     const auto clade_color_for = [&](std::size_t rank, const std::string& name) -> Color {
@@ -769,13 +927,22 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         //     labels centred on their bands overprint into garbled text ("C.1.C1.7.2"). Spread each
         //     overlapping cluster apart with a small gap, centred on the cluster's mean, so the labels
         //     read cleanly like AD. Only the TEXT moves — the brackets stay on their true bands. ---
-        std::vector<double> label_cy(clade_plan.size());
-        std::vector<double> label_half(clade_plan.size()); // half text-extent along the leaf axis
-        for (std::size_t i = 0; i < clade_plan.size(); ++i) {
-            const auto& pl = clade_plan[i];
-            const CladeBand* mb = &pl.bands.front();
-            for (const auto& b : pl.bands) if (b.size > mb->size) mb = &b;
-            label_cy[i] = dev_y(static_cast<double>(mb->first_v + mb->last_v) / 2.0) + pl.offset_y * height;
+        // One bracket + label per BAND (AD Clades::draw draws the arrow, the arms and the label per
+        // SECTION, all sections of a clade sharing the clade's slot — acmacs-tal clades.cc:248-... ).
+        // A clade left fragmented by its tolerances therefore SHOWS as several brackets, which is the
+        // signal the `.tal` needs tuning; it is the user's job to bring it back to one via
+        // section-inclusion/exclusion-tolerance (RUNNING-THE-REPORT.md §10.5).
+        struct BandLabel { std::size_t plan_index; std::size_t band_index; };
+        std::vector<BandLabel> band_labels;
+        for (std::size_t i = 0; i < clade_plan.size(); ++i)
+            for (std::size_t b = 0; b < clade_plan[i].bands.size(); ++b)
+                band_labels.push_back({i, b});
+        std::vector<double> label_cy(band_labels.size());
+        std::vector<double> label_half(band_labels.size()); // half text-extent along the leaf axis
+        for (std::size_t i = 0; i < band_labels.size(); ++i) {
+            const auto& pl = clade_plan[band_labels[i].plan_index];
+            const CladeBand& bd = pl.bands[band_labels[i].band_index];
+            label_cy[i] = dev_y(static_cast<double>(bd.first_v + bd.last_v) / 2.0) + pl.offset_y * height;
             const double fs = std::max(slot_px * pl.label_scale, 2.5);
             const std::string nm = clade_display_for(clade_sections[pl.rank].name);
             const double tw = pdf.text_size(nm, fs).first;
@@ -785,7 +952,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         }
         {
             std::unordered_map<int, std::vector<std::size_t>> by_slot;
-            for (std::size_t i = 0; i < clade_plan.size(); ++i) by_slot[clade_plan[i].slot].push_back(i);
+            for (std::size_t i = 0; i < band_labels.size(); ++i) by_slot[clade_plan[band_labels[i].plan_index].slot].push_back(i);
             const double decl_gap = 0.004 * height; // gap between separated labels (~4px @1000)
             for (auto& [slot, idxs] : by_slot) {
                 if (idxs.size() < 2) continue;
@@ -809,8 +976,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 }
             }
         }
-        for (std::size_t plan_index = 0; plan_index < clade_plan.size(); ++plan_index) {
-            const auto& plan = clade_plan[plan_index];
+        for (std::size_t label_index = 0; label_index < band_labels.size(); ++label_index) {
+            const auto& plan = clade_plan[band_labels[label_index].plan_index];
+            const CladeBand& band = plan.bands[band_labels[label_index].band_index];
             const Clade& clade = clade_sections[plan.rank];
             const double cx = clades_left
                 ? clade_right_edge - slot_px * (static_cast<double>(plan.slot) + 1.0)
@@ -820,15 +988,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // slot_px*label_scale <= 0.02*clades_area_h (<= ~20px) by construction, so no guard needed
             // beyond a tiny floor. H3/BVic slot_px (7-9.8) are unaffected (well below the old cap).
             const double clade_fs = std::max(slot_px * plan.label_scale, 2.5);
-            // ONE arrow per clade, spanning its LARGEST band. After the AD-default merge (incl=10)
-            // above, every SHOWN H1/H3/BVic clade collapses to exactly ONE kept band, so largest ==
-            // the full section extent (C.1.7 now [10118..11646], not the old [10776..11096] stub).
-            // The largest-band pick is retained purely as a safety net: it still excludes any stray
-            // distant run that survives merge+exclude (e.g. B(5a.1)) from over-stretching the bracket,
-            // matching AD's per-section draw for the single kept section.
-            const CladeBand* main_band = &plan.bands.front();
-            for (const auto& b : plan.bands) if (b.size > main_band->size) main_band = &b;
-            const long ext_first = main_band->first_v, ext_last = main_band->last_v;
+            // One arrow per BAND, spanning exactly that band — AD's per-section draw. (ae previously
+            // drew a single arrow over the clade's LARGEST band only, which made a fragmented clade
+            // look like one short bracket instead of several, hiding the very thing §10.5 asks you
+            // to fix. The brackets never span across a gap: each is its own band's extent.)
+            const long ext_first = band.first_v, ext_last = band.last_v;
             {
                 // AD's clade double-arrow spans the FULL vertical extent of the section: from
                 // pos_y_above(first) = the TOP edge of the first leaf's row (half a row above its
@@ -874,7 +1038,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 const std::string name = clade_display_for(clade.name);
                 // label centred on the clade's vertical extent (AD vpos=middle), shifted by the
                 // per-clade offset, then decluttered (see pre-pass) so same-slot labels don't overlap.
-                const double center_y = label_cy[plan_index];
+                const double center_y = label_cy[label_index];
                 // NO halo behind the clade name (r7 item #3): AD draws the clade labels with a plain
                 // transparent background (acmacs-tal Clades::draw calls surface.text with no halo) —
                 // the label sits in the white clade column beside its arrow. The r3 white-halo box was

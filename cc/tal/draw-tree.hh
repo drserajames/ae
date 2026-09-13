@@ -166,6 +166,17 @@ namespace ae::tal
         double clades_label_scale{0.0};  // default per-clade label scale (AD all-clades label.scale); 0 = 1.0
         double clades_width_ratio{0.0};  // clade column width as a fraction of height (AD clades width-to-height-ratio); 0 = derived
         bool clades_horizontal_lines{true}; // draw the two faint grey lines at each clade's top & bottom (AD horizontal_line); false = brackets only
+        // AD Clades::Parameters::report (acmacs-tal clades.hh:99) — default TRUE, as in AD: print the
+        // clade-section diagnostic (per-clade band count, sizes, node ranges, inter-section gaps, and the
+        // hz-section dump + sibling-intersect warnings) before the slow PDF draw. The `.tal`'s clades
+        // command can turn it off with `"report": false`. See the block in draw-tree.cc.
+        bool clades_report{true};
+        // Where to also write that diagnostic. Empty -> `<output>.taleg` next to the rendered PDF
+        // (RUNNING-THE-REPORT.md §10.5 reads `tree/<subtype>.taleg`). "-" disables the file.
+        std::string clades_report_file{};
+        // Print the clade-section diagnostic and STOP, without drawing (tal-draw --clades-report).
+        // The §10.5 tuning loop only needs the numbers, and a report tree takes minutes to draw.
+        bool clades_report_only{false};
         double dash_column_width_ratio{0.0}; // dash-bar column pitch as fraction of drawable width; 0 => 0.022
         double right_margin_ratio{0.0};      // right page margin as fraction of width; 0 => same as the left (0.03).
                                             // Signature pages set this small so the rightmost column (the AA

@@ -25,7 +25,9 @@ static std::string usage(std::string_view prog)
                        "          [--color-by-continent] [--color-by-pos=N]\n"
                        "          [--time-series] [--interval=year|month|week|day] [--legend] [--geo-inset] [--aa-transitions]\n"
                        "          [--ladderize=none|number-of-leaves|max-edge-length]\n"
-                       "          [--title=TEXT] <tree.newick|tree.json[.xz]> <output.pdf|.names> [image-size-px]\n"
+                       "          [--title=TEXT] [--clades-report] <tree.newick|tree.json[.xz]> <output.pdf|.names> [image-size-px]\n"
+                       "  --clades-report print the clade-section diagnostic (band counts, gaps, hz sections,\n"
+                       "                  intersect warnings) to stderr and <output>.taleg, then exit WITHOUT drawing.\n"
                        "  --settings=FILE loads all draw options (incl. per-clade colour/name overrides) from\n"
                        "  a JSON config; other flags are ignored when it is given (image-size-px still overrides).\n"
                        "  --help, -h      show this help\n",
@@ -40,6 +42,7 @@ int main(int argc, char* const argv[])
         ae::tal::TreeDrawParameters params;
         std::string_view settings_file;
         std::string mrca_sidecar; // --mrca-sidecar=PATH: write the WYSIWYG editor geometry sidecar (applied after --settings)
+        bool clades_report_only{false}; // --clades-report: print the clade-section diagnostic and exit (applied after --settings)
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg{argv[i]};
             if (arg == "--labels")
@@ -82,6 +85,8 @@ int main(int argc, char* const argv[])
                 settings_file = arg.substr(11);
             else if (arg.substr(0, 15) == "--mrca-sidecar=")
                 mrca_sidecar = std::string{arg.substr(15)};
+            else if (arg == "--clades-report")
+                clades_report_only = true;
             else if (arg == "--help" || arg == "-h") {
                 fmt::print("{}", usage(argv[0]));
                 return 0;
@@ -105,6 +110,11 @@ int main(int argc, char* const argv[])
             params = ae::tal::load_draw_settings(std::filesystem::path{settings_file}, &image_size);
         if (!mrca_sidecar.empty()) // CLI flag wins over (and survives) the settings load
             params.mrca_label_sidecar = mrca_sidecar;
+        if (clades_report_only) { // likewise: --clades-report forces the report on and the drawing off
+            params.clades = true;
+            params.clades_report = true;
+            params.clades_report_only = true;
+        }
         if (positional.size() > 2)
             image_size = std::stod(std::string{positional[2]});
         const auto tree = ae::tree::load(std::filesystem::path{positional[0]});
@@ -129,6 +139,11 @@ int main(int argc, char* const argv[])
         }
         else {
             const std::size_t labels_hidden = ae::tal::export_tree_pdf(*tree, output, image_size, params);
+            if (clades_report_only) {
+                fmt::print("Clade-section report only ({} not drawn); diagnostic on stderr and in {}\n", positional[1],
+                           std::filesystem::path{output}.replace_extension(".taleg").string());
+                return 0;
+            }
             fmt::print("Wrote {} ({:.0f}x{:.0f}, {} leaves{}{}{}{})\n", positional[1], image_size, image_size, tree->number_of_leaves(), params.labels ? ", labelled" : "",
                        params.clades ? ", clades" : "", params.time_series ? ", time-series" : "",
                        labels_hidden > 0 ? fmt::format(", {} labels hidden to avoid overlap", labels_hidden) : std::string{});

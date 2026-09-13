@@ -700,6 +700,101 @@ on a large real tree, and `Nodes.remove()` traps — both reproduce on `tal-clad
 
 Tests: `cc/tal/test/test-aa-transitions-eu20200915.py` (7 checks, invented `J`/`O` residues).
 
+## Clade-section diagnostic (`>>> Clades` / `.taleg`) — ported 2026-09-13
+
+Port of AD `Clades::report_clades` (acmacs-tal `cc/clades.cc:221`) plus
+`HzSections::report` / `detect_intersect` (`cc/hz-sections.cc:196` / `:112`). It restores the
+workflow `RUNNING-THE-REPORT.md` §10.5 is written around, which had no ae equivalent: see each
+clade's band count `(N)`, each band's size and leaf range, the **gap** to the next band of the
+same clade, and the sibling-intersect warnings — without waiting out a full render.
+
+* **On by default**, as in AD (`Clades::Parameters::report{true}`, acmacs-tal `clades.hh:99`).
+  The `.tal`'s `{"N": "clades", …}` command turns it off with `"report": false`, and can redirect
+  the file with `"report-file"` (`"-"` = no file). Translated by `py/ae/tal/settings_v3.py`,
+  read in `cc/tal/settings.cc`.
+  *(No report `.tal` sets `report` at all — AD printed the block because the default is true.)*
+* **Output**: stderr, and `<output>.taleg` beside the rendered PDF (§10.5 documents reading
+  that file). The shared-surface entry point (signature pages) passes no output path and so
+  writes no file.
+* **`tal-draw --clades-report`** prints the diagnostic and exits *before* `make_surface`, so no
+  PDF is drawn: **0.6 s** on this round's bvic tree versus minutes for the full render.
+* The `[…]` hz dump reproduces AD's column-aligned `hz` `"sections"` shape, so it can be pasted
+  straight back into a `.tal`. Each section carries its **id** (`{clade}-{section no}`), which
+  distinguishes a genuinely non-monophyletic clade from a stale-id duplicate.
+* aa-transitions come from `ae::tal::section_aa_transitions` (`cc/tal/clades.cc`), factored out
+  of `compute_hz_sections` so the diagnostic and the signature-page path report identically.
+  They are empty when the tree's inodes carry no `A` field (B/Vic this round) — as in AD.
+
+### Reported from the DRAWING path, not `compute_hz_sections`
+
+The diagnostic reports the `clade_plan` bands `draw-tree.cc` actually draws. That matters,
+because ae has **two** section implementations and they do not agree:
+
+| | `clades.cc` `apply_section_tolerance` (sig pages) | `draw-tree.cc` clade_plan (the tree) |
+|---|---|---|
+| merge gap `<= inclusion` | same | same |
+| all bands small | AD behaviour: keep them **all** | same (fixed 2026-09-13; had kept only the largest) |
+| `all-clades` tolerances | inherited as the per-clade default | **not read**; per-clade only, 0/missing → AD's 10/5 |
+
+The remaining divergence (`all-clades` tolerances) changes nothing on this round's h1/h3/bvic —
+no report `.tal` sets them. It is recorded rather than silently "fixed": changing it alters what
+gets drawn and is a report-data decision.
+
+### One bracket per BAND (changed 2026-09-13)
+
+`draw-tree.cc` now draws an arrow + arms + label for **every** band that survives the
+include/exclude tolerances, all of a clade's bands sharing the clade's slot — AD's per-section
+draw (`Clades::draw`, acmacs-tal `clades.cc`). Previously it drew a single arrow over the clade's
+**largest** band, so a fragmented clade rendered as one short bracket and the other bands vanished
+silently. That hid exactly what §10.5 asks the user to notice; a fragmented clade must *show* as
+several brackets, and bringing it back to one is the user's job via the tolerances.
+
+Bands removed by `section-exclusion-tolerance` are still not drawn — that is what exclusion means —
+which is why the diagnostic reports them separately: a clade shown `(1)` may be one genuine run, or
+several runs whose strays were dropped, and §10.5's "does this resemble last round?" check needs to
+tell those apart.
+
+### Merged band size is the SPAN (fixed 2026-09-13)
+
+`draw-tree.cc` accumulated the sizes of the runs it merged, so a merged band's size left out the
+bridged gaps. AD's `clade_section_t::size()` is `last->node_id.vertical - first->node_id.vertical + 1`
+(acmacs-tal `clades.hh:40-47`), recomputed from the merged first/last; ae's own `clades.cc`
+`CladeSection::size()` is span-based too. Only the drawing path diverged, and the effect was that
+`section-exclusion-tolerance` dropped bands AD keeps and draws.
+
+**Verified against AD itself** — AD's `tal` run on the same tree + `.tal`, its `>>> Clades` block
+diffed against ours. They now agree exactly:
+
+```
+C.1.9 (2)  (0) [26823] 25651..52473   gap 45761   (1) [55] 98235..98289
+D.5   (2)  (0) [2500]  65602..68101   gap 22811   (1) [22] 90913..90934
+```
+
+— same sizes, gaps, leaf ranges, seq_ids and slots, and h3 all `(1)`, bvic `C.1 (2)`, h1 `D.3.1 (1)`.
+With the per-band draw above, ae's rendered clade column reproduces AD's: C.1.9 and D.5 each draw
+two brackets, bvic C.1 two (slot 4, page y≈28 and y≈804).
+
+Checked against the **unmerged** `aa-label-placement` branch (its left aa band widens the page), by
+stacking this work on it and re-measuring: every diagnostic number is unchanged — the band computation works in leaf verticals, before any page geometry — and
+the clade column shifts right as a block with spacing intact (bvic slot 4 x 659→692, h1 slot 3
+x 662→699; label y unchanged, since the band changes width only). No label collisions: bvic's two
+C.1 labels sit at y 28..43 and 804..819, h1's two C.1.9 at y 382..414 and 947..978, and no pair in
+any slot overlaps. Note ae's clade-label x then coincides with AD's ≈699 — which is why the
+renderer is identified by its stderr banner and `.taleg`, not by coordinates. Recorded here so that
+when that branch lands nobody re-investigates the shift; this work itself does not depend on it.
+
+> Running AD's `tal` needs its libraries found: `DYLD_FALLBACK_LIBRARY_PATH=$ACMACSD_ROOT/build/lib:…/build/acmacs-base/dist:…`
+> or it aborts with `libfmt.8.dylib not loaded`. ~82 s for a full H1 render, vs 0.6 s for
+> `tal-draw --clades-report`.
+
+Measured on `2026-0921-ssm` (`tree/bvic.after-2021.tal`, `tree/h1.after-2021.tal`):
+
+* **bvic `C.1` is `(2)`** — `[873] 60..948` and `[138] 38002..38139`, `gap 37053`; the second
+  band is flagged `INTRSCT` against the sibling `C.5-0` / `C.5.1-0`. ae draws only the first.
+* **h1 `D.3.1`, `D.5`, `C.1.9` are each `(1)`** in the drawing path. `D.3.1` has no dropped
+  bands at all (one contiguous run); `D.5` and `C.1.9` have strays that both ae *and* AD drop,
+  since a full-size band survives. Under either implementation these three yield one section.
+
 ## 6. Conf / format docs to mine next
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-conf.org` — the settings DSL reference.
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-processing.org` — processing stages.
