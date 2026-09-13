@@ -49,8 +49,10 @@ if [ -d "$_ae_data" ]; then
     [ -f "$_ae_data/hidb5.h3.json.xz" ]   && export HIDB_V5="$_ae_data"
     # SEQDB_V4 is the directory holding the seqdb*.v4.json.xz files
     [ -f "$_ae_data/seqdb-h3.v4.json.xz" ] && export SEQDB_V4="$_ae_data"
+    # WHO-data-gate private strain list (gitignored in acmacs-data; see tools/WHO-DATA-GATE.md)
+    [ -f "$_ae_data/.who-strain-list" ] && export WHO_STRAIN_LIST="$_ae_data/.who-strain-list"
 else
-    printf '[ae-env] note: reference data (%s) not found — LOCDB_V2/HIDB_V5/SEQDB_V4/AC_CLADES_JSON_V2 left unset.\n' "$_ae_data" >&2
+    printf '[ae-env] note: reference data (%s) not found — LOCDB_V2/HIDB_V5/SEQDB_V4/AC_CLADES_JSON_V2/WHO_STRAIN_LIST left unset.\n' "$_ae_data" >&2
     printf '[ae-env]       clone acmacs-data beside this checkout, or set ACMACS_DATA=/path/to/acmacs-data before sourcing.\n' >&2
 fi
 unset _ae_data

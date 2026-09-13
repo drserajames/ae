@@ -16,7 +16,7 @@
 #
 # Regenerate: tools/who-data-gate.py --update-baseline --justification "..."
 #   (existing justifications and expiry dates are carried over per path)
-# 35 grandfathered file(s), 2255 suppressed match(es).
+# 34 grandfathered file(s), 2362 suppressed match(es).
 TODO.md	1003b373d881da3d	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 bin/chart-semantic-populate	996c3ed9cccb92a0	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/chart/v2/name-format.cc	2b180f4b874e1b78	4	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
@@ -26,29 +26,28 @@ cc/geo/geo-draw-main.cc	ba02eff0595cef8a	2	2027-09-01	# Reference test data and 
 cc/geo/test/pie-records.json	6173028999c5037d	9	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/geo/test/test-geo-pie.sh	1003b373d881da3d	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/sequences/deletions.cc	85ab77a69600e849	3	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-cc/sequences/master.cc	fb7783246206de35	49	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-cc/tal/PORTING.md	5d37fa1631f16dd0	3	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
+cc/sequences/master.cc	cdbfb6b21929fa43	56	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/tal/draw-tree.cc	bb1fc2ade5af9305	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/tal/label-editor/README.md	6ddf90a913511bfd	2	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/tal/settings.hh	99ce3e010f5a2dee	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/tal/test/test-section-maps.py	f3e07c06fae045ba	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-cc/test/test-virus-name.cc	afd95e814f0ef39b	73	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
+cc/test/test-virus-name.cc	1d1af419ca694308	124	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/tree/aa-transitions.cc	b35c17824246a6a2	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/tree/export.cc	72cd6c908f2cf1f3	3	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-cc/virus/name-parse.cc	38106010bb8481ad	13	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
+cc/virus/name-parse.cc	dff377c4c3b956a9	22	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/virus/reassortant.cc	ac3f629ce59d4fd3	20	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 cc/whocc/xlsx/sheet-extractor.cc	7cbeadd711d97ba3	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-doc/ace-format.js	50a826bbc9b009fc	2	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
+doc/ace-format.js	295175c914ee8127	4	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 doc/org-table-format.org	6f155b3a217d0fe2	8	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 doc/phylogenetic-tree-v3.format.json	72cd6c908f2cf1f3	5	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 interactive/CONTRACT.md	9d737d4fe155a68c	3	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-proj/weekly-tree/bvic.tal	eb09e3784c29b3d3	253	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-proj/weekly-tree/byam.tal	197d36abe3357213	224	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
+proj/weekly-tree/bvic.tal	70f83e1643520498	257	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
+proj/weekly-tree/byam.tal	2cf27c00e236d8a1	242	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 proj/weekly-tree/export	a02bf44036d814a2	10	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-proj/weekly-tree/h1.tal	0abe49d9436a02c0	160	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-proj/weekly-tree/h3.tal	a3d281f81afb39e7	1393	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
+proj/weekly-tree/h1.tal	ff11b67036ea6352	163	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
+proj/weekly-tree/h3.tal	e01bf571fc7a64c5	1408	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 py/ae/semantic/name_passage.py	9a32e9ee7b11a347	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 py/ae/semantic/serology.py	9a32e9ee7b11a347	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
-py/ae/semantic/vaccine.py	bae847b8f8c63d40	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
+py/ae/semantic/vaccine.py	dec65cea6b619674	2	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 py/ae/tal/signature_page.py	c999f44b517da1db	2	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
 py/ae/virus/name_format.py	7cbeadd711d97ba3	1	2027-09-01	# Reference test data and strain/clade nomenclature already public in the tree since initial commit or prior to gate implementation
