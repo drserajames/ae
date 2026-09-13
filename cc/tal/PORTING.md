@@ -774,6 +774,15 @@ D.5   (2)  (0) [2500]  65602..68101   gap 22811   (1) [22] 90913..90934
 With the per-band draw above, ae's rendered clade column reproduces AD's: C.1.9 and D.5 each draw
 two brackets, bvic C.1 two (slot 4, page y≈28 and y≈804).
 
+Checked against the **unmerged** `aa-label-placement` branch (its left aa band widens the page), by
+stacking this work on it and re-measuring: every diagnostic number is unchanged — the band computation works in leaf verticals, before any page geometry — and
+the clade column shifts right as a block with spacing intact (bvic slot 4 x 659→692, h1 slot 3
+x 662→699; label y unchanged, since the band changes width only). No label collisions: bvic's two
+C.1 labels sit at y 28..43 and 804..819, h1's two C.1.9 at y 382..414 and 947..978, and no pair in
+any slot overlaps. Note ae's clade-label x then coincides with AD's ≈699 — which is why the
+renderer is identified by its stderr banner and `.taleg`, not by coordinates. Recorded here so that
+when that branch lands nobody re-investigates the shift; this work itself does not depend on it.
+
 > Running AD's `tal` needs its libraries found: `DYLD_FALLBACK_LIBRARY_PATH=$ACMACSD_ROOT/build/lib:…/build/acmacs-base/dist:…`
 > or it aborts with `libfmt.8.dylib not loaded`. ~82 s for a full H1 render, vs 0.6 s for
 > `tal-draw --clades-report`.
