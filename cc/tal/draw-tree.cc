@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <fstream>
@@ -1556,6 +1557,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // intersect the black tree lines) and to report the metric below.
             struct InkRect { double x0, y0, x1, y1; };
             std::vector<InkRect> ink;
+            // The tree's VERTICAL connectors, kept apart from the rest of the ink. A label must not sit
+            // to the right of a connector that runs past its own level: visually that puts the text
+            // inside a subtree it does not belong to. Being right of a connector that stops well above
+            // the label is fine, and being right of the trunk is fine.
+            std::vector<InkRect> vlines;
             ink.reserve(layout.leaves.size() + 2 * layout.inodes.size());
             const double hw = tree_line_width * 0.5; // drawn half-width of a branch (the stroke pdf.line() lays down)
             const auto add_h = [&](double xa, double xb, double y) { ink.push_back({std::min(xa, xb), y - hw, std::max(xa, xb), y + hw}); };
@@ -1581,8 +1587,24 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     const auto f = pos.find(*ch);
                     if (f != pos.end()) { const double cy = dev_y(f->second.second); ymin = std::min(ymin, cy); ymax = std::max(ymax, cy); }
                 }
-                if (ymax >= ymin) { mark_v(dev_x(in.x), ymin, ymax); add_v(dev_x(in.x), ymin, ymax); }
+                if (ymax >= ymin) { mark_v(dev_x(in.x), ymin, ymax); add_v(dev_x(in.x), ymin, ymax);
+                                    vlines.push_back({dev_x(in.x), ymin, dev_x(in.x), ymax}); }
             }
+            // Does this box sit RIGHT of a vertical connector that spans its own level?
+            // `above_tol` is the "not far above the label" allowance: a connector whose bottom end is
+            // this far above the box's top still counts as running past it.
+            const double vline_above_tol = mrca_fs * 1.2;
+            const auto box_right_of_vline = [&](double bx0, double by0, double bx1, double by1) -> int {
+                int n = 0;
+                for (const InkRect& v : vlines) {
+                    if (v.x0 >= bx1) continue;                      // connector is right of the box: fine
+                    if (v.x0 <= gx0 + mrca_fs * 0.5) continue;      // the trunk: explicitly allowed
+                    if (v.y1 < by0 - vline_above_tol) continue;     // ends well above the box: fine
+                    if (v.y0 > by1) continue;                       // starts below the box: fine
+                    ++n;
+                }
+                return n;
+            };
             // exact "does this (padded) text box touch any branch?" — the constraint-#1 veto.
             const auto box_hits_ink = [&](double bx0, double by0, double bx1, double by1) -> bool {
                 for (const InkRect& r : ink)
@@ -1656,19 +1678,20 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // layout had to leave the ideal envelope; nothing in the search reads it.
             struct Cand { double x0, y0, x1, y1, cx, cy, base; int tier; };
             std::vector<std::vector<Cand>> cands(anchors.size());
-            const double gapL = mrca_fs * 0.45; // min gap between the label's right edge and the branch // min gap between the label's right edge and the branch
+            const auto envd = [](const char* nm, double d){ const char* v = std::getenv(nm); return v ? std::atof(v) : d; };
+            const double gapL = mrca_fs * envd("AEL_GAPL", 0.45); // min gap between the label's right edge and the branch // min gap between the label's right edge and the branch
             // Clearance kept clear of tree ink around each label. Held at AD's 0.3: widening it to
             // 0.45 measurably squeezed the top-of-tree labels out of the thin left-hand gaps they
             // had been using and exiled them to the right of their branches. Text/branch separation
             // is enforced exactly by box_hits_ink, so pad only has to look right, not to be safe.
-            const double pad = mrca_fs * 0.3;
+            const double pad = mrca_fs * envd("AEL_PAD", 0.3);
             // --- leader-line shape targets (constraints #3 and #4) -------------------------------
             // #4 "the lines should not be too long": `len_soft` is the length a leader may reach for
             // free; beyond it the cost grows QUADRATICALLY, so the search will accept a slightly
             // worse angle rather than a leader twice as long, and `len_max` is a hard ceiling.
             // The old code had neither: its only length term was linear (len*1.8) against a 0.35*height
             // reach, so a far-flung candidate could always buy its way out of a local conflict.
-            const double len_soft = 0.018 * height;
+            const double len_soft = envd("AEL_LSOFT", 0.018) * height;
             const double len_max  = 0.110 * height;
             // #3 "leader lines should be NE-SW, and not exactly horizontal": measure the leader's angle
             // from the horizontal and aim it at 45°. `ang_min` is a HARD floor — a candidate shallower
@@ -1676,23 +1699,34 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // leaders (the old code only added a soft penalty when |dy| < 1.6*fs, which a long leader
             // satisfied while still running at 5°). `ang_max` keeps them off the vertical, which reads
             // as a stray tick rather than a leader.
-            // Angles FITTED to Sarah's hand layout (121 labels over the three report trees), not invented.
-            // The previous 45 degree target with a hard 22 degree floor was a guess, and the hand layout
-            // disagrees with it flatly: her median leader is 25 degrees and 45% of her labels sit
-            // SHALLOWER than the old floor, which the old rules could not produce at all.
-            const double ang_target = 27.0 * PI / 180.0;
-            const double ang_min    = 8.0 * PI / 180.0;
-            const double ang_max    = 72.0 * PI / 180.0;
+            // The angle a leader should aim for DEPENDS ON ITS LENGTH — one target for every length is
+            // what pinned the old placer at a flat ~25 degrees everywhere. The hand layout has two
+            // distinct populations: short leaders run nearly level ("beside the node and a little
+            // down", the stated default — median 7 degrees in the 15-30pt band) and only once a label
+            // has to travel does it go diagonal (median 30 degrees beyond 30pt).
+            const double ang_short  = envd("AEL_ANGS", 10.0) * PI / 180.0;  // aim for short leaders
+            const double ang_long   = envd("AEL_ANGL", 30.0) * PI / 180.0;  // ...and for long ones
+            const double ang_min    = envd("AEL_ANGMIN", 4.0) * PI / 180.0;
+            const double ang_max    = envd("AEL_ANGMAX", 72.0) * PI / 180.0;
+            const double ang_l1     = envd("AEL_L1", 0.018) * height;       // at/below this, ang_short
+            const double ang_l2     = envd("AEL_L2", 0.045) * height;       // at/above this, ang_long
+            const auto ang_target_for = [&](double L) {
+                const double t = std::clamp((L - ang_l1) / std::max(ang_l2 - ang_l1, 1e-9), 0.0, 1.0);
+                return ang_short + (ang_long - ang_short) * t;
+            };
+            // A visible short leader is PREFERRED to none (no leader is only for tucking mid-tree), so a
+            // placement close enough that the renderer draws no leader at all pays a small penalty.
+            const double K_noleader = envd("AEL_NOLEAD", 120.0);
             // Cost weights, chosen by sweeping each one over the three report trees and reading the
             // metrics line below (h1/h3/bvic `*.after-2021`). They are only a preference ordering: every
             // term here is worth far less than one overlap, which the search scores at 1e6.
             const double K_len_max2 = 0.30 * height; // tier-2 reach
             const double K_t2       = 700.0;         // flat surcharge for leaving the target envelope
-            const double K_nw       = 250.0;         // label ABOVE the branch: a mild preference, not a ban --        // flat surcharge for the NW-SE mirror (label ABOVE the branch).
+            const double K_nw       = envd("AEL_NW", 250.0);        // flat surcharge for the NW-SE mirror (label ABOVE the branch).
                                                      // Stiff on purpose: with the band there is nearly always a
                                                      // below-the-branch spot, and this is what takes it. Measured on
                                                      // H1, wrong-direction leaders 8 (at 400) -> 0.
-            const double K_wlen     = 2.5;           // per point of leader length           // per-point leader length
+            const double K_wlen     = envd("AEL_WLEN", 2.5);           // per-point leader length
             const double K_wquad    = 6.0;           // per (length - len_soft)/fs, squared           // per (length - len_soft)/fs, squared
             const double K_wang     = 10.0;          // per degree away from the target          // per degree away from the 45 degree target
             const double K_t3d      = 4.0;           // per point of distance for a band-sweep spot
@@ -1740,7 +1774,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     const double tha = std::atan2(std::abs(ay - ty), std::max(std::abs(ax - tx), 1e-9));
                     double base = La * K_wlen;                                                       // prefer SHORT leaders (#4)
                     if (La > len_soft) { const double o = (La - len_soft) / fs; base += o * o * K_wquad; } // ...and grow the cost QUADRATICALLY past the comfortable length (#4)
-                    base += std::abs(tha - ang_target) * (180.0 / PI) * K_wang;                      // aim the leader at 45° (#3)
+                    base += std::abs(tha - ang_target_for(La)) * (180.0 / PI) * K_wang;               // level-ish when short, diagonal when long
+                    if (La < fs * 0.6) base += K_noleader;                                            // a visible short leader beats none
                     if (!down) base += K_nw;                                                         // NW-SE mirror: allowed, but only as a fallback (#3)
                     base += extra;
                     cands[i].push_back({x0, y0, x0 + tw, y0 + th, tx, ty, base, extra > 0.0 ? 2 : 1});
@@ -1821,7 +1856,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                         // 1e4 tier surcharge: on the B/Vic tree a rescued label flew 204pt
                         // clear across the page (a 20%-of-page leader crossing two others) because the
                         // extra distance cost only a few hundred.
-                        double base = 1.0e4 + sp.d * K_t3d + std::abs(theta - ang_target) * (180.0 / PI) * K_wang;
+                        double base = 1.0e4 + sp.d * K_t3d + std::abs(theta - ang_target_for(sp.d)) * (180.0 / PI) * K_wang;
                         if (sp.d > len_soft) { const double o = (sp.d - len_soft) / fs; base += o * o * K_wquad; }
                         if (cy < ay) base += K_nw;                      // above the branch: the NW-SE mirror
                         // ...and keep it on the LEFT, where every other label lives. Free space is easiest
@@ -1851,8 +1886,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                             double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);
                             if (cx > ax - gapL * 0.5) continue;               // still left of the branch
                             const double theta = std::atan2(std::abs(ay - cy), std::max(ax - cx, 1e-9));
-                            double base = 1.0e5 + std::hypot(ax - cx, ay - cy) * K_wlen
-                                        + std::abs(theta - ang_target) * (180.0 / PI) * K_wang;
+                            const double Lr = std::hypot(ax - cx, ay - cy);
+                            double base = 1.0e5 + Lr * K_wlen + std::abs(theta - ang_target_for(Lr)) * (180.0 / PI) * K_wang;
                             if (cy < ay) base += K_nw;
                             cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, base, 3});
                         }
@@ -1947,7 +1982,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             std::vector<int> rankA(n);
             for (int k = 0; k < static_cast<int>(n); ++k) rankA[ordA[k]] = k;
             const auto ang = [&](std::size_t i, int ci) { const Cand& a = cands[i][ci]; return std::atan2(anchors[i].ny - a.cy, anchors[i].mid_x - a.cx); };
-            const long WC = 1000000L, WO = 1100L, WA = 130L; // conflicts >> vertical order > adjacent-angle ~ leader length
+            const long WC = 1000000L, WO = static_cast<long>(envd("AEL_WO", 1100.0)), WA = 130L; // conflicts >> vertical order > adjacent-angle ~ leader length
             std::vector<int> choice(n, 0), best(n, 0);
             const auto icost = [&](std::size_t i, int ci) -> long {
                 long c = static_cast<long>(cands[i][ci].base);
@@ -2127,12 +2162,13 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // constraint; all four counters should read 0, and the length/angle summary says how
             // close the leaders got to "short, diagonal, never horizontal".
             {
-                int ink_hits = 0, text_ovl = 0, lead_text = 0, lead_x = 0, shallow = 0, nonsw = 0, overlong = 0, t2 = 0, t3 = 0, vax_ovl = 0;
+                int ink_hits = 0, text_ovl = 0, lead_text = 0, lead_x = 0, shallow = 0, nonsw = 0, overlong = 0, t2 = 0, t3 = 0, vax_ovl = 0, vviol = 0;
                 std::vector<double> lens, angs, xings;
                 lens.reserve(n); angs.reserve(n); xings.reserve(n);
                 for (std::size_t i = 0; i < n; ++i) {
                     const Cand& a = cands[i][choice[i]];
                     if (box_hits_ink(a.x0, a.y0, a.x1, a.y1)) ++ink_hits;                    // #1 text over a black branch
+                    if (box_right_of_vline(a.x0, a.y0, a.x1, a.y1) > 0) ++vviol;             // right of a connector spanning its level
                     for (const auto& b : text_label_boxes)                                    // #2 text over a vaccine/strain name
                         if (a.x0 < b[2] && b[0] < a.x1 && a.y0 < b[3] && b[1] < a.y1) { ++vax_ovl; break; }
                     const double dx = anchors[i].mid_x - a.cx, dy = anchors[i].ny - a.cy;
@@ -2158,12 +2194,13 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 fmt::print(stderr, ">>> aa-label metrics: n={} | text-over-branch={} text-over-name={} text-over-text={} leader-over-text={} leader-over-leader={}"
                                    " | leader len %page: med={:.1f} max={:.1f} over-{:.0f}px={}"
                                    " | leader angle deg: min={:.0f} med={:.0f} below-22deg={} not-NE/SW={}"
+                                   " | right-of-vline={}"
                                    " | leader crosses tree cells: med={:.0f} max={:.0f}"
                                    " | off-envelope={} band-sweep={}\n",
                            n, ink_hits, vax_ovl, text_ovl, lead_text, lead_x,
                            100.0 * med(lens) / height, lens.empty() ? 0.0 : 100.0 * lens.back() / height, len_max, overlong,
                            angs.empty() ? 0.0 : angs.front(), med(angs), shallow, nonsw,
-                           med(xings), xings.empty() ? 0.0 : xings.back(), t2, t3);
+                           vviol, med(xings), xings.empty() ? 0.0 : xings.back(), t2, t3);
             }
         }
         else {
