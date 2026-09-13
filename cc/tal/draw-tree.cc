@@ -622,7 +622,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // 0.16 of the tree width: swept over the three report trees, it is the narrowest band that
     // still lets every label find a left-hand spot (0.12 starts forcing shallow leaders again),
     // and wider only buys longer leaders as labels drift out into the empty part of the band.
-    const double aa_band = (!output.empty() && !params.mrca_labels.empty()) ? 0.16 * width_base : 0.0;
+    // 0.05 of the tree width. Swept 0.00 -> 0.16 against both the overlap metrics and the dead
+    // space actually left over: 0.16 was far too generous (77pt of the h3 band and 58pt of the
+    // B/Vic band went unused), while 0.00 costs real quality — B/Vic loses a conflict-free
+    // layout and the longest leader grows from 12% to 20% of the page. 0.05 keeps every tree
+    // conflict-free with the short leaders, and leaves only ~3-5pt unused on h3 and B/Vic.
+    const double aa_band = (!output.empty() && !params.mrca_labels.empty()) ? 0.05 * width_base : 0.0;
     const double width = width_base + aa_band;
 
     // --- horizontal layout: hz-marker column | tree | labels | time-series column | dash bars | clades column ---
