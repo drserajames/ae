@@ -78,16 +78,59 @@ WHITE = "#ffffff"
 # (Do not re-derive this from grey-cloud dots: overlapping points and antialiasing fringes
 # split into spurious small components there, which is why a first pass at this read the
 # background dots as ~1.8x small. The in-section dots are isolated and measure cleanly.)
-AD_UNITS_TO_KATERI_PX = 4.566
-# NB the base/reference/serum outline_width stays at 1.0 rather than being converted.
-# AD's mapi `/size-reset` authors it as 1.0 in the same units as the sizes, so converting
-# it looks right — but doing so overshoots badly: grey88 ink went to 141% of AD (47k vs
-# 33k) because on a SOLID dot the outline is drawn on the edge and grows the dot, so the
-# unit has different meaning here than in AD's renderer. Left alone until that is
-# understood; the residual is that ae's grey88 ink is ~74% of AD's.
-BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": 1.0, "size": round(2.5 * AD_UNITS_TO_KATERI_PX, 1)}
-REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
-BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 1)}
+# A kateri px is NOT a page unit, and neither is an AD unit -- each is a unit of ITS OWN
+# renderer's map. Both sides draw the same map; they just draw it at different sizes:
+#
+#   AD     authors in page points on a cell AD_MAP_PANEL_PT wide (`PointStyle::size` and
+#          `outline_width` are both `Pixels`, and `context::convert` divides by the surface
+#          scale, so they land device-constant -- one AD unit is one PDF point there)
+#   ae     authors in kateri px on a render MAP_RENDER_WIDTH_PX wide, which is then scaled
+#          into a cell MAP_PANEL_PT wide
+#
+# So a point of S AD units spans S / AD_MAP_PANEL_PT of AD's map, and to span that same
+# FRACTION of ae's map it needs S * MAP_RENDER_WIDTH_PX / AD_MAP_PANEL_PT kateri px. The
+# conversion is that ratio -- render px per map over AD points per map -- and note the ae
+# cell width does not appear in it at all: matching the map fraction is scale-free.
+#
+# Which is the intent. ae draws its cells 180.945 pt against AD's 171.617 pt, i.e. 5.4%
+# larger, and Sarah's call (2026-09-12) is that the points follow the map: "make the points
+# 5.5% bigger if the maps are 5.5% bigger". Dividing by MAP_PANEL_PT instead would match AD's
+# points in absolute page points and leave them 5.4% small against their own larger map.
+#
+# It is derived, not fitted. It used to be fitted -- 4.03, then 4.566 -- by matching a modal
+# dot diameter on a 300 dpi raster, an instrument that resolves to +-1 px on a 17 px dot
+# (~6%) and so could not see a 4% error. Both cell widths here are read off the emitted PDFs
+# (the map-border `re` operators) and are constant across all 38 pages and all three subtypes.
+MAP_RENDER_WIDTH_PX = 800.0   # signature_page.render_section_maps_via_kateri default `width`
+MAP_PANEL_PT = 180.945        # ae's composed cell width; title + grid line scale by this
+AD_MAP_PANEL_PT = 171.617     # AD's composed cell width, from its own PDF
+AD_UNITS_TO_KATERI_PX = MAP_RENDER_WIDTH_PX / AD_MAP_PANEL_PT   # -> 4.662
+# The base/reference/serum outline_width IS in AD units and IS converted, like every other
+# width here. It was left raw at 1.0 for a while on the theory that a solid dot's stroke
+# carries a different meaning through kateri than through AD's renderer; that theory is
+# WRONG, and the evidence is in the emitted PDF operators rather than in a raster ink ratio:
+#
+#   class (h3-hi-guinea-pig-niid.sp)          AD `w`   ae `w`
+#   in-tree      white sep., gray63 fill      0.5      0.520   <- already converted, matches
+#   in-section   black outline                0.5      0.520   <- already converted, matches
+#   base/ref/serum grey88                     1.0      0.226   <- raw 1.0, 4.4x too thin
+#
+# Both renderers stroke CENTRED on a path of diameter `size` (kateri: draw_on_pdf.point ->
+# _drawShape(radius=size/2) then fill+stroke; AD: surface-cairo s_circle_filled, cairo's
+# default centred stroke), and in AD `size` and `outline_width` are both `Pixels`, converted
+# identically by `context::convert`. So one AD unit is one PDF point on the finished page,
+# and the two classes that were already converted land within 4% of AD -- which is the whole
+# proof that the conversion applies to this class too.
+#
+# What produced the old "converting overshoots to 141% of AD's ink" reading was the
+# measurement, not the drawing: `checkall.sh`'s ink() counted pixels EXACTLY #E0E0E0, which
+# is audit trap 13.3.3 applied to itself. At 0.226 pt a 300 dpi stroke is 0.94 px wide and
+# antialiases to *no* exactly-#E0E0E0 pixel at all, so the hollow reference/serum rings
+# scored ~0; converting made them 4.2 px wide and they suddenly scored in full. Neither 74%
+# nor 141% measured ink. Compare stroke widths in the PDF instead (tools/compare-sigpage-ink.py).
+BASE_ANTIGEN = {"fill": GREY88, "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 3), "size": round(2.5 * AD_UNITS_TO_KATERI_PX, 3)}
+REF_ANTIGEN = {"fill": "transparent", "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 3), "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 3)}
+BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": round(1.0 * AD_UNITS_TO_KATERI_PX, 3), "size": round(3.0 * AD_UNITS_TO_KATERI_PX, 3)}
 # Outline widths are in the SAME AD units as the sizes (sp.tal:29 authors
 # `"size": 3.5, "outline_width": 0.5` together), so they go through the same
 # conversion. They did not: the sizes were converted and the widths passed through raw,
@@ -95,9 +138,9 @@ BASE_SERUM = {"fill": "transparent", "outline": GREY88, "outline_width": 1.0, "s
 # about 4.5x too thin, so overlapping gray63 dots merged into blobs instead of being
 # held apart, and the in-section black outline at 1.5 instead of ~2.3.
 INTREE_ANTIGEN = {"fill": GRAY63, "outline": WHITE,
-                  "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 1)}
-INSECTION_ANTIGEN = {"outline": "black", "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 1),
-                     "size": round(3.5 * AD_UNITS_TO_KATERI_PX, 1)}
+                  "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 3)}
+INSECTION_ANTIGEN = {"outline": "black", "outline_width": round(0.5 * AD_UNITS_TO_KATERI_PX, 3),
+                     "size": round(3.5 * AD_UNITS_TO_KATERI_PX, 3)}
 NO_DATE_FILL = GRAY63  # in-section antigen whose date falls outside the time-series window
 # Sig-page serum circles draw the EMPIRICAL radius (AD spc.tal empirical.show:true). With the
 # kateri root fix (plot_spec.dart: `T ? t : e`, matching ae's `T`=theoretical convention),
@@ -109,14 +152,15 @@ SERUM_CIRCLE_THEORETICAL_FLAG = (_os.environ.get("AE_SC_THEORETICAL", "0") != "0
 VACCINE_SIZE = 15  # AD sig-page vaccine mark
 VACCINE_LABEL_SIZE = 12
 # kateri px; sits in the top-left band ABOVE the first horizontal gridline (AD).
-# The map is rendered by kateri at MAP_RENDER_WIDTH_PX and scaled into a ~184 pt panel, so the
-# drawn point size is size_px * panel_pt / render_px. 26 px measured out at 5.99 pt against AD's
-# 9.99 pt (sp.tal asks `text_size: 10`) — a uniform 1.67x shortfall on every page. 43 px puts it
-# on AD's 10 pt: 43 * 184.3 / 800 = 9.90.
-MAP_RENDER_WIDTH_PX = 800.0   # signature_page.render_section_maps_via_kateri default `width`
+# Same scaling as the point sizes: the title is authored in kateri px and shrinks by
+# MAP_PANEL_PT / MAP_RENDER_WIDTH_PX on the way to paper. 26 px measured out at 5.99 pt
+# against AD's 9.99 pt (sp.tal asks `text_size: 10`) — a uniform 1.67x shortfall on every
+# page — which is what deriving it from the panel width fixes.
+# (MAP_RENDER_WIDTH_PX and MAP_PANEL_PT are defined above, with the unit conversion; they
+# used to be repeated here with a stale 184.3, from before the 13.6 gutter change shrank
+# the cell, which left the title ~2% small.)
 MAP_TITLE_PT = 10.0           # AD sp.tal `text_size`
-MAP_PANEL_PT = 184.3          # measured composed panel width (varies ~1% per page)
-MAP_TITLE_SIZE = round(MAP_TITLE_PT * MAP_RENDER_WIDTH_PX / MAP_PANEL_PT)  # -> 43
+MAP_TITLE_SIZE = round(MAP_TITLE_PT * MAP_RENDER_WIDTH_PX / MAP_PANEL_PT)  # -> 44
 # Grid line width, same scaling problem as the title: the renderer draws the grid at the
 # `map_width` px render size and the map is then SCALED into its much smaller cell, thinning
 # every line by that factor. AD draws at the final page size instead, so its grid lands at its
@@ -978,6 +1022,8 @@ def build_section_styles(chart, sections, match, scale: Optional[DateColorScale]
         style.plot_title.text.font_face = "helvetica"
         style.plot_title.text.font_weight = "normal"
         style.plot_title.box.origin = "tl"
-        style.plot_title.box.offset(6, 3)  # hard into the corner; sits in the band above gridline 1
+        style.plot_title.box.offset(16, 3)  # sits in the band above gridline 1, clear of the frame
+        # x: units of the 800px render. 6 put the section letter almost on the frame's left border
+        # (measured inset 0.85mm against AD's 1.69mm); 16 reproduces AD's inset to 0.02mm.
         results.append({"name": name, "title": section_title(section), "n_antigens": len(ag_idx), "n_sera": len(sr_idx)})
     return results

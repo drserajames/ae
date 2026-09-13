@@ -82,6 +82,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         params.clades_horizontal_lines = get_bool(clades["horizontal_lines"], true);
     }
     params.dash_column_width_ratio = get_double(config["dash_column_width_ratio"], 0.0);
+    params.right_margin_ratio = get_double(config["right_margin_ratio"], 0.0);
     params.dash_fill_fraction = get_double(config["dash_fill_fraction"], 0.0);
     if (const auto& time_series = config["time_series"]; time_series.is_object()) {
         params.time_series = get_bool(time_series["show"]);

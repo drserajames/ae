@@ -716,9 +716,22 @@ drawn, self-procrustes yields no arrows, one moved point yields exactly one arro
 that point with the length the fit reports, and neither figures nor arrows reach `99.ace`.
 40/40 clean runs.
 
-**Still open on this stage** (see `../../../AE-PORT-SSM-ADJUST-AUDIT.md`): the `sp/0do` half
-of the `tal` wiring, and the cycle's `adjust/0do` scripts still import
-`acmacs_py.zero_do_5`. Stage B is **not** done.
+#### Stage B is done (2026-09-12)
+
+The `sp/0do` half of the `tal` wiring — the last item above — closed on 2026-09-11: ae now
+derives the hz-sections from the tree's clades when a `.tal` carries no `hz` sub-program,
+which is what this cycle's `.tal` files look like (audit §11.6). Signature pages build on ae
+for all 19 maps × both variants; the ae driver is
+`ac/results/ssm/2026-0223-ssm-sigpcompare/sp/gen-sigpages-ae.sh`, and the live September
+cycle's `sp/gen-sigpages-ae.py` carries the same settings stack. The pages were then compared
+against the published AD ones and seven visual defects fixed and measured — audit §13, with
+the two residuals (grey88 ink ratio, H1/H3 aa-transition titles) in §13.2.
+
+So **every AD-dependent piece of the report workflow has an ae equivalent**, all of it merged
+into `main` at `929fa65`. One thing remains, and it is a data decision rather than a port gap:
+the cycle's own `adjust/0do` scripts **still `import acmacs_py.zero_do_5`**. `ae.adjust` is a
+verified drop-in (`from ae import adjust as ZD`, `exit(ZD.main())`), but no live script has
+been re-pointed at it, so a cycle run today still needs AD installed for the adjust stage.
 
 **The real gap is one primitive.** All three missing ops are geometry on the layout, and all
 are enabled by **writing layout coordinates** (currently read-only). With a coordinate setter:

@@ -171,7 +171,7 @@ def compose_grid(tree_pdf, map_pdfs: Sequence[os.PathLike], out_pdf, *, captions
     # (bigger cells → wider grid → page aspect closer to AD) than the fixed-paper path.
     avail_h = paper_h - 2.0 * margin_mm - title_mm - (10.0 if auto_width else 6.0)
     row_overhead = 7.0 if any(caps) else (1.5 if auto_width else 3.0)
-    col_gap_mm, panel_gap_mm = 2.0, 5.0
+    col_gap_mm, panel_gap_mm = 2.0, 2.0   # panel_gap: see _sig_page_layout
     if auto_width:
         # AD-like: fix the page HEIGHT, give each map a fixed square cell (rows fill the
         # height), the tree its natural width (its aspect × height), and let the page WIDTH
@@ -559,6 +559,12 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
     if clades_before_time_series:
         schema["clades_before_time_series"] = True
         schema["hz_section_labels"] = True  # draw section letters (A/B/C) on the right, like AD
+        # The tree panel here is not a page — it is the left half of a composed sig page, and the
+        # AA colour bars have to end at its right edge so the maps can sit beside them the way they
+        # do in AD. The default symmetric 3% margin left ~4mm of blank paper there (plus ~3mm of
+        # over-charged inter-column gaps, fixed in draw-tree.cc), measured as an 11.9mm colour-bar-
+        # to-map gutter against AD's 0.8mm.
+        schema["right_margin_ratio"] = 0.004
     if matches_chart_seq_ids:
         schema["matches_chart_seq_ids"] = list(matches_chart_seq_ids)
     if section_prefixes and isinstance(schema.get("hz_sections"), list):
@@ -780,7 +786,10 @@ def _sig_page_layout(n_maps: int, tree_aspect: float, *, margin_mm: float = 2.0,
     cols = max(1, math.ceil(n_maps / 3))            # AD lays the maps 3 rows high
     rows = math.ceil(n_maps / cols) if n_maps else 1
     avail_h = paper_h_mm - 2.0 * margin_mm - 10.0
-    row_gap, col_gap, panel_gap = 1.5, 2.0, 5.0
+    # panel_gap: tree panel -> map grid. 5.0 was inherited from the pdfjam composition and is
+    # wider than AD's, which all but touches. 2.0 keeps a visible seam (Sarah: AD is "probably
+    # too close for H3") while taking 3mm off the page width.
+    row_gap, col_gap, panel_gap = 1.5, 2.0, 2.0
     cell = max(20.0, avail_h / rows - 1.5)
     grid_h = rows * cell + (rows - 1) * row_gap
     tree_w = tree_aspect * grid_h
