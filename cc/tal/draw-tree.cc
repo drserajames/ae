@@ -309,8 +309,15 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 const long fv = static_cast<long>(section.first_vertical), lv = static_cast<long>(section.last_vertical);
                 if (!bands.empty() && static_cast<double>(fv - bands.back().last_v) <= incl) {
                     bands.back().last_v = lv;
-                    bands.back().size += section.size();
                     bands.back().last_name = section.last_name; // the merged band now ends at this run's last leaf
+                    // A merged band's size is its SPAN, not the sum of the runs it bridged — AD
+                    // clade_section_t::size() is last->node_id.vertical - first->node_id.vertical + 1,
+                    // recomputed from the merged first/last (acmacs-tal clades.hh:40-47), and ae's own
+                    // clades.cc CladeSection::size() is span-based too. Accumulating run sizes instead
+                    // made merged bands look far smaller than they are, so section-exclusion-tolerance
+                    // dropped bands AD keeps and draws: on this round's h1, C.1.9's band 98235..98289 is
+                    // span 55 (AD keeps it, excl=20) but summed only 2 (ae dropped it).
+                    bands.back().size = static_cast<std::size_t>(bands.back().last_v - bands.back().first_v + 1);
                 }
                 else
                     bands.push_back({fv, lv, section.size(), section.first_name, section.last_name});
