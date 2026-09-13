@@ -610,7 +610,20 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // --- page geometry: height is image_size; width is portrait when a tree
     //     width-to-height ratio is set (acmacs-tal canvas sizing), else square. ---
     const double height = image_size;
-    const double width = params.width_to_height_ratio > 0.0 ? image_size * params.width_to_height_ratio : image_size;
+    const double width_base = params.width_to_height_ratio > 0.0 ? image_size * params.width_to_height_ratio : image_size;
+    // --- left band for the automatically-placed aa-transition labels ---------------------------
+    // A tree page has no whitespace on its left: the root sits on the page margin and the canopy
+    // opens to the right, so a label on a basal branch has nowhere to go on the near side and the
+    // placer is forced to park it right of its own branch, on a long shallow leader across the
+    // canopy. ADDING a band (rather than taking one out of the tree) is what makes a left-hand
+    // placement possible for those labels without the two costs that had this reserve removed
+    // before: the tree keeps its width, and the title still sits above the root (it is drawn at
+    // the root, not at the page margin — see the title block below).
+    // 0.16 of the tree width: swept over the three report trees, it is the narrowest band that
+    // still lets every label find a left-hand spot (0.12 starts forcing shallow leaders again),
+    // and wider only buys longer leaders as labels drift out into the empty part of the band.
+    const double aa_band = (!output.empty() && !params.mrca_labels.empty()) ? 0.16 * width_base : 0.0;
+    const double width = width_base + aa_band;
 
     // --- horizontal layout: hz-marker column | tree | labels | time-series column | dash bars | clades column ---
     //     The clade column is the RIGHTMOST (acmacs-tal draws it past the time-series, flipped to
@@ -623,13 +636,14 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     const double margin_r = (params.right_margin_ratio > 0.0 ? params.right_margin_ratio : 0.03) * width;
     const double drawable_w = width - margin - margin_r;
     const double gap = 0.012 * width;
-    // AD reserves NO dedicated left band for the aa-transition labels: the tree fills the whole
-    // drawable width (root at the left margin) and the labels are placed into whatever whitespace
-    // exists beside their branches (the auto-placer below uses gx0 = margin and tethers, and is
-    // free to overlap sparse tree ink — allowed-B label-placement difference). A left reserve here
-    // shrinks the tree and shifts the root right, so the tree no longer extends as far LEFT as AD
-    // and the title ends up beside the root rather than above it (Sarah r5 items #1/#2). Keep it 0.
-    const double aa_left = 0.0;
+    // The band computed above. It was 0 historically: AD reserves none, and an earlier attempt at a
+    // reserve was rejected because it was carved OUT of the drawable width, which shrank the tree
+    // and shifted the root right, leaving the title beside the root rather than above it (r5 items
+    // #1/#2). The band is now ADDED to the page width instead, so `drawable_w - aa_left` is the
+    // same tree width as before, and the title is drawn at the root. Standalone tree PDFs only —
+    // the signature-page path (export_tree_into, empty `output`) letterboxes the tree into someone
+    // else's rectangle, where a wider page would just shrink it.
+    const double aa_left = aa_band;
     // hz-section marker: the AD sig page draws the section letters (A/B/C) + brackets in a
     // column on the RIGHT, adjacent to the maps (hz_section_labels). The old left reserve
     // (used only to inset the matrix separators) stays when no right marker is drawn.
@@ -812,7 +826,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // glyph-box bottom (y is the box TOP here) ~4pt below the tree top, so it overlapped/occluded
         // the root backbone and read as "beside" the tree. Raise it so the box clears the tree top.
         const double title_y = std::min(title_fs * 0.6, vmargin + top_reserve - title_fs);
-        pdf.text(margin, std::max(title_y, 1.0), params.title, title_fs, BLACK, /*center=*/false);
+        // At the ROOT (margin + aa_left), not the page margin: with a label band the root is inset,
+        // and a title left at the margin would sit out in the band beside the tree instead of above
+        // it. With no band (aa_left == 0) this is exactly the old position.
+        pdf.text(margin + aa_left, std::max(title_y, 1.0), params.title, title_fs, BLACK, /*center=*/false);
     }
 
     // hz-section separators are no longer drawn here: AD draws the faint grey top/bottom rules
@@ -1568,8 +1585,16 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 return false;
             };
             // keep labels clear of the top-left title and the positioned strain-name labels
-            if (!params.title.empty()) mark_box(gx0, gy0, 0.18 * width, mrca_fs * 1.6);
+            if (!params.title.empty()) mark_box(margin + aa_left, gy0, 0.18 * width, mrca_fs * 1.6);
             for (const auto& b : text_label_boxes) mark_box(b[0], b[1], b[2] - b[0], b[3] - b[1]);
+            // ...and the lower-left world-map inset. It never needed reserving while the tree started
+            // on the page margin — its own basal branches covered that corner, so nothing could be
+            // placed there anyway. The label band opens exactly that corner up, so reserve it
+            // explicitly (same geometry as the draw call above) or a label can land on the map.
+            if (params.geo_inset) {
+                const double box_w = 0.134 * height, box_h = box_w / continent_map_aspect();
+                mark_box(margin, 0.972 * height - box_h, box_w, box_h);
+            }
 
             // --- candidate search + conflict-minimising local search (finds a near-branch,
             // crossing-free layout when one exists, as AD's hand layout proves it does) ---
@@ -1643,7 +1668,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // term here is worth far less than one overlap, which the search scores at 1e6.
             const double K_len_max2 = 0.30 * height; // tier-2 reach
             const double K_t2       = 700.0;         // flat surcharge for leaving the target envelope
-            const double K_nw       = 400.0;         // flat surcharge for the NW-SE mirror (label above the branch)
+            const double K_nw       = 3000.0;        // flat surcharge for the NW-SE mirror (label ABOVE the branch).
+                                                     // Stiff on purpose: with the band there is nearly always a
+                                                     // below-the-branch spot, and this is what takes it. Measured on
+                                                     // H1, wrong-direction leaders 8 (at 400) -> 0.
             const double K_wlen     = 1.8;           // per-point leader length
             const double K_wquad    = 6.0;           // per (length - len_soft)/fs, squared
             const double K_wang     = 10.0;          // per degree away from the 45 degree target
@@ -2078,12 +2106,14 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // constraint; all four counters should read 0, and the length/angle summary says how
             // close the leaders got to "short, diagonal, never horizontal".
             {
-                int ink_hits = 0, text_ovl = 0, lead_text = 0, lead_x = 0, shallow = 0, nonsw = 0, overlong = 0, t2 = 0, t3 = 0;
+                int ink_hits = 0, text_ovl = 0, lead_text = 0, lead_x = 0, shallow = 0, nonsw = 0, overlong = 0, t2 = 0, t3 = 0, vax_ovl = 0;
                 std::vector<double> lens, angs, xings;
                 lens.reserve(n); angs.reserve(n); xings.reserve(n);
                 for (std::size_t i = 0; i < n; ++i) {
                     const Cand& a = cands[i][choice[i]];
                     if (box_hits_ink(a.x0, a.y0, a.x1, a.y1)) ++ink_hits;                    // #1 text over a black branch
+                    for (const auto& b : text_label_boxes)                                    // #2 text over a vaccine/strain name
+                        if (a.x0 < b[2] && b[0] < a.x1 && a.y0 < b[3] && b[1] < a.y1) { ++vax_ovl; break; }
                     const double dx = anchors[i].mid_x - a.cx, dy = anchors[i].ny - a.cy;
                     const double L = std::hypot(dx, dy);
                     const double th_deg = std::atan2(std::abs(dy), std::max(std::abs(dx), 1e-9)) * 180.0 / PI;
@@ -2104,12 +2134,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 }
                 std::sort(lens.begin(), lens.end()); std::sort(angs.begin(), angs.end()); std::sort(xings.begin(), xings.end());
                 const auto med = [](const std::vector<double>& v) { return v.empty() ? 0.0 : v[v.size() / 2]; };
-                fmt::print(stderr, ">>> aa-label metrics: n={} | text-over-branch={} text-over-text={} leader-over-text={} leader-over-leader={}"
+                fmt::print(stderr, ">>> aa-label metrics: n={} | text-over-branch={} text-over-name={} text-over-text={} leader-over-text={} leader-over-leader={}"
                                    " | leader len %page: med={:.1f} max={:.1f} over-{:.0f}px={}"
                                    " | leader angle deg: min={:.0f} med={:.0f} below-22deg={} not-NE/SW={}"
                                    " | leader crosses tree cells: med={:.0f} max={:.0f}"
                                    " | off-envelope={} band-sweep={}\n",
-                           n, ink_hits, text_ovl, lead_text, lead_x,
+                           n, ink_hits, vax_ovl, text_ovl, lead_text, lead_x,
                            100.0 * med(lens) / height, lens.empty() ? 0.0 : 100.0 * lens.back() / height, len_max, overlong,
                            angs.empty() ? 0.0 : angs.front(), med(angs), shallow, nonsw,
                            med(xings), xings.empty() ? 0.0 : xings.back(), t2, t3);
