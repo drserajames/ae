@@ -148,11 +148,17 @@ Two further fixes in the same file:
 2. **Executable fixtures are not sanitisable for free.** `cc/chart/v2/name-format.cc` passes
    real names into `antigen.name()` / `serum.name()` in a unit test; changing the input would
    mean changing the expected output. Left baselined.
-3. **Lab codenames and serum ids are still outside the private list.** It covers strain names
-   only. They are not derivable from `hidb5` or `seqdb` and have to be supplied by hand. See
-   `tools/WHO-DATA-GATE.md` for the regeneration procedure and the `PRIVATE_MIN_LEN`
-   constraint — an entry shorter than the minimum is **rejected with a warning, not matched**,
-   so check the warning count after regenerating.
+3. **Lab codenames and serum ids — asked, and closed.** The private list covers strain names
+   only, and the long-standing open action (`archive/AE-PORT-PROGRESS.md:60`) was to extend it
+   to lab-internal identifiers that the regex rules structurally cannot match. Such identifiers
+   are not derivable from `hidb5` or `seqdb`, so the user was asked directly on 13th September
+   2026 and **knows of none** in this workflow. The item is closed, not deferred.
+
+   Reopen it only if one actually turns up. If it does: entries go in
+   `acmacs-data/.who-strain-list` under the same normalisation, and note the `PRIVATE_MIN_LEN`
+   constraint — an entry shorter than the minimum (8 characters) is **rejected with a warning,
+   not matched**, so check the warning count after regenerating. A shorter identifier needs a
+   rule change, which is the user's decision, not a quiet edit to the constant.
 
 ## How to re-verify this audit
 
