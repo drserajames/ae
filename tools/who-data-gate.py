@@ -63,7 +63,7 @@ _YEAR = r"(?:19|20)?[0-9]{2}"
 _END = r"(?![0-9])"
 # Strain names: A/Location/123/2021, B/Some Place/7/17  (2- or 4-digit year)
 RE_STRAIN = re.compile(rf"\b[AB]/[A-Za-z][A-Za-z .'_-]*/{_ISOLATE}/{_YEAR}{_END}")
-# Bare strain names WITHOUT an A/B prefix: Location/number/year, e.g. VICTORIA/2570/2019.
+# Bare strain names WITHOUT an A/B prefix: Location/number/year, e.g. EXAMPLETOWN/2570/2019.
 # Requires a Capitalised location word (>=3 alpha) so lowercase paths ("results/2/2024")
 # don't match; "_" and "-" are allowed because seq_ids write spaces as underscores
 # (SOUTH_AFRICA/…, NIIGATA-C/…).

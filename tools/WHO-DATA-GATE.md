@@ -93,11 +93,19 @@ its own as the rules improve.
 
 ## Allowlist mechanism
 
-Two files, both **WHO-data-clean** (no strain/AA/clade plaintext):
+Two files. Neither ever holds a **strain name** in plaintext:
 
-- **`tools/who-data-gate-allowlist.txt`** — hand-edited. Sections:
+- **`tools/who-data-gate-allowlist.txt`** — hand-edited. Entries here are **unscoped and
+  permanent**: one line passes that token in every file, for good. Only two kinds of token
+  qualify — invented placeholders, and nomenclature that is published and can never become
+  pre-publication. **A real strain name never qualifies**, however long it has been
+  published; it goes in the baseline instead, where it is hashed and scoped to one path.
+  Sections:
   - `[allow-literal]` — exact non-WHO false-positive tokens (e.g. a code identifier that
-    trips the AA rule), passed now and in future, anywhere.
+    trips the AA rule), passed now and in future, anywhere. Also the home of **published
+    clade designations**, which are public by definition. They are listed **one by one**,
+    deliberately: a categorical clade regex here would disable the clade rule outright,
+    whereas an unlisted — i.e. newly designated — clade token still fails the gate.
   - `[allow-regex]` — categorical false-positive patterns (`fullmatch`). Also the home of
     path- and URL-shaped false positives, which look like `LOCATION/isolate/year` to the
     strain rules — build paths (`Cellar/<pkg>/<version>`) and FTP URL segments are
@@ -117,6 +125,13 @@ Two files, both **WHO-data-clean** (no strain/AA/clade plaintext):
 
   Prefer `[allow-literal]`/`[skip-path]` for genuine false positives; use the baseline only
   for grandfathering already-public content.
+
+  Every entry needs a justification that says **what the tokens are in that file**, and an
+  expiry that reflects that file's own risk — a live config that gets regenerated against
+  current data earns a much shorter one than a frozen fixture. A shared blanket sentence
+  satisfies `--strict` and tells a later reader nothing; `tools/WHO-DATA-GATE-AUDIT.md`
+  records how the baseline was taken apart once for exactly that reason, and what each
+  entry now covers.
 
 ## How to run
 
