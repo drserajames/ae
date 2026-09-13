@@ -682,6 +682,9 @@ disables the gate. Raises if the chart has fewer than 2 layers.)")) //
              pybind11::doc("move a point to the given coordinates (antigens are indexed 0..n_ag-1, sera continue at n_ag..)")) //
         .def("unmovable_in_the_last_dimension", &ProjectionRef::unmovable_in_the_last_dimension)                                                              //
         .def("connect_all_disconnected", &ProjectionRef::connect_all_disconnected, pybind11::doc("reconnected points still have NaN coordinates after call")) //
+        .def("disconnect_points_without_coordinates", &ProjectionRef::disconnect_points_without_coordinates,                                          //
+             pybind11::doc("disconnect every point that has no coordinates, returning those newly disconnected; relax() does this itself "            //
+                           "— the engines reject NaN, and such a point cannot take part in the optimisation"))                                        //
         .def("layout", &ProjectionRef::layout, pybind11::return_value_policy::reference_internal)                                                             //
         .def("transformation", &ProjectionRef::transformation, pybind11::return_value_policy::reference_internal)                                             //
         .def(

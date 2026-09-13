@@ -26,6 +26,11 @@ namespace ae::py
         std::string minimum_column_basis() const { return projection.minimum_column_basis().format("{}", ae::chart::v3::minimum_column_basis::use_none::yes); }
         const std::vector<double>& forced_column_bases() const { return projection.forced_column_bases().data(); }
         std::vector<size_t> disconnected() const { return to_vector_base_t(projection.disconnected()); }
+
+        // Add every point that has no coordinates to the disconnected set, returning the points
+        // newly added. relax() does this itself; exposed so a caller can do it up front (and so
+        // the regression test can build the "already disconnected" case).
+        std::vector<size_t> disconnect_points_without_coordinates() { return to_vector_base_t(projection.disconnect_points_without_coordinates()); }
         std::vector<size_t> unmovable() const { return to_vector_base_t(projection.unmovable()); }
         std::vector<size_t> unmovable_in_the_last_dimension() const { return to_vector_base_t(projection.unmovable_in_the_last_dimension()); }
         ae::chart::v3::Transformation& transformation() { return projection.transformation(); }

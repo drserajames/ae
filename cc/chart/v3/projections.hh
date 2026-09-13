@@ -75,6 +75,11 @@ namespace ae::chart::v3
 
         point_indexes non_nan_points() const; // for relax_incremental and enum unmovable_non_nan_points
 
+        // Add every point that has no coordinates to the disconnected set, returning the points
+        // newly added. Called by relax(): the optimisation engines reject NaN outright, and a
+        // point with no coordinates cannot take part in the optimisation anyway.
+        point_indexes disconnect_points_without_coordinates();
+
         optimization_status relax(const Chart& chart, const optimization_options& options);
 
         Layout transformed_layout() const { return layout().transform(transformation()); }

@@ -69,8 +69,37 @@ ae::point_indexes ae::chart::v3::Projection::non_nan_points() const
 
 // ----------------------------------------------------------------------
 
+// A point with no coordinates cannot take part in the optimisation, and the engines reject NaN
+// outright ("MinCGCreate: X contains infinite or NaN values!"). DisconnectedPointsHandler already
+// zeroes-and-restores the points a projection LISTS as disconnected, but a chart can carry a NaN
+// point that is not on that list, and a single one of those aborts the whole relax.
+//
+// Report-pipeline charts do carry them. Over the 16 February-2026 ssm maps: 8 had NaN points that
+// were all properly listed -- up to 162 of them, relaxing fine -- and 3 had 1-2 unlisted ones,
+// which failed. AD disconnects such a point rather than failing, so do the same: the stress then
+// excludes it and its coordinates stay NaN afterwards.
+//
+// This cannot change a relax that currently succeeds: it only ever adds points that have no
+// coordinates, and any projection containing one of those throws today.
+ae::point_indexes ae::chart::v3::Projection::disconnect_points_without_coordinates()
+{
+    const auto& layt = layout();
+    point_indexes newly_disconnected;
+    for (const auto point_no : layt.number_of_points()) {
+        if (!layt.point_has_coordinates(point_no) && !disconnected_.contains(point_no)) {
+            disconnected_.insert(point_no);
+            newly_disconnected.insert(point_no);
+        }
+    }
+    return newly_disconnected;
+
+} // ae::chart::v3::Projection::disconnect_points_without_coordinates
+
+// ----------------------------------------------------------------------
+
 ae::chart::v3::optimization_status ae::chart::v3::Projection::relax(const Chart& chart, const optimization_options& options)
 {
+    disconnect_points_without_coordinates();
     const auto status = optimize(chart, *this, options);
     stress_ = status.final_stress;
     if (transformation_.number_of_dimensions != layout_.number_of_dimensions())
