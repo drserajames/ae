@@ -1559,11 +1559,6 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // intersect the black tree lines) and to report the metric below.
             struct InkRect { double x0, y0, x1, y1; };
             std::vector<InkRect> ink;
-            // The tree's VERTICAL connectors, kept apart from the rest of the ink. A label must not sit
-            // to the right of a connector that runs past its own level: visually that puts the text
-            // inside a subtree it does not belong to. Being right of a connector that stops well above
-            // the label is fine, and being right of the trunk is fine.
-            std::vector<InkRect> vlines;
             ink.reserve(layout.leaves.size() + 2 * layout.inodes.size());
             const double hw = tree_line_width * 0.5; // drawn half-width of a branch (the stroke pdf.line() lays down)
             const auto add_h = [&](double xa, double xb, double y) { ink.push_back({std::min(xa, xb), y - hw, std::max(xa, xb), y + hw}); };
@@ -1589,24 +1584,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     const auto f = pos.find(*ch);
                     if (f != pos.end()) { const double cy = dev_y(f->second.second); ymin = std::min(ymin, cy); ymax = std::max(ymax, cy); }
                 }
-                if (ymax >= ymin) { mark_v(dev_x(in.x), ymin, ymax); add_v(dev_x(in.x), ymin, ymax);
-                                    vlines.push_back({dev_x(in.x), ymin, dev_x(in.x), ymax}); }
+                if (ymax >= ymin) { mark_v(dev_x(in.x), ymin, ymax); add_v(dev_x(in.x), ymin, ymax); }
             }
-            // Does this box sit RIGHT of a vertical connector that spans its own level?
-            // `above_tol` is the "not far above the label" allowance: a connector whose bottom end is
-            // this far above the box's top still counts as running past it.
-            const double vline_above_tol = mrca_fs * 1.2;
-            const auto box_right_of_vline = [&](double bx0, double by0, double bx1, double by1) -> int {
-                int n = 0;
-                for (const InkRect& v : vlines) {
-                    if (v.x0 >= bx1) continue;                      // connector is right of the box: fine
-                    if (v.x0 <= gx0 + mrca_fs * 0.5) continue;      // the trunk: explicitly allowed
-                    if (v.y1 < by0 - vline_above_tol) continue;     // ends well above the box: fine
-                    if (v.y0 > by1) continue;                       // starts below the box: fine
-                    ++n;
-                }
-                return n;
-            };
             // exact "does this (padded) text box touch any branch?" — the constraint-#1 veto.
             const auto box_hits_ink = [&](double bx0, double by0, double bx1, double by1) -> bool {
                 for (const InkRect& r : ink)
@@ -2164,13 +2143,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // constraint; all four counters should read 0, and the length/angle summary says how
             // close the leaders got to "short, diagonal, never horizontal".
             {
-                int ink_hits = 0, text_ovl = 0, lead_text = 0, lead_x = 0, shallow = 0, nonsw = 0, overlong = 0, t2 = 0, t3 = 0, vax_ovl = 0, vviol = 0;
+                int ink_hits = 0, text_ovl = 0, lead_text = 0, lead_x = 0, shallow = 0, nonsw = 0, overlong = 0, t2 = 0, t3 = 0, vax_ovl = 0;
                 std::vector<double> lens, angs, xings;
                 lens.reserve(n); angs.reserve(n); xings.reserve(n);
                 for (std::size_t i = 0; i < n; ++i) {
                     const Cand& a = cands[i][choice[i]];
                     if (box_hits_ink(a.x0, a.y0, a.x1, a.y1)) ++ink_hits;                    // #1 text over a black branch
-                    if (box_right_of_vline(a.x0, a.y0, a.x1, a.y1) > 0) ++vviol;             // right of a connector spanning its level
                     for (const auto& b : text_label_boxes)                                    // #2 text over a vaccine/strain name
                         if (a.x0 < b[2] && b[0] < a.x1 && a.y0 < b[3] && b[1] < a.y1) { ++vax_ovl; break; }
                     const double dx = anchors[i].mid_x - a.cx, dy = anchors[i].ny - a.cy;
@@ -2196,13 +2174,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 fmt::print(stderr, ">>> aa-label metrics: n={} | text-over-branch={} text-over-name={} text-over-text={} leader-over-text={} leader-over-leader={}"
                                    " | leader len %page: med={:.1f} max={:.1f} over-{:.0f}px={}"
                                    " | leader angle deg: min={:.0f} med={:.0f} below-22deg={} not-NE/SW={}"
-                                   " | right-of-vline={}"
                                    " | leader crosses tree cells: med={:.0f} max={:.0f}"
                                    " | off-envelope={} band-sweep={}\n",
                            n, ink_hits, vax_ovl, text_ovl, lead_text, lead_x,
                            100.0 * med(lens) / height, lens.empty() ? 0.0 : 100.0 * lens.back() / height, len_max, overlong,
                            angs.empty() ? 0.0 : angs.front(), med(angs), shallow, nonsw,
-                           vviol, med(xings), xings.empty() ? 0.0 : xings.back(), t2, t3);
+                           med(xings), xings.empty() ? 0.0 : xings.back(), t2, t3);
             }
         }
         else {
