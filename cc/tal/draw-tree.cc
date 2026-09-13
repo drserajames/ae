@@ -1711,7 +1711,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                                                      // below-the-branch spot, and this is what takes it. Measured on
                                                      // H1, wrong-direction leaders 8 (at 400) -> 0.
             const double K_wlen     = 2.5;           // per-point leader length
-            const double K_wquad    = 6.0;           // per (length - len_soft)/fs, squared           // per (length - len_soft)/fs, squared
+            const double K_wquad    = 6.0;           // per (length - len_soft)/fs, squared
             const double K_wang     = 10.0;          // per degree away from the target
             const double K_t3d      = 4.0;           // per point of distance for a band-sweep spot
             const double K_wink     = 22.0;          // per tree-ink cell the leader crosses. NOTE (measured):
@@ -1923,6 +1923,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     std::vector<Cand> keep;
                     keep.reserve(300);
                     const double sep = fs * 0.5;
+                    // NOTE: this keys on the ATTACH POINT, so the three box variants emitted per
+                    // (angle, length) — centred, hanging below, sitting above — can collapse to one
+                    // survivor when the clamp puts their attach points together. Keying on the BOX
+                    // instead was measured and is no better (11.7pt vs 11.4pt baseline, 3 seeds).
                     for (const Cand& c : cands[i]) {            // pass 1: near field, finely spaced
                         bool dup = false;
                         for (const Cand& k : keep) if (std::hypot(c.cx - k.cx, c.cy - k.cy) < sep) { dup = true; break; }
