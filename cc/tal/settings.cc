@@ -80,6 +80,10 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         params.clades_label_scale = get_double(clades["label_scale"], 0.0);
         params.clades_width_ratio = get_double(clades["width_ratio"], 0.0);
         params.clades_horizontal_lines = get_bool(clades["horizontal_lines"], true);
+        // AD Clades::Parameters::report defaults to TRUE (acmacs-tal clades.hh:99) — the clade-section
+        // diagnostic prints unless the .tal's clades command says `"report": false`.
+        params.clades_report = get_bool(clades["report"], true);
+        params.clades_report_file = get_string(clades["report_file"]);
     }
     params.dash_column_width_ratio = get_double(config["dash_column_width_ratio"], 0.0);
     params.right_margin_ratio = get_double(config["right_margin_ratio"], 0.0);

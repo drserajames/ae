@@ -164,6 +164,97 @@ namespace ae::tal
     };
 } // namespace ae::tal
 
+// Accumulate, for each [first_vertical, last_vertical] span of shown-leaf rows, the
+// aa-transitions of every inode whose own shown-leaf extent fully contains it — AD
+// HzSections::set_aa_transitions. Shared by compute_hz_sections and by tal-draw's
+// clade-section diagnostic, which reports the same strings for the bands it actually draws.
+std::vector<std::string> ae::tal::section_aa_transitions(ae::tree::Tree& tree, const std::vector<std::pair<std::size_t, std::size_t>>& spans)
+{
+    using namespace ae::tree;
+
+    std::vector<std::string> result(spans.size());
+    if (spans.empty())
+        return result;
+
+    // Post-order pass for each inode's shown-leaf span, then a pre-order pass to apply
+    // them in AD's order. Both run off one iterative walk over node_index_t.
+    struct Frame
+    {
+        node_index_t index;
+        std::size_t cursor;
+        std::size_t first_vertical;
+        bool any_leaf;
+        std::size_t span_slot;
+    };
+    std::vector<InodeSpan> inode_spans;   // in pre-order
+    std::vector<Frame> stack;
+    std::size_t vertical{0};
+    inode_spans.push_back(InodeSpan{.aa_transitions = &tree.inode(Tree::root_index()).aa_transitions});
+    stack.push_back({Tree::root_index(), 0, 0, false, 0});
+    while (!stack.empty()) {
+        Frame& frame = stack.back();
+        const Inode& inode = tree.inode(frame.index);
+        if (frame.cursor < inode.children.size()) {
+            const node_index_t child = inode.children[frame.cursor++];
+            if (is_leaf(child)) {
+                if (tree.leaf(child).shown) {
+                    for (Frame& fr : stack) {
+                        if (!fr.any_leaf) {
+                            fr.any_leaf = true;
+                            fr.first_vertical = vertical;
+                        }
+                        inode_spans[fr.span_slot].first_vertical = fr.first_vertical;
+                        inode_spans[fr.span_slot].last_vertical = vertical;
+                    }
+                    ++vertical;
+                }
+            }
+            else if (tree.inode(child).shown) {
+                inode_spans.push_back(InodeSpan{.aa_transitions = &tree.inode(child).aa_transitions});
+                stack.push_back({child, 0, 0, false, inode_spans.size() - 1});
+            }
+        }
+        else {
+            stack.pop_back();
+        }
+    }
+
+    // accumulate as transitions (AD AA_Transitions), format once at the end
+    std::vector<std::vector<ae::tree::transition_t>> accumulated(spans.size());
+    for (const InodeSpan& span : inode_spans) { // inode_spans is in pre-order
+        if (span.aa_transitions == nullptr || span.aa_transitions->empty())
+            continue;
+        for (std::size_t sno{0}; sno < spans.size(); ++sno) {
+            if (span.first_vertical <= spans[sno].first && spans[sno].second <= span.last_vertical) {
+                for (const auto& transition : span.aa_transitions->transitions) {
+                    // AD AA_Transitions::add_or_replace: drop any entry at the same position, append
+                    std::erase_if(accumulated[sno], [&transition](const auto& have) { return have.pos == transition.pos; });
+                    accumulated[sno].push_back(transition);
+                }
+            }
+        }
+    }
+    // AD formats a section's label with AA_Transitions::display_most_important(0), which
+    // drops any entry with an empty left or right residue — a label whose ancestral residue
+    // was never resolved is not printed. Mirror that here.
+    for (std::size_t sno{0}; sno < spans.size(); ++sno) {
+        fmt::memory_buffer out;
+        bool first{true};
+        for (const auto& transition : accumulated[sno]) {
+            if (transition.left == ' ' || transition.right == ' ')
+                continue;
+            fmt::format_to(std::back_inserter(out), "{}{}", first ? "" : " ", transition);
+            first = false;
+        }
+        result[sno] = fmt::to_string(out);
+    }
+
+    return result;
+
+} // ae::tal::section_aa_transitions
+
+// ======================================================================
+
 std::vector<ae::tal::ComputedHzSection> ae::tal::compute_hz_sections(ae::tree::Tree& tree, const per_clade_parameters_t& per_clade, const CladeSectionParameters& all_clades)
 {
     using namespace ae::tree;
@@ -208,84 +299,14 @@ std::vector<ae::tal::ComputedHzSection> ae::tal::compute_hz_sections(ae::tree::T
         sections[no].prefix.assign(1, static_cast<char>('A' + no));
 
     // --- HzSections::set_aa_transitions() ---
-    // Pre-order over the tree: an inode contributes its transitions to every section its
-    // subtree fully contains (AD: section.first >= node.first_prev_leaf &&
-    // section.last <= node.last_next_leaf). add_or_replace semantics — a later (deeper)
-    // transition at the same position replaces the earlier one AND moves to the end.
     {
-        // Post-order pass for each inode's shown-leaf span, then a pre-order pass to apply
-        // them in AD's order. Both run off one iterative walk over node_index_t.
-        struct Frame
-        {
-            node_index_t index;
-            std::size_t cursor;
-            std::size_t first_vertical;
-            bool any_leaf;
-            std::size_t span_slot;
-        };
-        std::vector<InodeSpan> spans;   // in pre-order
-        std::vector<Frame> stack;
-        std::size_t vertical{0};
-        spans.push_back(InodeSpan{.aa_transitions = &tree.inode(Tree::root_index()).aa_transitions});
-        stack.push_back({Tree::root_index(), 0, 0, false, 0});
-        while (!stack.empty()) {
-            Frame& frame = stack.back();
-            const Inode& inode = tree.inode(frame.index);
-            if (frame.cursor < inode.children.size()) {
-                const node_index_t child = inode.children[frame.cursor++];
-                if (is_leaf(child)) {
-                    if (tree.leaf(child).shown) {
-                        for (Frame& fr : stack) {
-                            if (!fr.any_leaf) {
-                                fr.any_leaf = true;
-                                fr.first_vertical = vertical;
-                            }
-                            spans[fr.span_slot].first_vertical = fr.first_vertical;
-                            spans[fr.span_slot].last_vertical = vertical;
-                        }
-                        ++vertical;
-                    }
-                }
-                else if (tree.inode(child).shown) {
-                    spans.push_back(InodeSpan{.aa_transitions = &tree.inode(child).aa_transitions});
-                    stack.push_back({child, 0, 0, false, spans.size() - 1});
-                }
-            }
-            else {
-                stack.pop_back();
-            }
-        }
-
-        // accumulate as transitions (AD AA_Transitions), format once at the end
-        std::vector<std::vector<ae::tree::transition_t>> accumulated(sections.size());
-        for (const InodeSpan& span : spans) { // spans is in pre-order
-            if (span.aa_transitions == nullptr || span.aa_transitions->empty())
-                continue;
-            for (std::size_t sno{0}; sno < sections.size(); ++sno) {
-                const ComputedHzSection& section = sections[sno];
-                if (span.first_vertical <= section.first_vertical && section.last_vertical <= span.last_vertical) {
-                    for (const auto& transition : span.aa_transitions->transitions) {
-                        // AD AA_Transitions::add_or_replace: drop any entry at the same position, append
-                        std::erase_if(accumulated[sno], [&transition](const auto& have) { return have.pos == transition.pos; });
-                        accumulated[sno].push_back(transition);
-                    }
-                }
-            }
-        }
-        // AD formats a section's label with AA_Transitions::display_most_important(0), which
-        // drops any entry with an empty left or right residue — a label whose ancestral residue
-        // was never resolved is not printed. Mirror that here.
-        for (std::size_t sno{0}; sno < sections.size(); ++sno) {
-            fmt::memory_buffer out;
-            bool first{true};
-            for (const auto& transition : accumulated[sno]) {
-                if (transition.left == ' ' || transition.right == ' ')
-                    continue;
-                fmt::format_to(std::back_inserter(out), "{}{}", first ? "" : " ", transition);
-                first = false;
-            }
-            sections[sno].aa_transitions = fmt::to_string(out);
-        }
+        std::vector<std::pair<std::size_t, std::size_t>> spans;
+        spans.reserve(sections.size());
+        for (const ComputedHzSection& section : sections)
+            spans.emplace_back(section.first_vertical, section.last_vertical);
+        const std::vector<std::string> transitions = section_aa_transitions(tree, spans);
+        for (std::size_t sno{0}; sno < sections.size(); ++sno)
+            sections[sno].aa_transitions = transitions[sno];
     }
 
     return sections;

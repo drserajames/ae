@@ -700,6 +700,64 @@ on a large real tree, and `Nodes.remove()` traps — both reproduce on `tal-clad
 
 Tests: `cc/tal/test/test-aa-transitions-eu20200915.py` (7 checks, invented `J`/`O` residues).
 
+## Clade-section diagnostic (`>>> Clades` / `.taleg`) — ported 2026-09-13
+
+Port of AD `Clades::report_clades` (acmacs-tal `cc/clades.cc:221`) plus
+`HzSections::report` / `detect_intersect` (`cc/hz-sections.cc:196` / `:112`). It restores the
+workflow `RUNNING-THE-REPORT.md` §10.5 is written around, which had no ae equivalent: see each
+clade's band count `(N)`, each band's size and leaf range, the **gap** to the next band of the
+same clade, and the sibling-intersect warnings — without waiting out a full render.
+
+* **On by default**, as in AD (`Clades::Parameters::report{true}`, acmacs-tal `clades.hh:99`).
+  The `.tal`'s `{"N": "clades", …}` command turns it off with `"report": false`, and can redirect
+  the file with `"report-file"` (`"-"` = no file). Translated by `py/ae/tal/settings_v3.py`,
+  read in `cc/tal/settings.cc`.
+  *(No report `.tal` sets `report` at all — AD printed the block because the default is true.)*
+* **Output**: stderr, and `<output>.taleg` beside the rendered PDF (§10.5 documents reading
+  that file). The shared-surface entry point (signature pages) passes no output path and so
+  writes no file.
+* **`tal-draw --clades-report`** prints the diagnostic and exits *before* `make_surface`, so no
+  PDF is drawn: **0.6 s** on this round's bvic tree versus minutes for the full render.
+* The `[…]` hz dump reproduces AD's column-aligned `hz` `"sections"` shape, so it can be pasted
+  straight back into a `.tal`. Each section carries its **id** (`{clade}-{section no}`), which
+  distinguishes a genuinely non-monophyletic clade from a stale-id duplicate.
+* aa-transitions come from `ae::tal::section_aa_transitions` (`cc/tal/clades.cc`), factored out
+  of `compute_hz_sections` so the diagnostic and the signature-page path report identically.
+  They are empty when the tree's inodes carry no `A` field (B/Vic this round) — as in AD.
+
+### Reported from the DRAWING path, not `compute_hz_sections`
+
+The diagnostic reports the `clade_plan` bands `draw-tree.cc` actually draws. That matters,
+because ae has **two** section implementations and they do not agree:
+
+| | `clades.cc` `apply_section_tolerance` (sig pages) | `draw-tree.cc` clade_plan (the tree) |
+|---|---|---|
+| merge gap `<= inclusion` | same | same |
+| all bands small | AD behaviour: keep them **all** | keeps only the **largest** |
+| `all-clades` tolerances | inherited as the per-clade default | **not read**; per-clade only, 0/missing → AD's 10/5 |
+
+Neither divergence changes this round's h1/h3/bvic output — the "every band was small" branch
+never fires on them (the diagnostic prints an explicit `NOTE:` when it does), and no report
+`.tal` sets `all-clades` tolerances. They are recorded here, and surfaced at runtime, rather
+than silently "fixed": changing either alters what gets drawn and is a report-data decision.
+
+### The drawing path draws ONE bracket per clade
+
+`draw-tree.cc` draws a single arrow + label per clade, spanning its **largest** band; AD draws
+one per *section*. So an ae-rendered tree cannot double-label a clade — where AD would draw a
+second bracket for a second section, ae silently omits it. This is why the diagnostic reports
+both the drawn bands **and** the bands dropped by `section-exclusion-tolerance`: a clade shown
+`(1)` may be one genuine run, or several runs whose strays were dropped, and §10.5's
+"does this resemble last round?" check needs to tell those apart.
+
+Measured on `2026-0921-ssm` (`tree/bvic.after-2021.tal`, `tree/h1.after-2021.tal`):
+
+* **bvic `C.1` is `(2)`** — `[873] 60..948` and `[138] 38002..38139`, `gap 37053`; the second
+  band is flagged `INTRSCT` against the sibling `C.5-0` / `C.5.1-0`. ae draws only the first.
+* **h1 `D.3.1`, `D.5`, `C.1.9` are each `(1)`** in the drawing path. `D.3.1` has no dropped
+  bands at all (one contiguous run); `D.5` and `C.1.9` have strays that both ae *and* AD drop,
+  since a full-size band survives. Under either implementation these three yield one section.
+
 ## 6. Conf / format docs to mine next
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-conf.org` — the settings DSL reference.
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-processing.org` — processing stages.
