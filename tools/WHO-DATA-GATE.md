@@ -39,13 +39,21 @@ The names themselves are **never stored in this repo** — that would itself be 
 They live in the **private** `acmacs-data` repo, gitignored even there, and are found at
 runtime via:
 
-1. **`$WHO_STRAIN_LIST`** — the supported route. `ae-env.sh` exports it automatically as
-   `$ACMACS_DATA/.who-strain-list` when that file exists, so sourcing `ae-env.sh` is
-   normally all that is needed.
-2. A gitignored `.who-strain-list` / `.who-strain-list.txt` at **this repo's root** — a
+1. **`$WHO_STRAIN_LIST`** — an explicit override. `ae-env.sh` exports it as
+   `$ACMACS_DATA/.who-strain-list` when that file exists.
+2. **`$ACMACS_DATA/.who-strain-list`, else `../acmacs-data/.who-strain-list`** beside this
+   checkout — found automatically, with no environment set up at all. This matters: **git
+   hooks do not inherit a shell that sourced `ae-env.sh`**, so without this the pre-commit
+   hook would quietly fall back to regex-only at the exact moment the check matters most.
+   A silently degraded gate is the failure mode this tool exists to prevent.
+3. A gitignored `.who-strain-list` / `.who-strain-list.txt` at **this repo's root** — a
    legacy fallback that still works but **must not be used**. A file of pre-publication
    names sitting in a public checkout is one `git add -f` away from a permanent leak.
-   Keep the list in `acmacs-data` and point `$WHO_STRAIN_LIST` at it.
+   Keep the list in `acmacs-data`.
+
+Note that `--all` scans **git-tracked** files, so a gitignored list sitting in this repo's
+root is not scanned even though it is there. A clean `--all` is **not** evidence that no
+strain data is present in the checkout — check that with `ls`, not with the gate.
 
 If no list is found the scanner warns and falls back to the regex rules only; `--strict`
 turns that warning into a failure (use it in CI and hooks).

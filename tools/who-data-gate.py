@@ -264,10 +264,18 @@ def load_private_list(cfg: Config, root: str) -> str | None:
     env = os.environ.get("WHO_STRAIN_LIST")
     if env:
         candidates.append(env)
-    # gitignored local fallbacks (never committed)
+    # The list lives in the private acmacs-data repo. Look for it there directly, so the
+    # check still runs when the environment is not set up -- git hooks do NOT inherit a
+    # shell that sourced ae-env.sh, and a silently regex-only gate is the failure this
+    # whole file exists to prevent. Mirrors ae-env.sh's own $ACMACS_DATA / sibling logic.
+    data_dir = os.environ.get("ACMACS_DATA") or os.path.join(root, os.pardir, "acmacs-data")
+    candidates.append(os.path.join(data_dir, ".who-strain-list"))
+    # gitignored local fallbacks (legacy; keeping the list inside this public repo is
+    # discouraged -- see WHO-DATA-GATE.md)
     candidates.append(os.path.join(root, ".who-strain-list"))
     candidates.append(os.path.join(root, ".who-strain-list.txt"))
     for cand in candidates:
+        cand = os.path.normpath(cand) if cand else cand
         if cand and os.path.exists(cand):
             too_short = []
             with open(cand, "r", encoding="utf-8") as fh:
