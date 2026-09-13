@@ -1515,7 +1515,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // left side and a short tether), reserving each placed box so labels never overlap.
             const double gx0 = margin, gx1 = dev_x(max_cum);                 // tree band (left of the matrix)
             const double gy0 = vmargin + top_reserve, gy1 = height - vmargin - bottom_reserve;
-            const double cell = std::max(mrca_fs * 0.33, 0.6); // fine grid: find the small inter-clade whitespace pockets near branches
+            const auto envd_cell = [](const char* nm, double d){ const char* v = std::getenv(nm); return v ? std::atof(v) : d; };
+            const double cell = std::max(mrca_fs * envd_cell("AEL_CELL", 0.33), 0.2); // occupancy-grid resolution
+
             const int GX = std::clamp(static_cast<int>((gx1 - gx0) / cell), 1, 2600);
             const int GY = std::clamp(static_cast<int>((gy1 - gy0) / cell), 1, 3400);
             std::vector<unsigned char> occ(static_cast<std::size_t>(GX) * static_cast<std::size_t>(GY), 0);
