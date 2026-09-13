@@ -754,9 +754,29 @@ which is why the diagnostic reports them separately: a clade shown `(1)` may be 
 several runs whose strays were dropped, and §10.5's "does this resemble last round?" check needs to
 tell those apart.
 
-Measured: `bvic.after-2021` C.1 (two kept bands) now renders **two** brackets in the clade column,
-at page y≈28 and y≈804 (slot 4, x≈659) — band centres at ~1% and ~83% of the tree. h1 is unchanged
-(every clade there has one kept band); its render is byte-identical before and after this change.
+### Merged band size is the SPAN (fixed 2026-09-13)
+
+`draw-tree.cc` accumulated the sizes of the runs it merged, so a merged band's size left out the
+bridged gaps. AD's `clade_section_t::size()` is `last->node_id.vertical - first->node_id.vertical + 1`
+(acmacs-tal `clades.hh:40-47`), recomputed from the merged first/last; ae's own `clades.cc`
+`CladeSection::size()` is span-based too. Only the drawing path diverged, and the effect was that
+`section-exclusion-tolerance` dropped bands AD keeps and draws.
+
+**Verified against AD itself** — AD's `tal` run on the same tree + `.tal`, its `>>> Clades` block
+diffed against ours. They now agree exactly:
+
+```
+C.1.9 (2)  (0) [26823] 25651..52473   gap 45761   (1) [55] 98235..98289
+D.5   (2)  (0) [2500]  65602..68101   gap 22811   (1) [22] 90913..90934
+```
+
+— same sizes, gaps, leaf ranges, seq_ids and slots, and h3 all `(1)`, bvic `C.1 (2)`, h1 `D.3.1 (1)`.
+With the per-band draw above, ae's rendered clade column reproduces AD's: C.1.9 and D.5 each draw
+two brackets, bvic C.1 two (slot 4, page y≈28 and y≈804).
+
+> Running AD's `tal` needs its libraries found: `DYLD_FALLBACK_LIBRARY_PATH=$ACMACSD_ROOT/build/lib:…/build/acmacs-base/dist:…`
+> or it aborts with `libfmt.8.dylib not loaded`. ~82 s for a full H1 render, vs 0.6 s for
+> `tal-draw --clades-report`.
 
 Measured on `2026-0921-ssm` (`tree/bvic.after-2021.tal`, `tree/h1.after-2021.tal`):
 
