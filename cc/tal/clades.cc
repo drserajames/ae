@@ -168,6 +168,17 @@ namespace ae::tal
 // aa-transitions of every inode whose own shown-leaf extent fully contains it — AD
 // HzSections::set_aa_transitions. Shared by compute_hz_sections and by tal-draw's
 // clade-section diagnostic, which reports the same strings for the bands it actually draws.
+//
+// ONE DELIBERATE DIVERGENCE FROM AD, and it is a bug fix — see cc/tal/PORTING.md
+// "Section aa-transitions: where ae deliberately does NOT match AD". AD compares the section
+// against the inode's LITERAL first/last descendant leaf (Tree::set_first_last_next_node_id
+// takes subtree.front()/back() regardless of `hidden`), and a hidden leaf's node_id.vertical
+// is left at the sentinel node_id_t::NotSet == 0xFFFFFFFF. So in AD an inode whose last
+// descendant leaf is hidden satisfies `section.last <= node.last_next_leaf` vacuously and
+// leaks its substitutions into every section below it, while one whose first descendant leaf
+// is hidden is dropped from sections it really does contain. Using the first/last SHOWN leaf,
+// as here, is what that test is meant to ask. Measured on the current round: AD leaks from 13
+// (H3) / 33 (H1) label-carrying inodes and drops 9 / 23.
 std::vector<std::string> ae::tal::section_aa_transitions(ae::tree::Tree& tree, const std::vector<std::pair<std::size_t, std::size_t>>& spans)
 {
     using namespace ae::tree;

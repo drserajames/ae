@@ -32,6 +32,44 @@ def check_imported_no_curation() -> dict:
     }
 
 
+def check_curated_method_still_computes() -> dict:
+    """Curated `per-node` labels suppress the BLANKET per-inode labels (`show`), but they
+    must NOT suppress the COMPUTATION the block asks for.
+
+    AD's Settings::add_draw_aa_transitions (acmacs-tal cc/settings.cc:1256) sets
+    `aa_transitions.calculate = true` for every `draw-aa-transitions` command, curated or
+    not, and HzSections::set_aa_transitions accumulates the resulting per-inode labels into
+    each hz-section's aa-transitions text — the text printed on every signature-page map
+    title. Dropping the whole block for a curated `.tal` silently fell back to the tree's
+    stored "imported" labels, so a `.tal` asking for eu-20200915 never got it.
+
+    An "imported" curated block has nothing to compute, so it still emits no entry."""
+    curated = [{"name": "Q1R", "show": True, "?first": "A", "?last": "C"}]
+    eu, _ = translate({"tal": [
+        {"N": "draw-aa-transitions", "method": "eu-20200915", "non-common-tolerance": 0.7,
+         "minimum-number-leaves-in-subtree": 4, "per-node": curated},
+    ]})
+    eu_aa = eu.get("aa_transitions", {})
+    imported, _ = translate({"tal": [
+        {"N": "draw-aa-transitions", "method": "imported", "per-node": curated},
+    ]})
+    blanket, _ = translate({"tal": [
+        {"N": "draw-aa-transitions", "method": "eu-20200915"},
+    ]})
+    return {
+        "curated eu-20200915: compute kept on": eu_aa.get("compute") is True,
+        "curated eu-20200915: blanket labels off": eu_aa.get("show") is False,
+        "curated eu-20200915: method passed through": eu_aa.get("method") == "eu-20200915",
+        "curated eu-20200915: tolerance passed through": eu_aa.get("tolerance") == 0.7,
+        "curated eu-20200915: min_leaves passed through": eu_aa.get("min_leaves") == 4,
+        "curated eu-20200915: mrca label still emitted": len(eu.get("mrca_labels", [])) == 1,
+        "curated imported: nothing to compute -> no entry": "aa_transitions" not in imported,
+        "uncurated eu-20200915: show and compute both on": (
+            blanket.get("aa_transitions", {}).get("show") is True
+            and blanket.get("aa_transitions", {}).get("compute") is True),
+    }
+
+
 def check_seq_id_alternation() -> dict:
     """A `(A|B|C)` alternation seq_id (AD regex; tal-draw matches exactly) must expand
     into its exact members so long-branch hides actually fire."""
@@ -184,6 +222,7 @@ def main():
     }
     checks.update(check_eval_condition())
     checks.update(check_imported_no_curation())
+    checks.update(check_curated_method_still_computes())
     checks.update(check_seq_id_alternation())
     checks.update(check_dash_bar_colors())
     checks.update(check_tip_names_and_edges())
