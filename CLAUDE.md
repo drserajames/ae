@@ -102,66 +102,48 @@ ae/
 
 ---
 
-## Porting from AD (Acmacs-D) — status & coordination
+## Porting from AD (Acmacs-D)
 
-`ae` is the rewrite/successor of the older `AD` tree at `~/AC/eu/AD` (the `acmacs-*` C++
-family). The core was ported first; the remaining subsystems have since been ported (or
-shelved by architecture decision) — **the bulk of the AD→ae port is now complete.**
-**Multiple agents work different subsystems in parallel** — the master plan, ownership
-table, per-subsystem milestones, and coordination rules live in [`TODO.md`](TODO.md).
-**Read `TODO.md` and claim a subsystem there before starting any porting work.**
+`ae` is the successor to `AD` (`~/AC/eu/AD`, the `acmacs-*` C++ family). **The port is
+complete** — all seven subsystems (chart engine, map drawing, hidb, TAL, ssm-report,
+webserver, CLI wrappers, whocc-chains) are 🟢, and the full 36-page seasonal report
+reproduces end-to-end on `ae.report`. There is no subsystem left to claim. Work here is now
+fidelity, defect-closing and merge work, not porting.
 
-### The verification bar for port work
+**Where live status lives** — do not look for it in this file:
 
-A parity claim without a number is not a result. State the measurement:
-`27/27 polygons select identical antigen-index sets`, `61 = 61`, `ok=19 fail=0`. Where
-something was not measured, say "not verified" rather than letting an unmeasured claim stand.
+| Document | What it holds |
+|----------|---------------|
+| [`P2-RENDER-DESIGN.md`](P2-RENDER-DESIGN.md) §4 | **The current tracker** — the native report-map renderer, milestones A–K (open: **I** label auto-placement, **K** figure-matrix sign-off). |
+| [`TODO.md`](TODO.md) | Port history, the **open-defect list**, and **unmerged-branch status**. Its subsystem table is historical: claim a *milestone or branch*, not a subsystem, and confirm which worktree you are in (`git worktree list`) — uncommitted changes do not propagate between them. |
+| [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md), [`cc/tal/PORTING.md`](cc/tal/PORTING.md), [`doc/SIGPAGE.md`](doc/SIGPAGE.md), [`py/ae/whocc/chains/TODO.md`](py/ae/whocc/chains/TODO.md) | Per-area detail. *(MIGRATION.md's status header predates P2 and still describes the maps as kateri-rendered.)* |
 
-**Compare index sets, never counts — and re-derive both sides in the same run.** The report
-maps are re-optimised between runs: the same polygon on the same map gave 211 antigens one day
-and 10 the next, with AD and ae agreeing both times. A number remembered from a previous run is
-not a baseline, it is a different map. Lock a result in with a regression test built on
-**synthetic data only** (`test/chart1.ace` plus transformations applied in the test), as
-`test/adjust_frames.py` does, so it cannot drift with the report charts.
+**Facts worth having here:**
 
-**Core, already ported:** chart engine (relax/optimize, merge, grid-test, procrustes,
-serum circles, stress), sequences/seqdb, virus name/passage parsing, locationdb, tree
-manipulation, WHO CC XLSX/TSV ingestion. Exposed via `ae_backend` submodules: `chart_v3`,
-`chart_v2`, `seqdb`, `tree`, `virus`, `whocc`, `locdb_v3`, `hidb`, `utils`. The chart engine
-also now writes layout coordinates (`Projection.set_coordinates` / `Layout.__setitem__` /
-`set_unmovable`) for programmatic map adjustment.
+- AD source to reference for any subsystem: `~/AC/eu/AD/sources/<package>`.
+- Running AD for comparison needs its own library path — it links `libfmt.8.dylib`, absent
+  from `/opt/homebrew`:
+  `PYTHONPATH=~/AC/eu/AD/build/lib DYLD_LIBRARY_PATH=~/AC/eu/AD/build/lib python3 …`
+- Report maps render **natively** by default (`AE_REPORT_MAP_RENDERER=native`,
+  `py/ae/report/map_renderer.py`); `cc/map-draw/`'s `export_styled_map` resolves the same
+  on-chart `c["R"]`/`c["p"]` styling kateri consumes, and geographic maps are `cc/geo/` +
+  `geo-draw`. **kateri is now only the interactive drag-adjust/relax GUI** and the opt-in
+  `AE_REPORT_MAP_RENDERER=kateri` fallback — a report run needs no kateri process.
+- `meson.build` is the main merge-conflict risk: append inside a clearly-commented
+  `# --- <subsystem> ---` block, never reflow existing lines. Python bindings: add a
+  `cc/py/<name>.cc` and append one registration line to [`cc/py/module.cc`](cc/py/module.cc)
+  + [`cc/py/module.hh`](cc/py/module.hh) without reordering existing entries.
+- Build with [`./build.sh`](build.sh), then `source ae-env.sh`. Never `./mk`, never Homebrew
+  LLVM. See *Build system* below.
+- No real surveillance data, ever — run `python3 tools/who-data-gate.py --staged` before
+  every commit (see *Committing to this repo* above).
 
-**Subsystem status (priority order — see `TODO.md` for detail):**
-
-| # | Subsystem | AD source | ae target | State |
-|---|-----------|-----------|-----------|-------|
-| 1 | Map drawing | `acmacs-draw`, `acmacs-map-draw` | `cc/map-draw/` / `cc/geo/` | 🟢 done — the headless C++ Cairo renderer (`cc/map-draw/` + `map-draw` CLI / `ae_backend.map_draw`) was revived for the Linux **whocc-chains** batch path (#7), then given a **semantic-style interpreter** (`styled-draw.cc` → `export_styled_map`) that consumes the same on-chart `c["R"]`/`c["p"]` styling kateri does. It is now the **default report map renderer** (`AE_REPORT_MAP_RENDERER=native`); **kateri is retained only for the interactive drag-adjust/relax GUI** and as the opt-in fallback. `cc/draw/cairo-surface.*` shared; **geographic** maps = `cc/geo/` + `geo-draw` (done) |
-| 2 | hidb (historical influenza DB) | `hidb-5` | `cc/hidb/` | 🟢 done — reader + authoring (make/convert/stat), `ae_backend.hidb` |
-| 3 | TAL (phylo tree drawing / sig pages) | `acmacs-tal` | `cc/tal/` + `tal-draw` + `py/ae/tal/` | 🟢 feature-complete (core) — tree render, clades/time-series, colouring, aa-transitions, settings-v3 `.tal` reader, signature pages |
-| 4 | ssm-report (seasonal report) | `ssm-report` | `py/ae/report/` | 🟢 done — vcm engine consolidated; the full assembled 36-page report reproduces end-to-end on `ae.report`; all figure families generate on ae (**native** maps / `stat` / `geo-draw` / `tal-draw`); adjust ported (`ae.adjust` + kateri drag). See [`py/ae/report/MIGRATION.md`](py/ae/report/MIGRATION.md) (its status header predates P2 and still describes maps as kateri-rendered) and [`TODO.md`](TODO.md) |
-| 5 | webserver | `acmacs-webserver` | `py/ae/webserver/` | 🟢 done — Python rewrite; HTTP/HTTPS + chart-data verified |
-| 6 | CLI wrappers over `chart_v3` | various `bin/chart-*` | `bin/` | 🟢 done |
-
-> Note (corrected 2026-09-10): **antigenic-map drawing for the report is now native C++.**
-> `cc/map-draw/` (`map-draw` CLI / `ae_backend.map_draw`) started as the chains-path fidelity port
-> of AD ChartDraw and, via the **P2** workstream, gained a semantic-style interpreter
-> (`export_styled_map`) that resolves the same `c["R"]` named styles the report bakes. `ae.report`
-> chooses the backend with **`AE_REPORT_MAP_RENDERER`**, **default `native`**
-> (`py/ae/report/map_renderer.py`). **kateri** (a Dart/Flutter viewer + PDF generator,
-> `github.com/drserajames/kateri`, driven over a Unix socket by `ae.utils.kateri`) is kept for the
-> **interactive** drag-adjust/relax GUI and as the `AE_REPORT_MAP_RENDERER=kateri` fallback — a
-> report run needs no kateri process. The other ae-side "map drawing" is the geographic world map
-> (`cc/geo`). Open P2 tail + branch status: [`TODO.md`](TODO.md), [`P2-RENDER-DESIGN.md`](P2-RENDER-DESIGN.md).
-
-**Coordination essentials (full rules in `TODO.md`):**
-- `meson.build` is the main conflict risk — keep edits in a commented `# --- <subsystem> ---`
-  block and append rather than reflow.
-- Python bindings: add a `cc/py/<name>.cc` file and register it in
-  [`cc/py/module.cc`](cc/py/module.cc) + [`cc/py/module.hh`](cc/py/module.hh) without
-  reordering existing entries.
-- AD source to reference for each subsystem is under `~/AC/eu/AD/sources/<package>`.
-- Build with the native-arm64 Apple-Clang procedure below (not `./mk`, not Homebrew
-  LLVM). New drawing deps (Cairo, Pango) come from arm64 Homebrew at `/opt/homebrew`.
+**Proving parity:** a claim without a number is not a result. The one rule that catches people
+out is **compare index sets, not counts, and re-derive both sides in the same run** — the
+report maps are re-optimised between runs, so a number remembered from a previous run is a
+different map, not a baseline. Lock results in with regression tests on **synthetic data only**
+(`test/chart1.ace` plus in-test transformations, as `test/adjust_frames.py` does). Full
+procedure: the **`ad-diff` skill** and [`tools/p2-fidelity/README.md`](tools/p2-fidelity/README.md).
 
 ## Current build state (Apple Silicon)
 
