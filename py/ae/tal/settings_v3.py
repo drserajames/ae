@@ -617,7 +617,7 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     # emit an `mrca_label`; tal-draw finds the MRCA and places the label there.
                     skipped = 0
                     for e in pernode:
-                        if not isinstance(e, dict) or not e.get("show", True) or not e.get("name"):
+                        if not isinstance(e, dict) or not e.get("name"):
                             continue
                         first = e.get("first") or e.get("?first")
                         last = e.get("last") or e.get("?last")
@@ -625,6 +625,17 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                             skipped += 1
                             continue
                         ml = {"first": first, "last": last, "text": e["name"]}
+                        # `"show": false` is curation — "this transition exists, do NOT label it".
+                        # Carry it through rather than dropping the entry here: tal-draw never
+                        # places or draws a hidden label, but its label-position dump lists it
+                        # (AD reports shown and hidden alike), so a dump pasted back into the .tal
+                        # keeps the hidden ones hidden instead of silently reviving them.
+                        if not e.get("show", True):
+                            ml["show"] = False
+                        # AD's draw-time node id. ae resolves the node as MRCA(first/last) and never
+                        # reads this, but the dump echoes it so a pasted block doesn't lose the field.
+                        if isinstance(e.get("node_id"), str):
+                            ml["node_id"] = e["node_id"]
                         lab = e.get("label")
                         if isinstance(lab, dict):
                             off = lab.get("offset")
@@ -658,6 +669,12 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     # auto-place the curated labels into whitespace (tal-draw searches; the
                     # per-label offsets become optional hints). Default on; a .tal can opt out.
                     schema["mrca_labels_auto_place"] = bool(cmd.get("auto-place-labels", True))
+                    # The pasteable label-position dump (AD DrawAATransitions::report, which AD
+                    # printed on every draw) — default ON, since the manual label-moving loop needs
+                    # it without having to ask for it. NB the key is `label-report`, NOT this
+                    # command's `report`: in AD `report` switches on the aa-transition COMPUTATION
+                    # debug trace, and the report .tal files set it false for exactly that reason.
+                    schema["mrca_labels_report"] = bool(cmd.get("label-report", True))
                     # AD has ONE DrawAATransitions element, re-initialised by each
                     # `draw-aa-transitions` command, so a curated block REPLACES a blanket one
                     # rather than adding to it. That matters on the settings stack: the builtin

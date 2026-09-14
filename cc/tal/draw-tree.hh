@@ -104,6 +104,16 @@ namespace ae::tal
                                     // node + offset*page) and treat it as a fixed obstacle, while the
                                     // other (un-pinned) labels still auto-place around it. Set by the
                                     // WYSIWYG drag editor; un-pinned labels keep the auto-place behaviour.
+        bool show{true};            // the `.tal` per-node entry's "show". A `false` entry is curation:
+                                    // "this transition exists, do NOT label it". It is carried through
+                                    // (not dropped at translation) so the label-position dump can list
+                                    // it — AD reports shown and hidden transitions alike — and so a
+                                    // dump pasted back into the `.tal` keeps the hidden ones hidden.
+                                    // Never placed, never drawn.
+        std::string node_id{};      // AD's draw-time node id ("vertical.horizontal"), echoed verbatim
+                                    // from the `.tal`. ae has no such id — it identifies the node as
+                                    // MRCA(first,last) — but the dump round-trips the field so pasting
+                                    // a dumped block back into the `.tal` does not lose it.
     };
 
     struct NodeApply
@@ -222,6 +232,11 @@ namespace ae::tal
         bool mrca_labels_auto_place{false};               // auto-place mrca labels into whitespace (ignore per-label offsets), with collision avoidance + tether
         std::string mrca_label_sidecar{};                 // when non-empty, write a "tal-mrca-labels/1" JSON sidecar (page geometry + per-label
                                                           // anchor/tether/box/offset/pinned, device units) to this path — drives the WYSIWYG drag editor
+        bool mrca_labels_report{true};                    // print the pasteable aa-transition label-position dump (AD DrawAATransitions::report,
+                                                          // acmacs-tal draw-aa-transitions.cc:756) to stderr and to <output>.taleg. AD printed it
+                                                          // unconditionally; default ON here for the same reason — the manual label-moving loop needs
+                                                          // it without having to ask. NB this is NOT the `.tal`'s draw-aa-transitions "report" key,
+                                                          // which in AD switches on the aa-transition COMPUTATION debug trace, not this dump.
     };
 
     // Render `tree` to a PDF whose height is `image_size` device units. The width is

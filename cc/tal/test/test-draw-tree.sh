@@ -96,13 +96,39 @@ fi
 # mrca_labels — curated on-tree label placed at MRCA(first,last) (draw-aa-transitions per-node).
 # tree-clades.json: leaves A,B share a parent; a label at MRCA(A,B) must render its text.
 printf '{"labels": true, "mrca_labels": [{"first": "A", "last": "B", "text": "MRCALBL"}]}' > "$tmp/mrca.json"
-"$bin" --settings="$tmp/mrca.json" "$here/tree-clades.json" "$tmp/mrca.pdf" 400 >/dev/null
+"$bin" --settings="$tmp/mrca.json" "$here/tree-clades.json" "$tmp/mrca.pdf" 400 >/dev/null 2>&1
 check "tree-clades.json (mrca_labels at MRCA(A,B))" "$tmp/mrca.pdf"
 if command -v pdftotext >/dev/null 2>&1; then
     case "$(pdftotext "$tmp/mrca.pdf" - 2>/dev/null)" in
         *MRCALBL*) echo "  mrca_labels: label placed at the MRCA node" ;;
         *) echo "FAIL: mrca_labels label not rendered"; exit 1 ;;
     esac
+fi
+
+# aa-transition label-position dump (port of AD DrawAATransitions::report): a pasteable `[ … ]`
+# block of one row per curated label, on stderr AND appended to <output>.taleg after the clade
+# report — the manual label-moving loop reads it to get the offsets the placer chose.
+# `show: false` is curation: the label is REPORTED but never drawn.
+printf '{"labels": true, "clades": {"show": true}, "mrca_labels": [{"first": "A", "last": "B", "text": "SHOWNLBL", "node_id": "7.1", "pinned": true, "offset": [-0.05, 0.01]}, {"first": "C", "last": "E", "text": "HIDDENLBL", "node_id": "9.2", "show": false, "offset": [-0.02, 0.03]}]}' > "$tmp/dump.json"
+"$bin" --settings="$tmp/dump.json" "$here/tree-clades.json" "$tmp/dump.pdf" 400 >/dev/null 2>"$tmp/dump.err"
+check "tree-clades.json (aa-label position dump)" "$tmp/dump.pdf"
+[ -f "$tmp/dump.taleg" ] || { echo "FAIL: no <output>.taleg written"; exit 1; }
+for where in "$tmp/dump.taleg" "$tmp/dump.err"; do
+    grep -q '>>> AA transition labels (2)' "$where" || { echo "FAIL: dump header/count missing from $where"; exit 1; }
+done
+# the clade report must survive: both diagnostics share one .taleg, the later one appending
+grep -q '>>> Clades (' "$tmp/dump.taleg" || { echo "FAIL: aa-label dump overwrote the clade report in .taleg"; exit 1; }
+# each row: echoed node_id, curated name, show/pinned, an offset+box, and the node's CURRENT extent
+grep -Eq '"node_id": +"7\.1", +"name": +"SHOWNLBL", +"show": true, +"pinned": true, +"label": \{"offset": \[ *-?[0-9.]+, *-?[0-9.]+\], "\?box": \[[0-9.]+, [0-9.]+\]\}, +"first": +"A", +"last": +"B", +"\?before first": +null, +"\?after last": +"C"\}' "$tmp/dump.taleg" \
+    || { echo "FAIL: shown label row malformed"; sed -n '/AA transition labels/,/^]/p' "$tmp/dump.taleg"; exit 1; }
+grep -Eq '"name": +"HIDDENLBL", +"show": false, +"pinned": false,.*"first": +"C", +"last": +"E", +"\?before first": +"B", +"\?after last": +null\}' "$tmp/dump.taleg" \
+    || { echo "FAIL: show:false label not reported"; exit 1; }
+echo "  aa-label dump: 2 rows (1 shown, 1 show:false), appended after the clade report"
+if command -v pdftotext >/dev/null 2>&1; then
+    txt=$(pdftotext "$tmp/dump.pdf" - 2>/dev/null)
+    case "$txt" in *HIDDENLBL*) echo "FAIL: a show:false label was drawn"; exit 1 ;; esac
+    case "$txt" in *SHOWNLBL*) echo "  show:false reported but not drawn; shown label still drawn" ;;
+                   *) echo "FAIL: the shown label vanished"; exit 1 ;; esac
 fi
 
 # .names output — leaf names in draw order (one per line); and ladderize reorders them
