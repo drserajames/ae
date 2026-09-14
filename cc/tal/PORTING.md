@@ -795,6 +795,145 @@ Measured on `2026-0921-ssm` (`tree/bvic.after-2021.tal`, `tree/h1.after-2021.tal
   bands at all (one contiguous run); `D.5` and `C.1.9` have strays that both ae *and* AD drop,
   since a full-size band survives. Under either implementation these three yield one section.
 
+## aa-transition label-position dump (`>>> AA transition labels` / `.taleg`) — ported 2026-09-14
+
+Port of AD `DrawAATransitions::report` (acmacs-tal `cc/draw-aa-transitions.cc:756`), the third
+and last of AD's three tree diagnostics — the other two are the clade-section report above. AD
+printed it on **every** tree draw; ae's `tal-draw` did not, and `./0do <subtype>_small` had
+therefore stopped emitting the label positions the manual label-moving loop reads.
+
+Every row is a pasteable `draw-aa-transitions` `per-node` entry: render, read the offsets the
+placer chose, hand-edit the ones that want moving, paste the block back.
+
+* **On by default** (`TreeDrawParameters::mrca_labels_report`), as AD was. A `.tal` opts out with
+  `"label-report": false` on its `draw-aa-transitions` command.
+  **Not** that command's `"report"` key — in AD that switches on the aa-transition *computation*
+  debug trace (`Settings::add_draw_aa_transitions` → `aa_transitions.report`), and this round's
+  h1/h3/bvic `.tal`s all set it `false` for exactly that reason. Wiring the dump to it would have
+  silenced the thing being restored.
+* **Output**: stderr, and appended to `<output>.taleg` after the clade report — one diagnostic
+  file per tree. The shared-surface path (signature pages) has no output path, so stderr only.
+* **Printed before the labels are drawn**, as in AD.
+* `show: false` per-node entries are **reported but never drawn**. They used to be dropped in
+  translation (`py/ae/tal/settings_v3.py`), so a dump pasted back would have silently revived
+  every label the curation had switched off.
+
+### Field set — where it departs from AD, and why
+
+| field | AD | ae |
+|---|---|---|
+| `node_id` | recomputed draw-time id | **echoed** from the `.tal`; ae has no such id and never reads it |
+| `first`/`last` | `?`-disabled (informational) | **live** — ae resolves the node as MRCA(first,last), so they carry the identity |
+| value of `first`/`last` | the node's current extent | same: recomputed each draw, so a pasted block refreshes an identity gone stale |
+| `pinned` | not printed | **printed** — ae auto-places un-pinned labels and ignores their offsets |
+| `name` | the node's computed transitions | the curated label text |
+| `offset` | 3 dp | 6 dp, and `offset_h` when the label was authored that way |
+
+### Verified against AD — all three subtypes, both sides re-derived in one session
+
+AD `tal` and ae `tal-draw` on the identical `.tal` + `.tjz` (2026-0921-ssm, `*.after-2021`):
+
+```
+                   AD rows   ae rows            node identity matched   `name` differs
+2026-0921  h3         50       51 (7 hidden)    47/50 AD, 47/51 ae      1
+2026-0921  h1         71       63 (19 hidden)   62/71 AD, 62/63 ae      0
+2026-0921  bvic       35       33 (0 hidden)    29/35 AD, 29/33 ae      2
+2026-0223  h3         51       51 (7 hidden)    51/51 AD, 51/51 ae      0
+```
+
+**The Feb (2026-0223) row is the control, and it confirms the diagnosis of the Sep residual.**
+Feb's tree is the tree its `.tal` was written against, so nothing has drifted: AD's *detected*
+set and the `.tal`'s *curated* set are the same 51 nodes, and the two dumps agree on every row,
+every `name` and every `show`. The Sep shortfall is therefore tree drift since that `.tal` was
+last regenerated — labels AD now detects that nobody has curated yet — not a defect in the dump.
+
+Feb also covers what Sep could not: **it pins nothing** (Sep h3 pins 44 of 51), so every label
+goes through the auto-placer on both sides. Offsets then differ as expected (median 0.036, max
+0.171) — ae replaced AD's placer (`4162073`, `bc28392`) and that is settled, not a bug.
+
+Offsets, h3, partitioned by whether AD could match the `.tal` entry at all (AD matches `per-node`
+by `first`/`last` when live, else by the now-stale `node_id`; only 11 of the 51 active entries
+carry a live pair):
+
+```
+AD CAN match  (live "first"/"last"): n=11  median |delta| 0.0004  10/11 within 0.001
+AD CANNOT     ("?first" disabled)  : n=35  median |delta| 0.0272   0/35 within 0.001
+```
+
+So where AD honours the `.tal` pin, ae reproduces the same offset to AD's printed precision. Where
+AD cannot, it discards the pin and auto-places — **that** is the divergence, not a dump bug, and ae
+honouring the pin is the better behaviour. Same cause for the 5 `show` disagreements on h3: AD lost
+the `show: false` curation on entries whose `?first` it could not match.
+
+**The residual row-set difference is structural and is NOT closed here.** AD enumerates the
+transitions it *detects* in the tree (min-leaves threshold, `hide-aa`); ae enumerates the *curated*
+`per-node` set. So AD reports nodes ae never labels (3 on h3, 6 on bvic) and vice versa. Giving ae
+AD's detection would change what the tree *draws*, not just what it reports — a separate decision.
+
+**No render change**: the h3 PDF is byte-identical before and after this work (3 662 411 bytes;
+the only differing bytes are cairo's `/CreationDate`), and the placer still reports `n=44`.
+
+### The round trip — dump, paste back, re-render
+
+The point of the block is that it goes back into the `.tal`, so that is tested end to end, on both
+rounds and in both pinning states. Every comparison below is **exact — 0.0, not a tolerance**.
+
+| | what was spliced back | result |
+|---|---|---|
+| 2026-0921 h3 (44 of 51 pinned) | the 51 dumped rows as-is | 51/51 rows identical in identity, `node_id`, `show`, `pinned`, offset and `?box`; re-rendered PDF byte-identical bar `/CreationDate` |
+| 2026-0223 h3 (nothing pinned) | same `.tal` rendered twice | 51/51 offsets identical — the placer is deterministic, so the block diffs cleanly against the previous render |
+| 2026-0223 h3 | the dump pasted back with the 44 shown rows' `"pinned"` flipped to `true` | 51/51 offsets identical — *auto-place, then freeze exactly what you see* is the workflow, and it holds |
+
+So the recomputed `first`/`last` resolve to the same nodes the authored pair did, and an offset
+survives the trip unchanged whether it was pinned already or pinned from the dump.
+
+### Signature pages print it too, as AD did
+
+AD's sig-page command stacks the curated tree `.tal` (`sp/0do:61`), so `DrawAATransitions::report`
+ran there as well. ae's sig-page path renders the tree through `export_tree_into` (shared surface,
+no output file), and the dump follows: AD `tal` and `ae.tal.signature_page` on the identical Feb
+stack (`../bvic-cdc/sp.mapi`, `bvic.sp.tal`, `bvic.after-2021.tal`, `sp.tal`, `bvic-cdc.sp.tal`,
+`--chart ../bvic-cdc/styled.ace`) give **33 rows each, 33/33 matching on identity, `show` and even
+`node_id`** — Feb's tree has not drifted, so the echoed id still equals AD's recomputed one.
+
+One difference remains, and it is ae-wide rather than this block's: **AD splits the streams** —
+content rows to stdout, `vvvv`/`^^^^` banners to stderr (`AD_INFO`) — while ae sends whole blocks
+to stderr, the convention the clade report established when it was ported. Line counts for one
+bvic-cdc page: AD 63 stdout + 492 stderr, ae 0 + 144 (AD's stderr is mostly its own `@@ file:line`
+logging chatter). Matching AD's split here would make this block disagree with the two beside it in
+the same `.taleg`, so it is left alone; changing it is a decision about all three blocks at once.
+
+No `.taleg` is written on this path — there is no output PDF path to derive one from, and the
+geometry is a sub-rect of someone else's page, the same reason `mrca_label_sidecar` is skipped here.
+
+### The 7 hidden labels are not drawn — measured, not argued
+
+On Feb h3, ae `main` translates 44 `mrca_labels` and this branch translates 51 (the 7 `show: false`
+entries it no longer discards). The rendered PDFs are **byte-identical, 2 747 642 bytes, differing
+only in cairo's `/CreationDate`**, and the placer reports `n=44` on both. The extra entries reach
+the report and nothing else.
+
+### The drag editor is untouched
+
+`Anchor` gained fields and the dump reads them, so the `mrca_label_sidecar` the WYSIWYG editor
+consumes was re-derived on both sides: `tal-draw --mrca-sidecar` on h3, ae `main` vs this branch,
+including each side's own `settings_v3` translation (44 mrca + 3 nodetext rows). The two sidecars
+are **identical except the `"pdf"` field**, which only names the differing output file. `Anchor`'s
+`first`/`last` deliberately stay the authored `.tal` values for that reason — the editor matches its
+entry by them; only the dump uses the recomputed `cur_first`/`cur_last`.
+
+### `.taleg` emission paths, all exercised on the synthetic tree
+
+clades + dump (both blocks, clades first); clades hidden and `clades.report: false` (the dump alone
+creates the file); `report_file: "-"` (no file, stderr only); `report_file: PATH` (both blocks go
+there, nothing at the default path); `mrca_labels_report: false` (dump gone, clade report intact);
+`--clades-report` (early exit — clade report only, no PDF, no dump).
+
+Tests: `cc/tal/test/test-draw-tree.sh` (synthetic `tree-clades.json`) asserts the block appears on
+stderr and in the `.taleg` **after** the clade report, both rows' full shape, and that the
+`show: false` label is reported but absent from the rendered PDF.
+
+
 ## 6. Conf / format docs to mine next
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-conf.org` — the settings DSL reference.
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-processing.org` — processing stages.
