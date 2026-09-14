@@ -138,7 +138,9 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                 continue;
             NodeMod mod;
             if (const auto& select = mod_value["select"]; select.is_object()) {
-                mod.select.seq_id = get_string_list(select["seq_id"]);
+                // compiled once here, not per node: see SeqIdMatcher in tal/draw-tree.hh
+                for (const std::string& pattern : get_string_list(select["seq_id"]))
+                    mod.select.seq_id.push_back(make_seq_id_matcher(pattern));
                 mod.select.cumulative_min = get_opt_double(select["cumulative_min"]);
                 mod.select.edge_min = get_opt_double(select["edge_min"]);
                 mod.select.date_min = get_string(select["date_min"]);
