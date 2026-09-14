@@ -630,6 +630,12 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                             off = lab.get("offset")
                             if isinstance(off, list) and len(off) == 2:
                                 ml["offset"] = off
+                            # offset_h: x relative to image_size rather than page width, so a pin
+                            # survives a change in the tree's own width (see MrcaLabel in
+                            # cc/tal/draw-tree.hh). Written by the label editor; wins over "offset".
+                            off_h = lab.get("offset_h")
+                            if isinstance(off_h, list) and len(off_h) == 2:
+                                ml["offset_h"] = off_h
                             if "color" in lab:
                                 ml["color"] = lab["color"]
                             if isinstance(lab.get("scale"), (int, float)):

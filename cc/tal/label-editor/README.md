@@ -31,23 +31,39 @@ browser (editor.html): backdrop.png + draggable label overlay (from labels.json,
 A label is identified **not by node id** but as `MRCA(first, last)` of two leaf `seq_id`s the
 entry records — so a manual nudge survives weekly tree rebuilds where node numbering changes.
 
-### Offset semantics (exact, fs-independent)
+### Offset semantics (exact, fs-independent, geometry-invariant)
 
-The renderer places a **pinned** label so its text-box top-left sits at
+The renderer places a **pinned** MRCA label so its text-box top-left sits at
 
 ```
-box.x0 = anchor.x + offset.x * page.width
-box.y0 = anchor.y + offset.y * page.height      (+y is DOWN, PDF device units)
+box.x0 = anchor.x + offset_h.x * page.height     (page.height == image_size)
+box.y0 = anchor.y + offset_h.y * page.height     (+y is DOWN, PDF device units)
 ```
 
 where `anchor` is the MRCA branch node point. The editor inverts this exactly:
 
 ```
-offset.x = (box.x0 - anchor.x) / page.width
-offset.y = (box.y0 - anchor.y) / page.height
+offset_h.x = (box.x0 - anchor.x) / page.height
+offset_h.y = (box.y0 - anchor.y) / page.height
 ```
 
 so a label dragged by Δ device units moves by exactly Δ in the regenerated PDF.
+
+**Why both components divide by HEIGHT.** The legacy key `offset` divided x by `page.width`
+instead. Page width is not stable: it is the tree's own width plus the aa-label band, so it moves
+when the tree changes between rounds and when the band changes — and every pinned label moves with
+it, silently. That has already cost one rescue pass over a whole hand-placed layout (the offsets in
+the 2026-09 round had to be rescaled by 1.16/1.05 after the band was narrowed). `page.height` is
+`image_size`, which is fixed, and it is also what the font size scales with, so a height-relative
+offset holds a label the same number of points from its branch whatever the page does.
+
+`offset` is still honoured exactly as before, so **existing `.tal` files render unchanged** —
+verified: the three 2026-09 report trees produce identical label geometry either way. The editor
+writes `offset_h` for new pins and removes any stale `offset` on the same entry so the two cannot
+disagree. If both are present, `offset_h` wins.
+
+Vaccine/strain-name (`NodeText`) offsets are still width-relative — they are few and quick to
+re-drag, and converting them needs the same treatment in the `nodes apply.text` path.
 
 ### Pinned vs auto
 
@@ -93,7 +109,8 @@ arch -arm64 ninja -C build-py314 tal-draw
       "anchor": { "x": 87.0, "y": 88.4 },          // branch node point (offset origin)
       "tether": { "x": 70.2, "y": 88.4 },          // leader target = mid of the node's horizontal edge
       "box": { "x0": 51.3, "y0": 88.2, "x1": 73.9, "y1": 92.7 },   // current placed box
-      "offset": { "x": -0.055, "y": -0.0002 },     // reproduces box if pinned
+      "offset": { "x": -0.055, "y": -0.0002 },     // legacy: x relative to page WIDTH
+      "offset_h": { "x": -0.0357, "y": -0.0002 },  // x relative to page HEIGHT — what the editor saves
       "color": "#4d4d4d", "fs": 9.5 }
   ]
 }
@@ -110,7 +127,7 @@ Surgical text edits (relaxed-JSON formatting/comments preserved):
 - **MRCA** → the matching active `draw-aa-transitions` `per-node` entry (keyed by `{first,last}`,
   matching `first`/`?first`; the disabled `?per-node` block is never touched):
   ```json
-  { "pinned": true, "name": "I140K", "label": {"offset": [-0.12, 0.02], ...}, ... }
+  { "pinned": true, "name": "I140K", "label": {"offset_h": [-0.093, 0.02], ...}, ... }
   ```
   "Reset to auto" sets `"pinned": false` (offset ignored, label re-flows).
 - **NodeText** → the matching `nodes` entry's `apply.text.offset` (keyed by `seq_id`):

@@ -252,6 +252,12 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                 label.offset_x = get_double(offset.array()[0], 0.0);
                 label.offset_y = get_double(offset.array()[1], 0.0);
             }
+            // "offset_h" wins if both are present: x relative to image_size, not to page width.
+            if (const auto& offh = entry["offset_h"]; offh.is_array() && offh.array().size() == 2) {
+                label.offset_x = get_double(offh.array()[0], 0.0);
+                label.offset_y = get_double(offh.array()[1], 0.0);
+                label.offset_rel_height = true;
+            }
             if (!label.first.empty() && !label.last.empty() && !label.text.empty())
                 params.mrca_labels.push_back(std::move(label));
         }

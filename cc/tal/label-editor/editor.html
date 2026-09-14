@@ -136,7 +136,12 @@ document.getElementById("fit").onclick = fit;
 function boxW(l){ return l.box.x1 - l.box.x0; }
 function boxH(l){ return l.box.y1 - l.box.y0; }
 function attach(l){ return {x:l.box.x1, y:(l.box.y0+l.box.y1)/2}; }      // leader meets mid-right edge
-function recomputeOffset(l){ l.offset = { x:(l.box.x0 - l.anchor.x)/page.width, y:(l.box.y0 - l.anchor.y)/page.height }; }
+function recomputeOffset(l){
+  l.offset   = { x:(l.box.x0 - l.anchor.x)/page.width,  y:(l.box.y0 - l.anchor.y)/page.height };
+  // offset_h is what we SAVE for mrca labels: x relative to page height (== image_size), which does
+  // not move when the tree's width changes, unlike page.width. See MrcaLabel in cc/tal/draw-tree.hh.
+  l.offset_h = { x:(l.box.x0 - l.anchor.x)/page.height, y:(l.box.y0 - l.anchor.y)/page.height };
+}
 function markChanged(){ changed = true; saveBtn.disabled = false; }
 
 // ---- render overlay ----
@@ -287,7 +292,7 @@ async function save(){
   // (vaccine) labels are written only when moved.
   const edits = [];
   for (const l of labels){
-    if (l.kind==="mrca") edits.push({kind:"mrca", first:l.first, last:l.last, offset:[l.offset.x, l.offset.y], pinned: !l.autoReset});
+    if (l.kind==="mrca") edits.push({kind:"mrca", first:l.first, last:l.last, offset_h:[l.offset_h.x, l.offset_h.y], pinned: !l.autoReset});
     else if (l.moved)    edits.push({kind:"nodetext", seq_id:l.seq_id, offset:[l.offset.x, l.offset.y]});
   }
   try {

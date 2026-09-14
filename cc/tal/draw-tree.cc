@@ -1478,7 +1478,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // stack vertically (AD style); the box is then max-token-wide and nlines tall.
         const auto split_ws = [](const std::string& s) { std::vector<std::string> out; std::string cur; for (char c : s) { if (c == ' ') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } } else cur += c; } if (!cur.empty()) out.push_back(cur); if (out.empty()) out.push_back(s); return out; };
         // resolve each curated label to its anchor (the MRCA branch point) + text metrics
-        struct Anchor { double nx, ny, mid_x, fs, tw, off_x, off_y; int nlines; std::string text; Color color; bool pinned; std::string first, last; };
+        struct Anchor { double nx, ny, mid_x, fs, tw, off_x, off_y; int nlines; std::string text; Color color; bool pinned; std::string first, last; bool off_rel_h; };
         std::vector<Anchor> anchors;
         for (const auto& label : params.mrca_labels) {
             const auto fi = leaf_by_name.find(label.first);
@@ -1502,7 +1502,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const auto toks = split_ws(label.text);
             double tw = 0.0;
             for (const auto& t : toks) tw = std::max(tw, pdf.text_size(t, fs).first);
-            anchors.push_back({nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color, label.pinned, label.first, label.last});
+            anchors.push_back({nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color, label.pinned, label.first, label.last, label.offset_rel_height});
         }
 
         std::vector<Placed> done;
@@ -1727,14 +1727,14 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             for (std::size_t i = 0; i < anchors.size(); ++i) {
                 if (!anchors[i].pinned) continue;
                 const double lineh = anchors[i].fs * 1.18, th = anchors[i].nlines * lineh, tw = anchors[i].tw;
-                const double x0 = anchors[i].nx + anchors[i].off_x * width, y0 = anchors[i].ny + anchors[i].off_y * height;
+                const double x0 = anchors[i].nx + anchors[i].off_x * (anchors[i].off_rel_h ? height : width), y0 = anchors[i].ny + anchors[i].off_y * height;
                 mark_box(x0 - pad, y0 - pad, tw + 2.0 * pad, th + 2.0 * pad);
             }
             for (std::size_t i = 0; i < anchors.size(); ++i) {
                 const double fs = anchors[i].fs, lineh = fs * 1.18, th = anchors[i].nlines * lineh, tw = anchors[i].tw;
                 if (anchors[i].pinned) {
                     // one fixed candidate at the authored offset; mid-right attach (same as the auto attach).
-                    const double x0 = anchors[i].nx + anchors[i].off_x * width, y0 = anchors[i].ny + anchors[i].off_y * height;
+                    const double x0 = anchors[i].nx + anchors[i].off_x * (anchors[i].off_rel_h ? height : width), y0 = anchors[i].ny + anchors[i].off_y * height;
                     double cx, cy; attach_pt(anchors[i].mid_x, anchors[i].ny, x0, y0, x0 + tw, y0 + th, cx, cy);
                     cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, 0.0, 0});
                     continue;
@@ -2343,7 +2343,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             std::vector<Placed> placed;
             for (std::size_t i = 0; i < anchors.size(); ++i) {
                 const auto& a = anchors[i];
-                const double tx = a.nx + a.off_x * width;
+                const double tx = a.nx + a.off_x * (a.off_rel_h ? height : width);
                 const double ty = a.ny + a.off_y * height + a.fs * 0.3;
                 placed.push_back({a.nx, a.ny, tx, ty, a.fs, tx, tx + a.tw, ty - a.fs, ty, tx, ty - a.fs * 0.5, a.nlines, a.text, a.color, static_cast<int>(i)});
             }
@@ -2434,13 +2434,14 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         for (std::size_t k = 0; k < side_rows.size(); ++k) {
             const SideRow& r = side_rows[k];
             const double off_x = (r.bx0 - r.ax) / width, off_y = (r.by0 - r.ay) / height;
+            const double off_hx = (r.bx0 - r.ax) / height; // geometry-invariant x (see MrcaLabel::offset_rel_height)
             fmt::format_to(std::back_inserter(j),
                            "    {{ \"id\": {}, \"kind\": \"{}\", \"first\": \"{}\", \"last\": \"{}\", \"seq_id\": \"{}\", \"text\": \"{}\", \"nlines\": {}, \"pinned\": {},\n"
                            "      \"anchor\": {{ \"x\": {:.4f}, \"y\": {:.4f} }}, \"tether\": {{ \"x\": {:.4f}, \"y\": {:.4f} }},\n"
                            "      \"box\": {{ \"x0\": {:.4f}, \"y0\": {:.4f}, \"x1\": {:.4f}, \"y1\": {:.4f} }},\n"
-                           "      \"offset\": {{ \"x\": {:.6f}, \"y\": {:.6f} }}, \"color\": \"#{:06x}\", \"fs\": {:.4f} }}",
+                           "      \"offset\": {{ \"x\": {:.6f}, \"y\": {:.6f} }}, \"offset_h\": {{ \"x\": {:.6f}, \"y\": {:.6f} }}, \"color\": \"#{:06x}\", \"fs\": {:.4f} }}",
                            k, r.kind, jstr(r.first), jstr(r.last), jstr(r.seq_id), jstr(r.text), r.nlines, r.pinned ? "true" : "false",
-                           r.ax, r.ay, r.tx, r.ty, r.bx0, r.by0, r.bx1, r.by1, off_x, off_y, r.color, r.fs);
+                           r.ax, r.ay, r.tx, r.ty, r.bx0, r.by0, r.bx1, r.by1, off_x, off_y, off_hx, off_y, r.color, r.fs);
             j += (k + 1 < side_rows.size()) ? ",\n" : "\n";
         }
         j += "  ]\n}\n";
