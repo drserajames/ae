@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "py"))
 
-from ae.tal.settings_v3 import load_tal, _eval_condition, translate, _expand_seq_id
+from ae.tal.settings_v3 import load_tal, _eval_condition, translate
 
 
 def check_imported_no_curation() -> dict:
@@ -70,19 +70,23 @@ def check_curated_method_still_computes() -> dict:
     }
 
 
-def check_seq_id_alternation() -> dict:
-    """A `(A|B|C)` alternation seq_id (AD regex; tal-draw matches exactly) must expand
-    into its exact members so long-branch hides actually fire."""
-    expanded = _expand_seq_id("(A/X/1_aa|A/Y/2_bb|A/Z/3_cc)")
+def check_seq_id_passthrough() -> dict:
+    """A `seq_id` select is passed to tal-draw verbatim, whatever its shape. AD matches it as
+    an unanchored, case-insensitive regex and tal-draw now does the same (SeqIdMatcher,
+    cc/tal/draw-tree.hh), so the translator must NOT rewrite an alternation into its members
+    any more — a `(A|B|C)` group is a regex the matcher handles natively."""
     tal = {"tal": [
         {"N": "nodes", "select": {"seq_id": "(P/1_h|Q/2_h|R/3_h)"}, "apply": {"hide": True}},
+        {"N": "nodes", "select": {"seq_id": "S/4_h"}, "apply": {"hide": True}},
+        {"N": "nodes", "select": {"seq_id": ["T/5_h", "U/6*"]}, "apply": {"hide": True}},
     ]}
     schema, _ = translate(tal)
-    sel = schema.get("nodes", [{}])[0].get("select", {}).get("seq_id", [])
+    nodes = schema.get("nodes", [])
+    sel = [n.get("select", {}).get("seq_id", []) for n in nodes]
     return {
-        "seq_id alternation -> exact list": expanded == ["A/X/1_aa", "A/Y/2_bb", "A/Z/3_cc"],
-        "plain seq_id passes through": _expand_seq_id("A/X/1_aa") == ["A/X/1_aa"],
-        "nodes seq_id alternation expanded": sel == ["P/1_h", "Q/2_h", "R/3_h"],
+        "alternation kept intact as one regex": sel[0] == ["(P/1_h|Q/2_h|R/3_h)"],
+        "plain seq_id -> single-entry list": sel[1] == ["S/4_h"],
+        "list form preserved, order and all": sel[2] == ["T/5_h", "U/6*"],
     }
 
 
@@ -237,7 +241,7 @@ def main():
     checks.update(check_eval_condition())
     checks.update(check_imported_no_curation())
     checks.update(check_curated_method_still_computes())
-    checks.update(check_seq_id_alternation())
+    checks.update(check_seq_id_passthrough())
     checks.update(check_dash_bar_colors())
     checks.update(check_tip_names_and_edges())
     checks.update(check_time_series_slot())

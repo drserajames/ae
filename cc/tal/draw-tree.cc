@@ -88,12 +88,59 @@ namespace ae::tal
 
 namespace ae::tal
 {
+    namespace
+    {
+        // The ECMAScript special characters. A `seq_id` with none of them is a plain literal,
+        // and an unanchored regex search for a literal is exactly a substring search — so we can
+        // skip std::regex entirely, which matters at ~1000 selectors x ~100k leaves per render.
+        constexpr std::string_view seq_id_regex_metacharacters{"\\^$.|?*+()[]{}"};
+
+        char ascii_lower(char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
+
+        std::string ascii_lowered(std::string_view src)
+        {
+            std::string res;
+            res.reserve(src.size());
+            std::transform(src.begin(), src.end(), std::back_inserter(res), ascii_lower);
+            return res;
+        }
+    } // namespace
+
+    bool SeqIdMatcher::matches(std::string_view name) const
+    {
+        if (re)
+            return std::regex_search(name.begin(), name.end(), *re);
+        // literal fast path: case-insensitive substring, i.e. unanchored — AD's semantics
+        return std::search(name.begin(), name.end(), lowered.begin(), lowered.end(),
+                           [](char in_name, char in_pattern) { return ascii_lower(in_name) == in_pattern; }) != name.end();
+    }
+
+    bool SeqIdMatcher::equals(std::string_view name) const { return ascii_lowered(name) == ascii_lowered(pattern); }
+
+    SeqIdMatcher make_seq_id_matcher(std::string_view pattern)
+    {
+        SeqIdMatcher matcher{.pattern = std::string{pattern}, .lowered = ascii_lowered(pattern)};
+        if (pattern.find_first_of(seq_id_regex_metacharacters) != std::string_view::npos) {
+            try {
+                matcher.re = std::make_shared<const std::regex>(pattern.begin(), pattern.end(),
+                                                                std::regex_constants::ECMAScript | std::regex_constants::icase | std::regex_constants::optimize);
+            }
+            catch (const std::regex_error& err) {
+                // AD would throw out of the whole render here; a single bad selector is not worth
+                // losing the tree over, so fall back to treating it as a literal and say so.
+                AD_WARNING("seq_id selector \"{}\" is not a valid regex ({}) — matched as a literal string instead", pattern, err.what());
+            }
+        }
+        return matcher;
+    }
+
     // Does a node-mod's selector match this node? Extracted so the drawing path (which
     // applies hide + the style overrides) and `apply_node_hide_mods` (which the `.names`
     // dump uses, and which needs hide only) cannot drift apart.
     static bool node_mod_selects(const NodeSelect& sel, const ae::tree::Node& base, const std::string* name, const std::string* date)
     {
-        if (!sel.seq_id.empty() && (name == nullptr || std::find(sel.seq_id.begin(), sel.seq_id.end(), *name) == sel.seq_id.end()))
+        if (!sel.seq_id.empty() &&
+            (name == nullptr || std::none_of(sel.seq_id.begin(), sel.seq_id.end(), [name](const SeqIdMatcher& matcher) { return matcher.matches(*name); })))
             return false;
         if (sel.cumulative_min && base.cumulative_edge.get() < *sel.cumulative_min)
             return false;
@@ -114,6 +161,91 @@ namespace ae::tal
         return true;
     }
 
+    // Walk every leaf once and report `seq_id` selectors whose outcome is suspicious. Run once
+    // per render, before the mods are applied, so it sees the whole tree.
+    //
+    // Two findings, deliberately separated because their signal-to-noise differs by two orders
+    // of magnitude. Measured on the 2026-0921 round (bvic + h1 + h3, 1088 active selectors):
+    //   - "matched only as a substring": 1 hit — and that one hit is a real, report-visible bug
+    //     that sat unnoticed for years (a seq_id one character short of the leaf's sequence hash,
+    //     hiding a different strain than the author named). Worth a warning each.
+    //   - "matched nothing": 205 hits, 203 of them stale ids left over from previous cycles.
+    //     Genuinely worth cleaning out of the `.tal`, but not worth 205 warnings on every
+    //     render — summarised on one line, with a bounded sample.
+    void report_node_mod_selectors(const ae::tree::Tree& tree, const TreeDrawParameters& params)
+    {
+        if (params.node_mods.empty())
+            return;
+        struct Stat
+        {
+            const SeqIdMatcher* matcher{nullptr};
+            std::size_t matched{0};
+            std::size_t exact{0};
+            const std::string* first_inexact{nullptr};
+        };
+        std::vector<Stat> stats;
+        for (const NodeMod& mod : params.node_mods)
+            for (const SeqIdMatcher& matcher : mod.select.seq_id)
+                stats.push_back(Stat{.matcher = &matcher});
+        if (stats.empty())
+            return;
+        // Same stack walk as apply_node_hide_mods below — the tree exposes no whole-leaf-range
+        // accessor, and this runs before anything is hidden, so it sees every leaf.
+        struct Frame
+        {
+            ae::tree::node_index_t index;
+            std::size_t cursor;
+        };
+        std::vector<Frame> stack;
+        stack.push_back({ae::tree::Tree::root_index(), 0});
+        while (!stack.empty()) {
+            Frame& frame = stack.back();
+            const ae::tree::Inode& inode = tree.inode(frame.index);
+            if (frame.cursor < inode.children.size()) {
+                const ae::tree::node_index_t child = inode.children[frame.cursor++];
+                if (ae::tree::is_leaf(child)) {
+                    const std::string& name = tree.leaf(child).name;
+                    for (Stat& stat : stats) {
+                        if (stat.matcher->matches(name)) {
+                            ++stat.matched;
+                            if (stat.matcher->equals(name))
+                                ++stat.exact;
+                            else if (stat.first_inexact == nullptr)
+                                stat.first_inexact = &name;
+                        }
+                    }
+                }
+                else
+                    stack.push_back({child, 0});
+            }
+            else
+                stack.pop_back();
+        }
+        std::vector<const Stat*> unmatched;
+        for (const Stat& stat : stats) {
+            if (stat.matched == 0)
+                unmatched.push_back(&stat);
+            else if (stat.exact == 0 && stat.matcher->is_literal())
+                AD_WARNING("seq_id selector \"{}\" carries no regex metacharacters but equals none of the {} leaf/leaves it selected — the match is unanchored, so a truncated or mistyped id silently selects a longer one (first: \"{}\")",
+                           stat.matcher->pattern, stat.matched, *stat.first_inexact);
+        }
+        if (!unmatched.empty()) {
+            std::string sample;
+            constexpr std::size_t max_listed{8};
+            constexpr std::size_t max_pattern_shown{90}; // a 70-way alternation is 2.5k characters
+            for (std::size_t no{0}; no < std::min(max_listed, unmatched.size()); ++no) {
+                const std::string& pattern = unmatched[no]->matcher->pattern;
+                if (pattern.size() <= max_pattern_shown)
+                    fmt::format_to(std::back_inserter(sample), "\n    {}", pattern);
+                else
+                    fmt::format_to(std::back_inserter(sample), "\n    {}… ({} characters)", std::string_view{pattern}.substr(0, max_pattern_shown), pattern.size());
+            }
+            if (unmatched.size() > max_listed)
+                fmt::format_to(std::back_inserter(sample), "\n    … and {} more", unmatched.size() - max_listed);
+            AD_WARNING("{} seq_id selector(s) selected no leaf at all (stale ids do nothing, silently):{}", unmatched.size(), sample);
+        }
+    }
+
     // Apply ONLY the `hide` part of the settings' node mods, marking hidden nodes
     // `shown = false` exactly as the drawing path does before it computes the layout.
     //
@@ -127,6 +259,7 @@ namespace ae::tal
         using namespace ae::tree;
         if (params.node_mods.empty())
             return;
+        report_node_mod_selectors(tree, params);
         tree.calculate_cumulative();
         const auto apply_hide = [&](Node& base, const std::string* name, const std::string* date) {
             for (const auto& mod : params.node_mods) {
@@ -189,6 +322,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     std::unordered_map<node_index_base_t, double> label_scale_override;
     std::unordered_map<node_index_base_t, NodeText> text_override; // positioned labels (DrawOnTree)
     if (!params.node_mods.empty()) {
+        report_node_mod_selectors(tree, params);
         tree.calculate_cumulative();
         const auto apply_mods = [&](node_index_base_t idx, Node& base, const std::string* name, const std::string* date) {
             for (const auto& mod : params.node_mods) {
