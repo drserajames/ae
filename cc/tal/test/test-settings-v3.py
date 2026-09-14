@@ -81,17 +81,31 @@ def check_dash_bar_colors() -> dict:
 
 
 def check_tip_names_and_edges() -> dict:
-    """node-id-size enables per-leaf tip names; a tree color-by sets color_edges (so edges
-    recolour) while time-series/clades-whocc continent does NOT (edges stay black)."""
+    """node-id-size enables per-leaf tip names; continent colouring — whether asked for by
+    the `tree` element or by time-series/clades-whocc — must NOT set color_edges.
+
+    AD reference (~/AC/eu/AD/sources/acmacs-tal/): DrawTree strokes every edge in
+    `node.color_edge_line` (cc/draw-tree.cc:73 leaf, :88 inode), whose only writers are an
+    explicit `nodes apply.tree-edge-line-color` mod (cc/settings.cc:292-295) and the
+    branches-by-edge diagnostic (cc/tree.cc:268, RED); its default is BLACK
+    (cc/tree.hh:108). A `tree` color-by feeds `coloring()`, which colours the leaf *label*
+    (cc/draw-tree.cc:77) plus the matrix/legend/world map — never the edges. So continent
+    colouring leaves the tree black. `color_by_pos` is the one color-by ae still maps to
+    color_edges (no AD reference render to check it against yet)."""
     tal_tip = {"tal": [{"N": "node-id-size", "size": 0.0002}]}
     s_tip, _ = translate(tal_tip)
     tal_tree_cb = {"tal": [{"N": "tree", "color-by": "continent"}]}
     s_tree, _ = translate(tal_tree_cb)
+    tal_tree_pos = {"tal": [{"N": "tree", "color-by": {"N": "pos-aa-frequency", "pos": 135}}]}
+    s_pos, _ = translate(tal_tree_pos)
     tal_ts = {"tal": [{"N": "time-series", "start": "2024-03", "end": "2026-03", "color-by": "continent"}]}
     s_ts, _ = translate(tal_ts)
     return {
         "node-id-size -> tip_names": s_tip.get("tip_names") is True,
-        "tree color-by continent sets color_edges": s_tree.get("color_edges") is True,
+        "tree color-by continent sets color_by_continent": s_tree.get("color_by_continent") is True,
+        "tree continent does NOT set color_edges (AD edges stay black)": "color_edges" not in s_tree,
+        "tree color-by pos DOES set color_edges": s_pos.get("color_edges") is True
+            and s_pos.get("color_by_pos") == {"pos": 135},
         "time-series continent does NOT set color_edges": "color_edges" not in s_ts,
     }
 
