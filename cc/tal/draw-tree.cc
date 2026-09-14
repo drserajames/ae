@@ -175,14 +175,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // --- compute aa-substitution transitions when requested, instead of using the
     //     transitions already stored on the tree's inodes (the `A` field). The method comes
     //     from the .tal's `draw-aa-transitions` `method` (acmacs-tal names it). ---
-    if (params.aa_transitions_compute) {
-        auto method{aa_nuc_transition_method::consensus};
-        if (params.aa_transitions_method == "eu-20200915" || params.aa_transitions_method == "eu_20200915" || params.aa_transitions_method == "eu-20200915-low-mem")
-            method = aa_nuc_transition_method::eu_20200915;
-        else if (params.aa_transitions_method != "consensus")
-            AD_WARNING("draw-aa-transitions: unsupported method \"{}\" — using consensus", params.aa_transitions_method);
-        set_aa_nuc_transition_labels(tree, AANucTransitionSettings{.set_aa_labels = true, .set_nuc_labels = false, .method = method, .non_common_tolerance = params.aa_transitions_tolerance});
-    }
+    //     Computed BELOW, after the node `hide` mods: AD applies its whole settings stack
+    //     (hiding included) before any element's prepare() runs, and both its consensus
+    //     counters (update_common_aa: `if (!child.hidden)`) and ae's (aa-transitions.cc:107,
+    //     160, 360: `if (… .shown)`) skip hidden children, so computing first would consense
+    //     over leaves AD has already removed.
 
     // --- node select/apply mods (settings DSL): hide nodes + collect per-node style
     //     overrides (keyed by node index, consulted during drawing). Applied before the
@@ -238,6 +235,26 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 stack.pop_back();
             }
         }
+    }
+
+    // --- compute aa-substitution transitions when requested, instead of using the
+    //     transitions already stored on the tree's inodes (the `A` field). The method comes
+    //     from the .tal's `draw-aa-transitions` `method` (acmacs-tal names it).
+    //     `reset_labels = false`: acmacs-tal's `tal` never clears the labels an `.asr` tjz
+    //     already carries (Tal::reset() runs only in its interactive loop), so the method adds
+    //     to them and they take part in the ancestor chain — clearing them changes the
+    //     computed labels' `left` residue. ---
+    if (params.aa_transitions_compute) {
+        auto method{aa_nuc_transition_method::consensus};
+        if (params.aa_transitions_method == "eu-20200915" || params.aa_transitions_method == "eu_20200915" || params.aa_transitions_method == "eu-20200915-low-mem")
+            method = aa_nuc_transition_method::eu_20200915;
+        else if (params.aa_transitions_method != "consensus")
+            AD_WARNING("draw-aa-transitions: unsupported method \"{}\" — using consensus", params.aa_transitions_method);
+        set_aa_nuc_transition_labels(tree, AANucTransitionSettings{.set_aa_labels = true,
+                                                                   .set_nuc_labels = false,
+                                                                   .method = method,
+                                                                   .reset_labels = false,
+                                                                   .non_common_tolerance = params.aa_transitions_tolerance});
     }
 
     // --- ladderize (reorder children before layout). "none"/"" keep the .tjz order. ---
@@ -899,7 +916,13 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     }
 
     // --- aa-transition labels at inodes (port of DrawAATransitions) ---
-    if (params.aa_transitions || params.aa_transitions_compute) {
+    // `show` alone decides whether the blanket per-inode labels are DRAWN. Computing the
+    // transitions is a separate question (`compute`), exactly as in AD, where
+    // Settings::add_draw_aa_transitions sets `aa_transitions.calculate = true` for every
+    // `draw-aa-transitions` command while DrawAATransitions::draw decides what is painted.
+    // A `.tal` whose block carries curated `per-node` labels asks for the computation but
+    // not the blanket labels; gating the drawing on `compute` too would flood the tree.
+    if (params.aa_transitions) {
         const double aa_fs = std::clamp(vstep * 0.7, 4.0, 11.0);
         if (params.aa_transitions_min_leaves > 1)
             tree.update_number_of_leaves_in_subtree();

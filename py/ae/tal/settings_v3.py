@@ -669,21 +669,23 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                 # AD draws the curated per-node labels OR (when no curation is given) every
                 # stored inode transition — never both. When we emitted curated MRCA labels,
                 # leaving aa_transitions.show on would flood the tree with every stored inode
-                # transition (the H3/H1 purple flood). Only enable show for an "imported"
-                # block that carries NO per-node curation.
+                # transition (the H3/H1 purple flood), so `show` stays off for a curated block.
+                #
+                # `compute` is a SEPARATE question from `show`, and curation must NOT switch it
+                # off: AD's Settings::add_draw_aa_transitions (acmacs-tal cc/settings.cc:1256)
+                # sets `aa_transitions.calculate = true` for EVERY `draw-aa-transitions`
+                # command, curated or not, and the labels it computes are what
+                # HzSections::set_aa_transitions (cc/hz-sections.cc:77) then accumulates into
+                # each hz-section's aa-transitions text — the text `sp.tal` prints on every
+                # signature-page map title. Dropping the whole block for a curated `.tal`
+                # (which every report tree `.tal` is) silently fell back to the tree's stored
+                # "imported" labels, so a `.tal` asking for `method: eu-20200915` never got it.
                 method = cmd.get("method", "imported")
-                if not emitted_mrca and method == "imported":
-                    aa = schema.setdefault("aa_transitions", {})
-                    aa["show"] = True
-                    aa["compute"] = False  # use the tree's stored ("imported") transitions
-                    mn = cmd.get("minimum-number-leaves-in-subtree")
-                    if isinstance(mn, (int, float)) and mn >= 1:
-                        aa["min_leaves"] = int(mn)
-                elif not emitted_mrca and method in ("eu-20200915", "eu_20200915", "eu-20200915-low-mem"):
+                if method in ("eu-20200915", "eu_20200915", "eu-20200915-low-mem"):
                     # ported in cc/tree/aa-transitions.cc and verified label-for-label against
                     # AD; compute it rather than fall back to the tree's stored labels.
                     aa = schema.setdefault("aa_transitions", {})
-                    aa["show"] = True
+                    aa["show"] = not emitted_mrca
                     aa["compute"] = True
                     aa["method"] = "eu-20200915"
                     if isinstance(cmd.get("non-common-tolerance"), (int, float)):
@@ -691,7 +693,17 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     mn = cmd.get("minimum-number-leaves-in-subtree")
                     if isinstance(mn, (int, float)) and mn >= 1:
                         aa["min_leaves"] = int(mn)
-                elif method not in ("imported", "eu-20200915", "eu_20200915", "eu-20200915-low-mem"):
+                elif method == "imported":
+                    # nothing to compute; the stored labels are already on the tree, so a
+                    # curated block needs no aa_transitions entry at all.
+                    if not emitted_mrca:
+                        aa = schema.setdefault("aa_transitions", {})
+                        aa["show"] = True
+                        aa["compute"] = False  # use the tree's stored ("imported") transitions
+                        mn = cmd.get("minimum-number-leaves-in-subtree")
+                        if isinstance(mn, (int, float)) and mn >= 1:
+                            aa["min_leaves"] = int(mn)
+                else:
                     warnings.append(f"draw-aa-transitions: method {method!r} not ported (only 'imported' and 'eu-20200915')")
             elif name == "hz-sections":
                 schema["hz_sections"] = [
