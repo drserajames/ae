@@ -83,8 +83,21 @@ namespace ae::tal
         std::string first{};        // seq_id of the node's first leaf
         std::string last{};         // seq_id of the node's last leaf
         std::string text{};         // label string (the aa-transition / clade name)
-        double offset_x{0.0};       // x offset from the node, fraction of image_size
+        double offset_x{0.0};       // x offset from the node; fraction of PAGE WIDTH unless
+                                    // offset_rel_height, then of image_size (see below)
         double offset_y{0.0};       // y offset, fraction of image_size (down is positive)
+        bool offset_rel_height{false}; // the .tal carried "offset_h" rather than "offset": x is a
+                                    // fraction of image_size (== page HEIGHT), not of page width.
+                                    // Page width moves when the tree's own width changes between
+                                    // rounds, or when the aa-label band changes, and a width-relative
+                                    // offset silently drags every pinned label with it — that has
+                                    // already cost one rescue pass over a whole hand layout. Height
+                                    // is image_size, which is fixed, and it is also what the font
+                                    // size scales with, so a height-relative offset holds a label the
+                                    // same number of points from its branch whatever the page does.
+                                    // "offset" keeps the old meaning exactly, so existing .tal files
+                                    // render byte-identically; the editor writes "offset_h" for new
+                                    // pins.
         std::string color{};        // "" -> black
         double size{0.0};           // font size as fraction of image_size; 0 -> default font
         bool pinned{false};         // user PINNED this label: place it at its offset (box top-left =

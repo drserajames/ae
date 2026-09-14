@@ -14,8 +14,12 @@ posts the new offsets here; we patch the matching `draw-aa-transitions` `per-nod
 and re-render. A pinned label is then placed at exactly that offset by tal-draw (box top-left =
 node + offset*page) and reserved as a fixed obstacle; the un-pinned labels still auto-place around it.
 
-  offset.x = (box.x0 - anchor.x) / page.width      # exact inverse of the renderer's pinned formula
-  offset.y = (box.y0 - anchor.y) / page.height      # +y is DOWN (PDF device units)
+  offset_h.x = (box.x0 - anchor.x) / page.height   # exact inverse of the renderer's pinned formula
+  offset_h.y = (box.y0 - anchor.y) / page.height   # +y is DOWN (PDF device units)
+
+Both components are relative to page HEIGHT (== image_size). The legacy `offset` key divided x by
+page.width instead, which meant any change to the tree's width silently moved every pinned label;
+tal-draw still honours it for existing .tal files, but the editor no longer writes it.
 
 Run:
   python3 server.py --tal <path/to/x.tal> --tree <path/to/x.tjz> [--out DIR] [--image-size N]
@@ -108,12 +112,20 @@ def _active_pernode_spans(lines):
 
 
 def _patch_entry_line(line: str, ox: float, oy: float, pinned: bool) -> str:
-    """Set this per-node entry's label.offset and pinned, editing only those keys."""
+    """Set this per-node entry's label.offset_h and pinned, editing only those keys.
+
+    We write `offset_h`, not `offset`: its x is relative to page HEIGHT (== image_size), which does
+    not move when the tree's own width changes between rounds, whereas the legacy `offset` x is a
+    fraction of page width and silently drags every pinned label when the page geometry shifts.
+    A stale `offset` on the same entry is REMOVED rather than left to disagree — tal-draw lets
+    offset_h win, but two sources of truth on one line is how this went wrong the first time.
+    """
     off = f"[{_num(ox)}, {_num(oy)}]"
-    if re.search(r'"offset"\s*:\s*\[', line):                       # replace existing offset
-        line = re.sub(r'("offset"\s*:\s*)\[[^\]]*\]', lambda m: m.group(1) + off, line, count=1)
-    elif re.search(r'"label"\s*:\s*\{', line):                      # add offset into existing label{}
-        line = re.sub(r'("label"\s*:\s*\{)', lambda m: m.group(1) + f'"offset": {off}, ', line, count=1)
+    line = re.sub(r'"offset"\s*:\s*\[[^\]]*\]\s*,?\s*', '', line, count=1)   # drop any legacy offset
+    if re.search(r'"offset_h"\s*:\s*\[', line):                     # replace existing offset_h
+        line = re.sub(r'("offset_h"\s*:\s*)\[[^\]]*\]', lambda m: m.group(1) + off, line, count=1)
+    elif re.search(r'"label"\s*:\s*\{', line):                      # add offset_h into existing label{}
+        line = re.sub(r'("label"\s*:\s*\{)', lambda m: m.group(1) + f'"offset_h": {off}, ', line, count=1)
     elif re.search(r'"label"\s*:\s*"', line):                       # string "label" (B/Yam-family schema)
         # Inserting a second "label": {...} here would duplicate-key and (last-wins) drop the label
         # text. The editor only supports the curated `"name"` + object-`"label"` schema, so fail loudly
@@ -122,7 +134,7 @@ def _patch_entry_line(line: str, ox: float, oy: float, pinned: bool) -> str:
                            'supports the curated "name" + object-"label" schema. line: ' + line.strip()[:80])
     elif re.search(r'"\??name"\s*:\s*"[^"]*"', line):               # add a label{} after the name
         line = re.sub(r'("\??name"\s*:\s*"[^"]*")(\s*,)?',
-                      lambda m: m.group(1) + f', "label": {{"offset": {off}}},', line, count=1)
+                      lambda m: m.group(1) + f', "label": {{"offset_h": {off}}},', line, count=1)
     else:                                                           # no anchor to attach an offset to
         raise RuntimeError('per-node entry has no "name" to anchor a label offset. line: ' + line.strip()[:80])
     pv = "true" if pinned else "false"
@@ -155,7 +167,7 @@ def patch_tal(tal_path: Path, edits):
         spans = _active_pernode_spans(lines)
         for e in mrca:
             first, last = e["first"], e["last"]
-            ox, oy = e["offset"]
+            ox, oy = e["offset_h"] if "offset_h" in e else e["offset"]
             pinned = bool(e.get("pinned", True))
             hit = None
             for start, end in spans:
