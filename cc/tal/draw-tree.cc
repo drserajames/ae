@@ -554,6 +554,31 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     //
     // Printed BEFORE the drawing below so the RUNNING-THE-REPORT.md §10.5 tuning loop can read it
     // without waiting out a full render, and also written to `<output>.taleg`.
+    //
+    // `.taleg` is ONE diagnostic file per tree, shared by every diagnostic block: the clade-section
+    // report here and the aa-transition label-position dump further down (which can only be produced
+    // after the labels are placed). `clades.report_file` overrides the path; "-" writes no file; the
+    // shared-surface entry point (signature pages) passes an empty `output`, which also means no file
+    // — stderr only. The first block to emit truncates, later ones append, so the order in the file is
+    // the order the render produced them.
+    std::filesystem::path taleg_path{params.clades_report_file};
+    if (taleg_path.empty() && !output.empty())
+        taleg_path = std::filesystem::path{output}.replace_extension(".taleg");
+    if (taleg_path == std::filesystem::path{"-"})
+        taleg_path.clear();
+    bool taleg_started{false};
+    const auto emit_diag = [&taleg_path, &taleg_started](const std::string& report) {
+        fmt::print(stderr, "{}", report);
+        if (taleg_path.empty())
+            return;
+        if (std::ofstream out{taleg_path, taleg_started ? std::ios::app : std::ios::trunc}; out) {
+            out << report;
+            taleg_started = true;
+        }
+        else
+            AD_WARNING("cannot write tal diagnostic to {}", taleg_path.string());
+    };
+
     if (params.clades_report && !clade_plan.empty()) {
         fmt::memory_buffer rep;
         const auto app = std::back_inserter(rep);
@@ -659,20 +684,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                            fmt::format("\"{}\",", section.aa_transitions), w_subs + 3, section.aa_transitions);
         fmt::format_to(app, "]\n\n");
 
-        const std::string report = fmt::to_string(rep);
-        fmt::print(stderr, "{}", report);
         // …and to <output>.taleg, which RUNNING-THE-REPORT.md §10.5 documents reading instead of
-        // watching the terminal. `clades.report_file` overrides the path; "-" writes no file.
-        // The shared-surface entry point (signature pages) passes an empty `output` — no file then.
-        std::filesystem::path taleg{params.clades_report_file};
-        if (taleg.empty() && !output.empty())
-            taleg = std::filesystem::path{output}.replace_extension(".taleg");
-        if (!taleg.empty() && taleg != std::filesystem::path{"-"}) {
-            if (std::ofstream out{taleg}; out)
-                out << report;
-            else
-                AD_WARNING("cannot write clade-section diagnostic to {}", taleg.string());
-        }
+        // watching the terminal.
+        emit_diag(fmt::to_string(rep));
     }
 
     // --clades-report: the diagnostic above is all the caller wanted. Return before make_surface,
@@ -1614,9 +1628,13 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     //     entry's first/last leaf seq_ids (MRCA(first,last) IS that node) and labels its position. ---
     if (!params.mrca_labels.empty()) {
         std::unordered_map<std::string, node_index_base_t> leaf_by_name; // shown leaves only
+        std::unordered_map<std::string, std::size_t> leaf_order_by_name; // draw-order index, for the report's neighbour fields
         leaf_by_name.reserve(layout.leaves.size());
-        for (const auto& ln : layout.leaves)
-            leaf_by_name.emplace(ln.name, ln.node);
+        leaf_order_by_name.reserve(layout.leaves.size());
+        for (std::size_t lo = 0; lo < layout.leaves.size(); ++lo) {
+            leaf_by_name.emplace(layout.leaves[lo].name, layout.leaves[lo].node);
+            leaf_order_by_name.emplace(layout.leaves[lo].name, lo);
+        }
         const auto root = *Tree::root_index();
         const auto mrca = [&tree, root](node_index_base_t a, node_index_base_t b) -> std::optional<node_index_base_t> {
             std::unordered_set<node_index_base_t> ancestors;
@@ -1634,10 +1652,43 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // split an aa-transition label into its substitutions (one per line) so doubles/triples
         // stack vertically (AD style); the box is then max-token-wide and nlines tall.
         const auto split_ws = [](const std::string& s) { std::vector<std::string> out; std::string cur; for (char c : s) { if (c == ' ') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } } else cur += c; } if (!cur.empty()) out.push_back(cur); if (out.empty()) out.push_back(s); return out; };
+        // Descend to the first (or last) SHOWN leaf under `start`, following the child order the
+        // tree is drawn in — the node's own extent, which is what AD's report prints.
+        const auto edge_leaf = [&tree, &pos](node_index_base_t start, bool want_first) -> std::string {
+            node_index_t at{start};
+            while (*at <= 0) { // <=0 is an inode (0 is the root)
+                node_index_t pick{0};
+                bool got{false};
+                for (const node_index_t child : tree.inode(at).children) {
+                    if (pos.find(*child) == pos.end())
+                        continue;
+                    pick = child;
+                    got = true;
+                    if (want_first)
+                        break;
+                }
+                if (!got)
+                    return {}; // nothing shown under it (cannot happen for a node that is being labelled)
+                at = pick;
+            }
+            return tree.leaf(at).name;
+        };
         // resolve each curated label to its anchor (the MRCA branch point) + text metrics
-        struct Anchor { double nx, ny, mid_x, fs, tw, off_x, off_y; int nlines; std::string text; Color color; bool pinned; std::string first, last; bool off_rel_h; };
+        struct Anchor { double nx, ny, mid_x, fs, tw, off_x, off_y; int nlines; std::string text; Color color; bool pinned; std::string first, last; bool off_rel_h; std::string node_id; std::size_t ord;
+                        // The node's own first/last SHOWN leaf in draw order, recomputed from the tree being
+                        // drawn — what the label-position dump reports, as AD does. `first`/`last` above stay the
+                        // authored `.tal` values, because the sidecar/drag editor matches its entry by those.
+                        // The two differ whenever the node has gained leaves since the `.tal` was written, and
+                        // reporting the current pair is what lets a pasted block stay valid against a rebuilt tree.
+                        std::string cur_first, cur_last; };
         std::vector<Anchor> anchors;
-        for (const auto& label : params.mrca_labels) {
+        // Curated entries carrying `"show": false` — "this transition exists, do NOT label it".
+        // They resolve to a real node like any other (so the dump lists nothing stale), but they are
+        // kept OUT of `anchors`: they are never placed, never reserved as obstacles, never drawn.
+        // The label-position dump reports them with their authored offset, as AD's does.
+        std::vector<Anchor> hidden;
+        for (std::size_t lno = 0; lno < params.mrca_labels.size(); ++lno) {
+            const MrcaLabel& label = params.mrca_labels[lno];
             const auto fi = leaf_by_name.find(label.first);
             const auto li = leaf_by_name.find(label.last);
             if (fi == leaf_by_name.end() || li == leaf_by_name.end())
@@ -1659,7 +1710,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const auto toks = split_ws(label.text);
             double tw = 0.0;
             for (const auto& t : toks) tw = std::max(tw, pdf.text_size(t, fs).first);
-            anchors.push_back({nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color, label.pinned, label.first, label.last, label.offset_rel_height});
+            Anchor anchor{nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color, label.pinned, label.first, label.last, label.offset_rel_height, label.node_id, lno,
+                          edge_leaf(*node, true), edge_leaf(*node, false)};
+            (label.show ? anchors : hidden).push_back(std::move(anchor));
         }
 
         std::vector<Placed> done;
@@ -2526,6 +2579,110 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 side_rows.push_back({"mrca", a.first, a.last, "", a.text,
                                      a.nx, a.ny, a.mid_x, a.ny, p.x0, p.y0, p.x1, p.y1, a.fs, a.nlines, a.pinned, a.color.rgbI()});
             }
+        }
+
+        // --- aa-transition label-position dump (port of AD DrawAATransitions::report,
+        //     acmacs-tal cc/draw-aa-transitions.cc:756) ---
+        //
+        // Every row is directly pasteable into the `.tal`'s `draw-aa-transitions` `per-node` list —
+        // which IS the manual label-moving workflow: render, read the offsets the placer chose,
+        // hand-edit the ones that want moving, paste the block back. `?`-prefixed keys are AD's
+        // convention for "informational, ignored on read".
+        //
+        // Emitted alongside the clade-section report on stderr AND in `<output>.taleg`
+        // (RUNNING-THE-REPORT.md §10.5 documents reading the file instead of scraping stderr), and
+        // printed BEFORE the labels are drawn, as AD does, so the tuning loop need not wait out the
+        // rest of the render.
+        //
+        // `first`/`last` are the node's CURRENT extent (Anchor::cur_first/cur_last), recomputed from
+        // the tree being drawn exactly as AD recomputes them — so a pasted block refreshes an
+        // identity that has gone stale as the tree grew, instead of writing back what it came in with.
+        //
+        // Two deliberate departures from AD's field set, both forced by how ae identifies a node:
+        //   * `first`/`last` are NOT `?`-disabled. AD selects a node by its draw-time `node_id`, so
+        //     for AD they are informational; ae has no such id and resolves the node as
+        //     MRCA(first,last), so here they carry the identity and must stay live. `node_id` is
+        //     echoed back from the `.tal` verbatim — ae neither computes nor consumes it — so a
+        //     pasted block keeps the field, but it does not track a rebuilt tree.
+        //   * `pinned` is printed. ae AUTO-PLACES un-pinned labels and ignores their offsets, so a
+        //     row pasted back without it would be re-placed rather than held where the dump says.
+        //
+        // Rows are in `.tal` order (Anchor::ord), shown and hidden together, as AD reports both.
+        if (params.mrca_labels_report && !(anchors.empty() && hidden.empty())) {
+            const auto jstr = [](const std::string& str) {
+                std::string out;
+                out.reserve(str.size() + 2);
+                for (char c : str) {
+                    switch (c) {
+                        case '"': out += "\\\""; break;
+                        case '\\': out += "\\\\"; break;
+                        default: if (static_cast<unsigned char>(c) < 0x20) out += ' '; else out += c;
+                    }
+                }
+                return out;
+            };
+            // the leaf drawn immediately before `first` / after `last` — AD's `?before first` /
+            // `?after last`, the hint for widening or narrowing a label's node by hand
+            const auto neighbour = [&](const std::string& leaf, long delta) -> std::string {
+                const auto found = leaf_order_by_name.find(leaf);
+                if (found == leaf_order_by_name.end())
+                    return {};
+                const long at = static_cast<long>(found->second) + delta;
+                if (at < 0 || at >= static_cast<long>(layout.leaves.size()))
+                    return {};
+                return layout.leaves[static_cast<std::size_t>(at)].name;
+            };
+            struct ReportRow { std::size_t ord; std::string node_id, name, first, last, before_first, after_last; bool show, pinned, off_rel_h; double off_x, off_y, box_w, box_h; };
+            std::vector<ReportRow> rows;
+            rows.reserve(done.size() + hidden.size());
+            const auto row_of = [&](const Anchor& a, bool show, double off_x, double off_y, double box_w, double box_h) {
+                return ReportRow{a.ord, a.node_id, a.text, a.cur_first, a.cur_last, neighbour(a.cur_first, -1), neighbour(a.cur_last, 1), show, a.pinned, a.off_rel_h, off_x, off_y, box_w, box_h};
+            };
+            for (const auto& p : done) {
+                const Anchor& a = anchors[p.aidx];
+                // the offset that REPRODUCES the placed box: box top-left = node point + offset*page
+                // (the same inverse the sidecar and the drag editor use). x is relative to the page
+                // width, or to its height when the label was authored with "offset_h".
+                const double rel_w = a.off_rel_h ? height : width;
+                rows.push_back(row_of(a, true, (p.x0 - a.nx) / rel_w, (p.y0 - a.ny) / height, (p.x1 - p.x0) / width, (p.y1 - p.y0) / height));
+            }
+            for (const auto& a : hidden) // never placed: report the authored offset and the text-metric box
+                rows.push_back(row_of(a, false, a.off_x, a.off_y, a.tw / width, static_cast<double>(a.nlines) * a.fs * 1.18 / height));
+            std::sort(std::begin(rows), std::end(rows), [](const ReportRow& r1, const ReportRow& r2) { return r1.ord < r2.ord; });
+
+            // AD column-aligns on the widest id / name / first / last — that alignment is what makes
+            // the block readable and hand-diffable against the previous render.
+            std::size_t w_id{0}, w_name{0}, w_first{0}, w_last{0}, w_before{0};
+            for (const ReportRow& row : rows) {
+                w_id = std::max(w_id, row.node_id.size());
+                w_name = std::max(w_name, row.name.size());
+                w_first = std::max(w_first, row.first.size());
+                w_last = std::max(w_last, row.last.size());
+                w_before = std::max(w_before, row.before_first.size());
+            }
+            fmt::memory_buffer rep;
+            const auto app = std::back_inserter(rep);
+            fmt::format_to(app, ">>> AA transition labels ({}) vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n", rows.size());
+            fmt::format_to(app, ">>> paste into the .tal's \"draw-aa-transitions\" \"per-node\"; \"pinned\": true holds a label where you put it\n[\n");
+            for (std::size_t rno = 0; rno < rows.size(); ++rno) {
+                const ReportRow& row = rows[rno];
+                fmt::format_to(app,
+                               "    {{\"node_id\": {:>{}s} \"name\": {:<{}s} \"show\": {} \"pinned\": {} "
+                               "\"label\": {{\"{}\": [{:9.6f}, {:9.6f}], \"?box\": [{:.4f}, {:.4f}]}}, "
+                               "\"first\": {:<{}s} \"last\": {:<{}s} \"?before first\": {:<{}s} \"?after last\": {}}}{}\n",
+                               fmt::format("\"{}\",", jstr(row.node_id)), w_id + 4,                                             // node_id
+                               fmt::format("\"{}\",", jstr(row.name)), w_name + 4,                                              // name
+                               row.show ? "true, " : "false,",                                                                 // show
+                               row.pinned ? "true, " : "false,",                                                               // pinned
+                               row.off_rel_h ? "offset_h" : "offset", row.off_x, row.off_y, row.box_w, row.box_h,              // label
+                               fmt::format("\"{}\",", jstr(row.first)), w_first + 4,                                            // first
+                               fmt::format("\"{}\",", jstr(row.last)), w_last + 4,                                              // last
+                               row.before_first.empty() ? std::string{"null,"} : fmt::format("\"{}\",", jstr(row.before_first)), w_before + 4,
+                               row.after_last.empty() ? std::string{"null"} : fmt::format("\"{}\"", jstr(row.after_last)),
+                               rno + 1 < rows.size() ? "," : "");
+            }
+            fmt::format_to(app, "]\n>>> ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n");
+            emit_diag(fmt::to_string(rep));
         }
 
         for (const auto& p : done) {
