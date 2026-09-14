@@ -16,6 +16,37 @@ The project compiles to:
 
 ---
 
+## Where your work goes — a branch or worktree, never `main`
+
+**Every piece of ae work gets its own branch, and normally its own worktree. Do not commit to
+`main`, and do not leave uncommitted edits sitting in the `main` checkout.**
+
+Several agents and sessions are routinely live in this repo at once. Sharing `main` means
+colliding mid-edit, in the same file, with no record of who changed what — the worst kind of
+conflict to unpick. On separate branches the same work merges once, deliberately, at the end.
+
+```sh
+git worktree list                                    # what exists — never trust a name written down
+git worktree add ~/AC/eu/ae-<topic> -b <branch> main
+```
+
+- Name it `ae-<topic>` alongside the main checkout, matching the existing `ae-aa-labels` /
+  `ae-clade-diagnostics` pattern.
+- **`build-py314` is per-worktree.** A fresh worktree has no configured build dir — see
+  *Building for Python 3.14* below, or invoke the `ae-build` skill. A change confined to
+  `py/ae/` needs no build at all, so don't pay for one until you touch `cc/`.
+- **The git stash stack is shared across every worktree.** Never bare `git stash`. To move
+  work already started on `main`, patch it across rather than stashing it:
+  `git diff -- <files> > <scratch>/wip.patch`, `git worktree add …`,
+  `git checkout -- <files>` to leave `main` clean, then `git apply` in the new tree.
+  Untracked files copy by hand — they are not in the diff.
+- Uncommitted changes do **not** propagate between worktrees. Confirm which one you are in
+  (`git rev-parse --show-toplevel`) before concluding a change has gone missing.
+- **Merging is the user's call**, exactly like pushing. Finish on your branch and report;
+  do not merge to `main`, push, or open a PR on your own initiative.
+
+---
+
 ## Committing to this repo — read before your first commit
 
 **`ae` is a public GitHub repo, and it is worked on from a workspace full of
