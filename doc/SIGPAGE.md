@@ -121,6 +121,40 @@ default**. Opt in with **`tal-signature-page --serum-circles [--serum-circle-fol
 circle (passage-type coloured — cell blue / egg red / reassortant orange, via
 `semantic.serum_circle`), with the serum point drawn dark so the centre is visible.
 
+### hz-section marker column restored (2026-09-14)
+
+The bracket + section-letter column described above was **drawing nothing** on every real
+signature page — the page rendered the clade arrow labels but no `A`/`B`/`C` keys tying each
+map panel to its section, which is easy to mistake for "the feature is there".
+
+Cause was upstream of `draw-tree.cc`, whose marker block is gated on
+`!params.hz_sections.empty()`. That list is filled from the tal-draw schema's `hz_sections`,
+and `settings_v3.translate` only fills it from an `hz-sections` command the `.tal`'s program
+actually RUNS. No report `.tal` from 2026-0805-tc1 on runs one: they keep the block but dropped
+the `hz` sub-program, so `find_command` correctly ignores it and the list came out empty — while
+`hz_section_labels` still reserved the column's 2.8 % of width. `_tal_to_settings` now takes
+`hz_sections=` and writes the sections the page is really built from (`SM.sections_for`, the
+clade-derived fallback AD itself uses), which is the authoritative list in either case.
+
+Measured — single-letter text-show ops in the PDF content stream, clustered by x
+(`pdftotext -bbox` is not enough on its own: it silently drops bare `I` glyphs, undercounting
+both engines by one). ae rendered from `2026-0921-ssm`, AD reference from `2026-0223-ssm/sp`:
+
+| page | AD column | ae before | ae after |
+|---|---|---|---|
+| `h3-hint-cdc` | 11 letters `A`–`K` @ x≈367 | **none** | 9 letters `A`–`I` @ x≈361 |
+| `h1-cdc` | 6 letters `A`–`F` @ x≈429 | **none** | 13 letters `A`–`M` @ x≈416 |
+| `bvic-cdc` | 8 letters `A`–`H` @ x≈315 | **none** | 10 letters `A`–`J` @ x≈396 |
+
+All three subtypes had the same gap. The letter *counts* differ from AD because the section
+SETS differ — AD's reference is Feb 2026's hand-curated `.tal` splits, ae's are the current
+tree's clade-derived sections — not because letters are missing: each page's column matches the
+`L` field of its own run's `>>> HZ sections` dump exactly (9 / 13 / 10), in order. Each letter
+sits at its own section's first-leaf row: Pearson *r* between first-leaf draw index and letter
+y = **0.999999 / 1.000000 / 0.999999**, strictly monotonic in all three.
+
+Locked in by `cc/tal/test/test-sigpage-hz-marker.py` (synthetic `.tal` + section list).
+
 ### Checking
 `python3 cc/tal/test/check-sigpage.py <ae.pdf> [<AD-reference.pdf>]` emits an AD-vs-ae
 montage (eyeball #1/#2/#3/#4/#8) plus automated probes for the data-independent items

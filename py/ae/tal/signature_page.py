@@ -501,7 +501,8 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
                      title: Optional[str] = None, show_legend: Optional[bool] = None,
                      drop_dash_bars: bool = False, clades_before_time_series: bool = False,
                      matches_chart_seq_ids: Optional[Sequence[str]] = None,
-                     section_prefixes: Optional[dict] = None) -> tuple[str, Optional[int]]:
+                     section_prefixes: Optional[dict] = None,
+                     hz_sections: Optional[Sequence[dict]] = None) -> tuple[str, Optional[int]]:
     """Translate an acmacs-tal settings-v3 `.tal` into a tal-draw settings file.
     Returns (settings_path, image_size_or_None). Mirrors the `--tal` handling in
     the tal-signature-page CLI so the tree panel is rendered from the same config
@@ -525,7 +526,11 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
       * `clades_before_time_series` — AD draws the clades column to the LEFT of the
         time-series matrix on the sig page (tree-only puts it right);
       * `matches_chart_seq_ids` — leaves whose antigen is in the chart, drawn as
-        AD's grey `matches-chart-antigen` dash-bar.
+        AD's grey `matches-chart-antigen` dash-bar;
+      * `hz_sections` — the section list the page is built from (`SM.sections_for`),
+        which becomes the schema's `hz_sections` and hence AD's bracket + section-letter
+        marker column. See the note at the assignment for why the schema's own list is
+        not enough.
     """
     from ae.tal.settings_v3 import load_tal
 
@@ -567,6 +572,22 @@ def _tal_to_settings(tal_path, tmpdir: Path, defines: Optional[dict] = None,
         schema["right_margin_ratio"] = 0.004
     if matches_chart_seq_ids:
         schema["matches_chart_seq_ids"] = list(matches_chart_seq_ids)
+    if hz_sections is not None:
+        # The sections the page is ACTUALLY built from (`SM.sections_for`), which is what
+        # AD's hz-section-marker column is drawn from. Overriding the schema here is what
+        # makes that column appear at all on a modern report `.tal`: `settings_v3` only fills
+        # `schema["hz_sections"]` from an `hz-sections` command the `.tal`'s program still
+        # RUNS, and no report `.tal` from 2026-0805-tc1 on does (they keep the block but
+        # dropped the `hz` sub-program, so `find_command` correctly ignores it). The list came
+        # out empty, `draw-tree.cc`'s marker block is gated on `!params.hz_sections.empty()`,
+        # and the whole bracket+letter column silently drew nothing — while `hz_section_labels`
+        # still reserved its 2.8 % width. `sections_for` already returns the `.tal`'s own shown
+        # sections when it does run `hz-sections`, so this is the authoritative list either way.
+        schema["hz_sections"] = [
+            {"first": s.get("first", ""), "last": s.get("last", ""),
+             "label": s.get("label", ""), "prefix": s.get("prefix", "")}
+            for s in hz_sections if s.get("first") and s.get("last")
+        ]
     if section_prefixes and isinstance(schema.get("hz_sections"), list):
         for hs in schema["hz_sections"]:  # AD assigns A/B/C in tree order, not the .tal "L"
             if hs.get("first") in section_prefixes:
@@ -694,7 +715,8 @@ def make_section_signature_page(tree, chart, tal, output, *, size: Optional[int]
         matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
         tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
                                             drop_dash_bars=False, clades_before_time_series=True,
-                                            matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes)
+                                            matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes,
+                                            hz_sections=sections)
         tree_pdf = render_tree_pdf(tree, tmpdir / "tree.pdf", size=size or tal_size or 1000, settings=tree_settings)
 
         # AD lays the section maps out 3 rows high -> columns = ceil(n / 3).
@@ -891,7 +913,8 @@ def make_section_signature_page_native(tree, chart, tal, output, *, size: Option
         matched_seq_ids = [leaf_names[i] for i in sorted(match.leaf_to_ag)]
         tree_settings, _ = _tal_to_settings(tal, tmpdir, defines, title=page_title, show_legend=False,
                                             drop_dash_bars=False, clades_before_time_series=True,
-                                            matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes)
+                                            matches_chart_seq_ids=matched_seq_ids, section_prefixes=section_prefixes,
+                                            hz_sections=sections)
         tree_schema = json.loads(Path(tree_settings).read_text())
         tree_aspect = float(tree_schema.get("width_to_height_ratio", 1.0)) or 1.0
 
