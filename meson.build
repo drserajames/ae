@@ -393,6 +393,15 @@ test_pos = executable(
   dependencies : [fmt],
   install : true)
 
+# --- sequences ---
+test_seqdb_collision = executable(
+  'test-seqdb-collision',
+  sources : ['cc/test/test-seqdb-collision.cc'],
+  include_directories : include_cc,
+  dependencies : [fmt, range_v3, simdjson, xxhash],
+  link_with : [libae],
+  install : true)
+
 chart_v3_test = executable(
   'chart-v3-test',
   sources : ['cc/test/chart-v3-test.cc'],
@@ -406,6 +415,7 @@ test('ae test date parsing', test_date)
 test('ae test passage parsing', test_passage)
 test('ae test_named_vector', test_named_vector)
 test('ae test_pos', test_pos)
+test('ae test seqdb hash collision', test_seqdb_collision)
 test('ae chart_v3_test', chart_v3_test)
 
 # ----------------------------------------------------------------------
