@@ -77,6 +77,12 @@ bool ae::sequences::Seqdb::add(const RawSequence& raw_sequence)
     if (keep_sequence) {
         hash_index_.try_emplace(raw_sequence.hash_nuc, raw_sequence.name);
     }
+    else if (raw_sequence.sequence.nuc.get() == found_by_hash.seq->nuc.get()) {
+        // Same hash AND the same nucleotides under a different name: a genuine duplicate. This is
+        // what the master/slave design is for — keep_sequence stays false, the entry becomes a
+        // slave, and replace_with_master() later resolves it to an identical sequence. Nothing to
+        // report. Checked FIRST because a hash hit is not by itself evidence of equality.
+    }
     else if (raw_sequence.sequence.nuc.size() != found_by_hash.seq->nuc.size()) {
         fmt::print(">> [seqdb {}] hash {} conflict for \"{}\" (nucs: {}) and \"{}\" (nucs: {}) (short sequence will be thrown away)\n", subtype_, raw_sequence.hash_nuc, raw_sequence.name,
                    raw_sequence.sequence.nuc.size(), found_by_hash.entry->name, found_by_hash.seq->nuc.size());
@@ -90,6 +96,18 @@ bool ae::sequences::Seqdb::add(const RawSequence& raw_sequence)
             hash_index_.try_emplace(raw_sequence.hash_nuc, raw_sequence.name);
             keep_sequence = true;
         }
+    }
+    else {
+        // Same hash, different name, same length, DIFFERENT nucleotides: a true hash collision
+        // between two distinct viruses. Before this branch existed the incoming sequence was
+        // stored as a slave with its nuc cleared, and replace_with_master() then handed the
+        // strain the OTHER virus's sequence — silently, because the diagnostic above sits inside
+        // the length-differs branch. Keep both instead: this sequence becomes its own master and
+        // is deliberately NOT registered in hash_index_, so the hash's canonical master and every
+        // slave already resolving through it are left exactly as they were.
+        fmt::print(">> [seqdb {}] hash {} COLLISION for \"{}\" and \"{}\" — same hash and length ({} nucs) but different nucleotides; both sequences kept, \"{}\" is its own master\n",
+                   subtype_, raw_sequence.hash_nuc, raw_sequence.name, found_by_hash.entry->name, raw_sequence.sequence.nuc.size(), raw_sequence.name);
+        keep_sequence = true;
     }
     const auto found = std::lower_bound(std::begin(entries_), std::end(entries_), raw_sequence.name, [](const auto& entry, std::string_view nam) { return entry.name < nam; });
     if (found != std::end(entries_) && found->name == raw_sequence.name) {

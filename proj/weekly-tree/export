@@ -89,6 +89,11 @@ def bvic(subtype: str, args: argparse.Namespace):
         )  # outgroup BRISBANE/60/2008, B/CHONGQING BANAN/1840/2017 (V1A)
         .remove_hash_duplicates()
         .replace_with_master()
+        # replace_with_master resolves by hash across the whole seqdb, ignoring every
+        # filter above it, so an excluded strain can re-enter as another's hash-master.
+        # Re-apply the exclusion here; the call above stays so that excluded strains
+        # never win remove_hash_duplicates against an included one.
+        .exclude_name(name_list("bvic-exclude.txt"))
         .check()
         .sort("+date")
         .move_name_to_beginning(outgroup)
@@ -114,6 +119,11 @@ def byam(subtype: str, args: argparse.Namespace):
         .exclude_name(name_list("byam-exclude.txt"))
         .remove_hash_duplicates()
         .replace_with_master()
+        # replace_with_master resolves by hash across the whole seqdb, ignoring every
+        # filter above it, so an excluded strain can re-enter as another's hash-master.
+        # Re-apply the exclusion here; the call above stays so that excluded strains
+        # never win remove_hash_duplicates against an included one.
+        .exclude_name(name_list("byam-exclude.txt"))
         .sort("+date")
         .move_name_to_beginning(outgroup)
     )
@@ -141,6 +151,11 @@ def h1(subtype: str, args: argparse.Namespace):
         .exclude_name(["SWINE/"] + name_list("h1-exclude.txt"))
         .remove_hash_duplicates()
         .replace_with_master()
+        # replace_with_master resolves by hash across the whole seqdb, ignoring every
+        # filter above it, so an excluded strain can re-enter as another's hash-master.
+        # Re-apply the exclusion here; the call above stays so that excluded strains
+        # never win remove_hash_duplicates against an included one.
+        .exclude_name(["SWINE/"] + name_list("h1-exclude.txt"))
         .sort("+date")
         .move_name_to_beginning(outgroup)
     )
@@ -164,6 +179,11 @@ def h3(subtype: str, args: argparse.Namespace):
         .exclude_name(["SWINE/"] + name_list("h3-exclude.txt"))
         .remove_hash_duplicates()
         .replace_with_master()
+        # replace_with_master resolves by hash across the whole seqdb, ignoring every
+        # filter above it, so an excluded strain can re-enter as another's hash-master.
+        # Re-apply the exclusion here; the call above stays so that excluded strains
+        # never win remove_hash_duplicates against an included one.
+        .exclude_name(["SWINE/"] + name_list("h3-exclude.txt"))
         .sort("+date")
         .move_name_to_beginning(outgroup)
     )

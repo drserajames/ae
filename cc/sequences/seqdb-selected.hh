@@ -109,7 +109,16 @@ namespace ae::sequences
         SeqdbSelected& remove_hash_duplicates() // keep most recent
         {
             sort(order::hash);
-            refs_.erase(std::unique(std::begin(refs_), std::end(refs_), [](const auto& ref1, const auto& ref2) { return ref1.seq->hash == ref2.seq->hash; }), std::end(refs_));
+            // A shared hash is not proof of a shared sequence — see Seqdb::add, which now keeps
+            // both sides of a true collision instead of discarding one. Two masters under the same
+            // hash whose nucleotides differ are different viruses and must both survive; a slave is
+            // only ever created for a genuine duplicate, so it still dedups against its master.
+            refs_.erase(std::unique(std::begin(refs_), std::end(refs_),
+                                    [](const auto& ref1, const auto& ref2) {
+                                        return ref1.seq->hash == ref2.seq->hash &&
+                                               (!ref1.is_master() || !ref2.is_master() || ref1.seq->nuc.get() == ref2.seq->nuc.get());
+                                    }),
+                        std::end(refs_));
             return *this;
         }
 
