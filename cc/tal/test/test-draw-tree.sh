@@ -113,4 +113,23 @@ echo "  .names: A B C D E (draw order)"
 [ "$(cat "$tmp/order.names")" != "$(cat "$tmp/ladder.names")" ] || { echo "FAIL: --ladderize=max-edge-length did not reorder"; exit 1; }
 echo "  ladderize: max-edge-length reorders leaves ($(tr '\n' ' ' < "$tmp/ladder.names"))"
 
+# --- hidden leaves and the eu-20200915 aa-transitions (cc/tree/aa-transitions.cc) ---------
+# tree-aa-hidden.json: the inode with edge 9 (leaves H1,H2) is hidden by an edge_min mod and
+# carries an imported O13J that flips its parent's imported J13O. acmacs-tal keeps the parent's
+# label, because a hidden subtree contributes NO leaves to stage 3's flip ratio
+# (Node::number_leaves, AD cc/tree.cc:755-763) -- and because Node::hide() hides the whole
+# subtree, so H1/H2 are hidden too. Both are needed: count H1/H2 and the ratio is 2/5, over the
+# 0.5% threshold, and the parent's substitution is dropped and reappears one level down.
+printf '{"aa_transitions": {"compute": true, "method": "eu-20200915"}, "nodes": [{"select": {"edge_min": 5.0}, "apply": {"hide": true}}]}' > "$tmp/hidden.json"
+"$bin" --settings="$tmp/hidden.json" --transitions-report="$tmp/hidden.tsv" "$here/tree-aa-hidden.json" "$tmp/hidden.pdf" >/dev/null
+# columns: first leaf, last leaf, SHOWN leaves, labels
+parent=$(awk -F'\t' '$1=="H1" && $2=="L5" {print $4}' "$tmp/hidden.tsv")
+hidden_n=$(awk -F'\t' '$1=="H1" && $2=="H2" {print $3}' "$tmp/hidden.tsv")
+[ "$hidden_n" = "0" ] || { echo "FAIL: hide did not reach the hidden inode's leaves (shown leaves: ${hidden_n:-<no such node>})"; exit 1; }
+echo "  hidden subtree: 0 shown leaves (Node::hide reaches the whole subtree)"
+case "$parent" in
+    *J13O*) echo "  eu-20200915: the parent keeps J13O (hidden flip counts 0 leaves)" ;;
+    *) echo "FAIL: eu-20200915 dropped the parent's J13O (labels: ${parent:-<none>})"; exit 1 ;;
+esac
+
 echo "OK: tal-draw renders valid PDFs"
