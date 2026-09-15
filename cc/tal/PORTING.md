@@ -835,6 +835,30 @@ added for this):
 Regression test: the `tree-aa-hidden.json` case in `cc/tal/test/test-draw-tree.sh` (invented `J`/`O`
 residues), which fails if either half is reverted.
 
+Each half was re-checked individually on the merged tree (2026-09-15): reverting the recursive
+hide fails the case with *"hide did not reach the hidden inode's leaves (shown leaves: 2)"*,
+reverting the shown-only leaf count fails it with *"eu-20200915 dropped the parent's"* label —
+two distinct failures, so the case guards both halves rather than one of them twice.
+
+**Re-verified on a second round the fix had never seen (2026-09-15).** The concern was that this
+changes *hide semantics*, which reaches far beyond aa-transitions, so it was replayed against the
+previous round's three trees with the same driver and the same `.tal`s. Per-inode, AD and ae
+re-derived in the same run:
+
+| tree | inodes compared | identical label lists | identical shown-leaf counts |
+|---|---:|---:|---:|
+| bvic | 5 357 | **5 357** | 5 357 |
+| h1   | 16 708 | **16 708** | 16 708 |
+| h3   | 10 121 | **10 121** | 10 121 |
+
+Hidden-leaf counts agree with AD on both rounds, and are unchanged by the fix: current round
+43 / 491 / 361 hidden (bvic / h1 / h3), previous round 43 / 489 / 316, identical across AD, ae
+before the fix and ae after it. The previous round's `.names` dumps are byte-identical before and
+after, and the rendered trees pixel-identical — 0 differing pixels at both strict and `-fuzz 30%`
+on ~10.6–13.3 Mpx rasters of all three. So the recursive hide reaches exactly the nodes AD hides
+and nothing else: it changes the aa-transition consensus, and demonstrably nothing that is drawn.
+
+
 **With the labels now identical, every remaining section difference is the AD sentinel bug (1).**
 Proved by switching *only* the accumulation rule inside ae — `AE_SECTION_AD_SENTINEL=1` makes
 `section_aa_transitions` use AD's literal extents with the `NotSet` sentinel, changing nothing else —
