@@ -710,10 +710,21 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                 else:
                     warnings.append(f"draw-aa-transitions: method {method!r} not ported (only 'imported' and 'eu-20200915')")
             elif name == "hz-sections":
+                # AD HzSections::update_from_parameters (acmacs-tal cc/hz-sections.cc:44) reads
+                # `id`, `first`, `last`, `show` and `label` from every entry and merges them
+                # INTO the computed clade sections by id — a curated entry whose id is
+                # not among the computed ones ADDS a section, which is how a hand-split clade
+                # (`<clade>-1`, `<clade>-2`) survives. So pass every entry through, hidden ones
+                # included: `show` decides what is drawn, not what exists.
+                #
+                # AD deliberately does NOT read `L` here — the section letter is recomputed over
+                # the SHOWN sections in id order by HzSections::set_prefix (cc/hz-sections.cc:136),
+                # so a `.tal` carrying stale letters (or letters that count hidden sections) cannot
+                # push a wrong letter onto the marker column. `L` is therefore dropped on input.
                 schema["hz_sections"] = [
-                    {"first": s.get("first", ""), "last": s.get("last", ""),
-                     "label": s.get("label", ""), "prefix": s.get("L", "")}  # AD "L" = section letter
-                    for s in cmd.get("sections", []) if isinstance(s, dict) and s.get("show", True)
+                    {"id": str(s.get("id", "")), "first": s.get("first", ""), "last": s.get("last", ""),
+                     "label": s.get("label", ""), "show": bool(s.get("show", True))}
+                    for s in cmd.get("sections", []) if isinstance(s, dict)
                 ]
             elif name == "dash-bar-aa-at":
                 if "pos" in cmd:
