@@ -117,15 +117,21 @@ ae::tree::EdgeLength ae::tree::Tree::calculate_cumulative(bool force)
 
 // ----------------------------------------------------------------------
 
-void ae::tree::Tree::update_number_of_leaves_in_subtree()
+void ae::tree::Tree::update_number_of_leaves_in_subtree(shown_only_t shown_only)
 {
     // Timeit ti{"update_number_of_leaves_in_subtree"};
+    const bool skip_hidden{shown_only == shown_only_t::yes};
     for (auto ref : visit(tree_visiting::inodes_post)) {
         ref.visit(
-            [this](Inode* inode) {
+            [this, skip_hidden](Inode* inode) {
                 inode->number_of_leaves_ = 0;
-                for (const auto child_id : inode->children)
-                    inode->number_of_leaves_ += node(child_id).visit([](const auto* sub_node) { return sub_node->number_of_leaves(); });
+                for (const auto child_id : inode->children) {
+                    inode->number_of_leaves_ += node(child_id).visit([skip_hidden](const auto* sub_node) -> size_t {
+                        if (skip_hidden && !sub_node->shown)
+                            return 0;
+                        return sub_node->number_of_leaves();
+                    });
+                }
             },
             [](const Leaf*) {});
     }

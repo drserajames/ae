@@ -221,6 +221,13 @@ namespace ae::tal
         // Print the clade-section diagnostic and STOP, without drawing (tal-draw --clades-report).
         // The §10.5 tuning loop only needs the numbers, and a report tree takes minutes to draw.
         bool clades_report_only{false};
+        // Differential-verification hook (tal-draw --transitions-report=FILE): after the node `hide`
+        // mods and the aa-transition computation, dump one line per inode --
+        //     <first leaf name> TAB <last leaf name> TAB <shown leaves> TAB <labels>
+        // -- and STOP without drawing. The (first, last) leaf pair is the only key both engines
+        // share (AD's "vertical.horizontal" node_id has no ae equivalent), so this is the ae side
+        // of a per-inode diff against AD's `tal --first-last-leaves 1`. Empty = off.
+        std::string transitions_report_file{};
         double dash_column_width_ratio{0.0}; // dash-bar column pitch as fraction of drawable width; 0 => 0.022
         double right_margin_ratio{0.0};      // right page margin as fraction of width; 0 => same as the left (0.03).
                                             // Signature pages set this small so the rightmost column (the AA

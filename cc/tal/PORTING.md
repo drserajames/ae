@@ -796,10 +796,59 @@ hidden children) and with `reset_labels = false`. Sections matching AD exactly, 
 **B/Vic 0/10 → 10/10**, **H1 0/13 → 3/13**, **H3 4/9 → 4/9** (unchanged: that `.tal` is
 `imported`, so nothing is computed; its 5 diffs are the AD sentinel bug above).
 
-H1's residual 10/13 is a **third, separate** defect — per-inode differences in the eu-20200915
-port itself (`cc/tree/aa-transitions.cc`) on a 100k-leaf tree, a handful of positions per
-section rather than the wholly disjoint lists it produced before. It does not involve
-`section_aa_transitions`.
+**3. The third defect: hidden leaves in the eu-20200915 port — fixed 2026-09-15.** H1's residual
+was chased to two places, both about `hidden`, and both now match AD. Measured per-inode against
+`AD/bin/tal -s <round>.tal --first-last-leaves 1`, keyed on each inode's (first leaf, last leaf)
+pair, with AD and ae re-derived in the same run (ae side: `tal-draw --transitions-report=FILE`,
+added for this):
+
+| tree | inodes compared | identical label lists, before → after |
+|---|---:|---|
+| `h1.asr.after-2021` (99 595 shown leaves, 479 hide mods) | 17 721 | 17 719 → **17 721** |
+| `bvic.after-2021` | 6 422 | 6 422 → 6 422 |
+| `h3.asr.after-2021` (`imported`) | 13 430 | 13 430 → 13 430 |
+
+* **`hide` was not recursive** (`cc/tal/draw-tree.cc`). AD's `Node::hide()` (`AD cc/tree.cc:567`)
+  hides the matched node **and its whole subtree**, and `Tree::hide()` (`cc/tree.cc:594-599`) then
+  hides every inode left with no shown child. ae set `shown = false` on the matched node only. The
+  layout and the clade sections never noticed — both stop descending at a hidden inode, so the
+  vertical numbering is identical either way — but the consensus did:
+  `children_with_common_aa` (AD `number_of_children_with_the_same_common_aa`) reads a child inode's
+  counter **without** a hidden check, exactly as AD does, and in AD a hidden inode's counter is
+  empty because `update_common_aa` skipped all of its (also hidden) children. In ae it was fully
+  populated from descendants still marked shown, so a hidden outlier subtree could still "agree"
+  with its parent's consensus. On this round's H1 an `edge >= 0.01` mod hides 4 inodes covering 12
+  leaves; ae now hides those 12 too, and its shown-leaf counts match AD's exactly (4 mismatches → 0).
+  Ported as `propagate_hide()`, run after both node-mod walks.
+* **Stage 3 counted hidden leaves.** `Tree::update_number_of_leaves_in_subtree()` counts every leaf;
+  AD's `Node::number_leaves` is only ever the **shown** count (`Tree::set_first_last_next_node_id`,
+  `AD cc/tree.cc:755-763`, sums `if (!child.hidden)`). Stage 3's flip removal divides the flipping
+  descendants' leaves by the ancestor's and drops the ancestor's label when the ratio exceeds 0.5 %
+  within 3 levels, so counting hidden leaves there **removes labels AD keeps**. AD's own trace
+  (`"debug": true, "debug-pos": 528`) shows it: `keep flips_in_children 528 … leaves: 140 children: 2
+  flips: 1 leaves: 0 ( 0.0%) min_flip_distance:1` — the flipping child is an all-hidden 3-leaf inode
+  whose imported label still takes part in stage 3, and AD scores it 0 leaves. ae scored it 3/140 =
+  2.1 %, dropped the ancestor's label, and the substitution reappeared one level down. Fixed with
+  `update_number_of_leaves_in_subtree(shown_only_t::yes)` from the eu-20200915 driver; the default
+  stays all-leaves because the tree exporter writes these counts out as the file's own `"L"`.
+
+Regression test: the `tree-aa-hidden.json` case in `cc/tal/test/test-draw-tree.sh` (invented `J`/`O`
+residues), which fails if either half is reverted.
+
+**With the labels now identical, every remaining section difference is the AD sentinel bug (1).**
+Proved by switching *only* the accumulation rule inside ae — `AE_SECTION_AD_SENTINEL=1` makes
+`section_aa_transitions` use AD's literal extents with the `NotSet` sentinel, changing nothing else —
+and re-deriving both sides in the same run:
+
+| tree | ae's shown-extent rule | ae with AD's literal-extent rule |
+|---|---:|---:|
+| h1   | 3/13  | **13/13** |
+| bvic | 10/10 | 10/10 |
+| h3   | 4/9   | **9/9** |
+
+So h1's 10 differing sections and h3's 5 are AD's `HzSections::set_aa_transitions` sentinel bug,
+character for character — not port defects, and deliberately not reproduced. The switch exists only
+to re-derive that claim; it prints a warning and is off by default.
 
 ### Reported from the DRAWING path, not `compute_hz_sections`
 

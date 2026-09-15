@@ -1,0 +1,15 @@
+{"_": "synthetic tree for the hidden-leaf cases of test-draw-tree.sh. Residues are J and O, which are NOT amino-acid codes, so nothing here is WHO data. Every leaf carries the same sequence, so nothing is computed from the sequences; the two inode 'A' labels are the imported ones a .asr tjz would carry, and position 13 is the one under test. The inode with edge 9 is picked out by an edge_min hide mod: acmacs-tal hides its whole subtree (Node::hide) and then counts no leaves for it (Tree::set_first_last_next_node_id sums only non-hidden children), so its imported O13J flips its parent's J13O over 0 leaves and the parent keeps the label. Counting the hidden leaves instead puts the flip over the 0.5% threshold and the parent's label is dropped.",
+ "  version": "phylogenetic-tree-v3",
+ "tree": {"t": [
+   {"l": 1, "n": "L1", "a": "JJJJJJJJJJJJJJJ"},
+   {"l": 1, "n": "L2", "a": "JJJJJJJJJJJJJJJ"},
+   {"l": 1, "A": ["J13O"], "t": [
+     {"l": 9, "A": ["O13J"], "t": [
+       {"l": 1, "n": "H1", "a": "JJJJJJJJJJJJJJJ"},
+       {"l": 1, "n": "H2", "a": "JJJJJJJJJJJJJJJ"}
+     ]},
+     {"l": 1, "n": "L3", "a": "JJJJJJJJJJJJJJJ"},
+     {"l": 1, "n": "L4", "a": "JJJJJJJJJJJJJJJ"},
+     {"l": 1, "n": "L5", "a": "JJJJJJJJJJJJJJJ"}
+   ]}
+ ]}}
