@@ -653,6 +653,151 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         }
     }
 
+    // --- hz sections: the computed clade bands with the `.tal`'s CURATED `hz-sections` entries
+    //     merged in. Port of AD HzSections::update_from_parameters / sort / detect_intersect /
+    //     set_prefix (acmacs-tal cc/hz-sections.cc:44 / :93 / :112 / :136).
+    //
+    // AD keeps ONE section list. Clades::make_clades fills it from the computed clade bands
+    // (HzSections::add_section), then update_from_parameters walks the `.tal`'s static `sections`
+    // array and, for each entry, does find_add_section BY ID: an entry whose id is already there
+    // overrides that section's extents, and an entry whose id is NOT there ADDS a section. That
+    // second half is how a hand-split clade survives — the curator writes `<clade>-1`, `<clade>-2`
+    // beside the computed `<clade>-0` and AD draws three bands where the tree yields one run.
+    //
+    // ae had no equivalent: the section set was built from `clade_plan` alone and the static block
+    // reached only `params.hz_sections`, where it drove the marker column and the time-series
+    // separators but never the sections themselves. The two therefore disagreed with each other,
+    // and with AD, on any tree whose `.tal` curates splits. Measured on 2026-0223 (whose `.tal`s
+    // RUN the `hz` sub-program; 2026-0921's define it and never invoke it, which is why only the
+    // older round exposes this): ae reported 14/20/11 sections against AD's 14/21/15.
+    struct HzSectionResolved
+    {
+        std::string id, prefix, label, first_name, last_name, aa_transitions;
+        long first_v{0}, last_v{0};
+        bool shown{true}, intersect{false};
+        std::size_t size{0};
+    };
+    std::vector<HzSectionResolved> hz_set;
+    for (const CladePlan& plan : clade_plan) {
+        const Clade& clade = clade_sections[plan.rank];
+        const auto style_it = params.clade_styles.find(clade.name);
+        const CladeStyle* style = style_it != params.clade_styles.end() ? &style_it->second : nullptr;
+        const std::string display = (style && !style->display_name.empty()) ? style->display_name : clade.name;
+        for (std::size_t bno{0}; bno < plan.bands.size(); ++bno) {
+            const CladeBand& band = plan.bands[bno];
+            hz_set.push_back(HzSectionResolved{.id = fmt::format("{}-{}", clade.name, bno),
+                                               .label = display,
+                                               .first_name = band.first_name,
+                                               .last_name = band.last_name,
+                                               .first_v = band.first_v,
+                                               .last_v = band.last_v,
+                                               .size = band.size});
+        }
+    }
+
+    if (!params.hz_sections.empty()) {
+        // seq_id -> vertical, the same numbering cc/tal/clades.cc uses: a counter over SHOWN
+        // leaves in tree order, which is exactly the index into layout.leaves.
+        std::unordered_map<std::string_view, long> vertical;
+        vertical.reserve(layout.leaves.size());
+        for (std::size_t i{0}; i < layout.leaves.size(); ++i)
+            vertical.emplace(layout.leaves[i].name, static_cast<long>(i));
+
+        // AD Tree::leaf_position::first (cc/tree.cc:734-741): a node that is its parent's FIRST
+        // child, where the parent has more than one child. Taken from the RAW child order, hidden
+        // children included, as AD's pre-order lambda does.
+        std::unordered_set<std::string_view> leaf_pos_first;
+        const std::function<void(node_index_t)> mark_first = [&](node_index_t index) {
+            const Inode& in = tree.inode(index);
+            for (std::size_t ch{0}; ch < in.children.size(); ++ch) {
+                const node_index_t child = in.children[ch];
+                if (ch == 0 && in.children.size() > 1 && is_leaf(child))
+                    leaf_pos_first.emplace(tree.leaf(child).name);
+                if (!is_leaf(child))
+                    mark_first(child);
+            }
+        };
+        mark_first(Tree::root_index());
+
+        for (const HzSection& curated : params.hz_sections) {
+            if (curated.id.empty())
+                continue; // AD merges on the id; an entry without one addresses nothing
+            auto found = std::find_if(std::begin(hz_set), std::end(hz_set), [&curated](const HzSectionResolved& s) { return s.id == curated.id; });
+            if (found == std::end(hz_set)) {
+                hz_set.push_back(HzSectionResolved{.id = curated.id});
+                found = std::prev(std::end(hz_set));
+            }
+            if (!curated.first.empty()) {
+                if (const auto it = vertical.find(curated.first); it != vertical.end()) {
+                    found->first_name = curated.first;
+                    found->first_v = it->second;
+                }
+                // else: the named leaf is hidden or absent. AD leaves node_id.vertical at the
+                // node_id_t::NotSet sentinel and prints 4294967295; ae keeps the computed extent
+                // instead of propagating a sentinel into a coordinate. See PORTING.md.
+            }
+            if (!curated.last.empty()) {
+                if (const auto it = vertical.find(curated.last); it != vertical.end()) {
+                    long last_v = it->second;
+                    std::string last_name = curated.last;
+                    // AD hz-sections.cc:62 — when the curated `last` lands on a leaf_position::first
+                    // node, step back to the previous shown leaf. That is what lets a curator close
+                    // a section by naming the FIRST leaf of the section below it.
+                    if (last_v > 0 && leaf_pos_first.contains(curated.last)) {
+                        --last_v;
+                        last_name = layout.leaves[static_cast<std::size_t>(last_v)].name;
+                    }
+                    found->last_name = last_name;
+                    found->last_v = last_v;
+                }
+            }
+            found->shown = curated.shown;
+            if (!curated.label.empty())
+                found->label = curated.label;
+            if (found->last_v >= found->first_v)
+                found->size = static_cast<std::size_t>(found->last_v - found->first_v + 1);
+        }
+    }
+
+    // AD HzSections::sort() — top-to-bottom by the first leaf.
+    std::sort(std::begin(hz_set), std::end(hz_set), [](const HzSectionResolved& s1, const HzSectionResolved& s2) { return s1.first_v < s2.first_v; });
+    // AD HzSections::detect_intersect() — SHOWN sections only (a hidden section overlapping a
+    // shown one is not a conflict: it is not drawn).
+    std::vector<std::pair<std::string, std::string>> hz_intersects;
+    for (auto sect = std::begin(hz_set); sect != std::end(hz_set); ++sect) {
+        if (!sect->shown)
+            continue;
+        for (auto other = std::next(sect); other != std::end(hz_set); ++other) {
+            if (other->shown && sect->first_v <= other->last_v && other->first_v <= sect->last_v) {
+                hz_intersects.emplace_back(sect->id, other->id);
+                sect->intersect = other->intersect = true;
+            }
+        }
+    }
+    // AD HzSections::set_prefix() — A, B, C… over the SHOWN sections in order; a hidden section
+    // takes no letter and does not consume one. ae previously took the letter from the `.tal`'s
+    // own "L" field, which AD never reads back, so a `.tal` whose letters counted hidden sections
+    // put the wrong letter on every bracket (2026-0223 bvic: first shown section lettered "C"
+    // where AD draws "A").
+    {
+        char letter{0};
+        for (HzSectionResolved& section : hz_set) {
+            if (section.shown)
+                section.prefix.assign(1, static_cast<char>('A' + (letter++ % 26)));
+            else
+                section.prefix.clear();
+        }
+    }
+    {
+        std::vector<std::pair<std::size_t, std::size_t>> spans;
+        spans.reserve(hz_set.size());
+        for (const HzSectionResolved& section : hz_set)
+            spans.emplace_back(static_cast<std::size_t>(std::max(0L, section.first_v)), static_cast<std::size_t>(std::max(0L, section.last_v)));
+        const std::vector<std::string> transitions = section_aa_transitions(tree, spans);
+        for (std::size_t no{0}; no < hz_set.size(); ++no)
+            hz_set[no].aa_transitions = transitions[no];
+    }
+
     // --- clade-section diagnostic: AD Clades::report_clades + HzSections::report/detect_intersect ---
     //
     // Ported from acmacs-tal cc/clades.cc:221 and cc/hz-sections.cc:112/196. Reported from the
@@ -730,69 +875,27 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         }
         fmt::format_to(app, ">>> ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n");
 
-        // ---- AD Clades::make_clades -> HzSections::add_section, then sort / detect_intersect /
-        //      set_prefix / set_aa_transitions (cc/hz-sections.cc) ----
-        struct ReportSection
-        {
-            std::string id, prefix, label, first_name, last_name, aa_transitions;
-            long first_v{0}, last_v{0};
-            bool intersect{false};
-            std::size_t size{0};
-        };
-        std::vector<ReportSection> sections;
-        for (const CladePlan& plan : clade_plan) {
-            const Clade& clade = clade_sections[plan.rank];
-            const auto style_it = params.clade_styles.find(clade.name);
-            const CladeStyle* style = style_it != params.clade_styles.end() ? &style_it->second : nullptr;
-            const std::string display = (style && !style->display_name.empty()) ? style->display_name : clade.name;
-            for (std::size_t bno{0}; bno < plan.bands.size(); ++bno) {
-                const CladeBand& band = plan.bands[bno];
-                sections.push_back(ReportSection{.id = fmt::format("{}-{}", clade.name, bno),
-                                                 .label = display,
-                                                 .first_name = band.first_name,
-                                                 .last_name = band.last_name,
-                                                 .first_v = band.first_v,
-                                                 .last_v = band.last_v,
-                                                 .size = band.size});
-            }
-        }
-        std::sort(std::begin(sections), std::end(sections), [](const ReportSection& s1, const ReportSection& s2) { return s1.first_v < s2.first_v; });
-        for (auto sect = std::begin(sections); sect != std::end(sections); ++sect) {
-            for (auto other = std::next(sect); other != std::end(sections); ++other) {
-                if (sect->first_v <= other->last_v && other->first_v <= sect->last_v) {
-                    // AD_WARNING in AD; a parent clade containing a child is expected, siblings overlapping is not.
-                    fmt::format_to(app, ">> WARNING: HZ Sections \"{}\" and \"{}\" intersect\n", sect->id, other->id);
-                    sect->intersect = other->intersect = true;
-                }
-            }
-        }
-        for (std::size_t no{0}; no < sections.size(); ++no)
-            sections[no].prefix.assign(1, static_cast<char>('A' + (no % 26)));
-        {
-            std::vector<std::pair<std::size_t, std::size_t>> spans;
-            spans.reserve(sections.size());
-            for (const ReportSection& section : sections)
-                spans.emplace_back(static_cast<std::size_t>(section.first_v), static_cast<std::size_t>(section.last_v));
-            const std::vector<std::string> transitions = section_aa_transitions(tree, spans);
-            for (std::size_t no{0}; no < sections.size(); ++no)
-                sections[no].aa_transitions = transitions[no];
-        }
+        // ---- AD HzSections::report over the merged section set built above ----
+        // AD_WARNING in AD; a parent clade containing a child is expected, siblings overlapping is not.
+        for (const auto& [one, other] : hz_intersects)
+            fmt::format_to(app, ">> WARNING: HZ Sections \"{}\" and \"{}\" intersect\n", one, other);
+        const std::vector<HzSectionResolved>& sections = hz_set;
 
         // AD HzSections::report: a `[ … ]` block in the `.tal`'s own `hz` "sections" array shape,
         // column-aligned, so it can be pasted straight back into a `.tal`.
         std::size_t w_id{0}, w_first{0}, w_last{0}, w_label{0}, w_subs{0};
-        for (const ReportSection& section : sections) {
+        for (const HzSectionResolved& section : sections) {
             w_id = std::max(w_id, section.id.size());
             w_first = std::max(w_first, section.first_name.size());
             w_last = std::max(w_last, section.last_name.size());
             w_label = std::max(w_label, section.label.size());
             w_subs = std::max(w_subs, section.aa_transitions.size());
         }
-        const bool any_intersect = std::any_of(std::begin(sections), std::end(sections), [](const ReportSection& section) { return section.intersect; });
+        const bool any_intersect = std::any_of(std::begin(sections), std::end(sections), [](const HzSectionResolved& section) { return section.intersect; });
         fmt::format_to(app, ">>> HZ sections ({})\n[\n", sections.size());
-        for (const ReportSection& section : sections)
-            fmt::format_to(app, "    {{\"show\": true,  \"id\": {:{}s} \"L\": \"{:1s}\", \"V\": [{:5d}, {:5d}], \"N\": {:5d}, {}\"first\": {:{}s} \"last\": {:{}s} \"label\": {:{}s} \"aa_transitions\": {:{}s} \"All transitions\": \"{}\"}},\n",
-                           fmt::format("\"{}\",", section.id), w_id + 3, section.prefix, section.first_v, section.last_v, section.size,
+        for (const HzSectionResolved& section : sections)
+            fmt::format_to(app, "    {{\"show\": {:6s} \"id\": {:{}s} \"L\": \"{:1s}\", \"V\": [{:5d}, {:5d}], \"N\": {:5d}, {}\"first\": {:{}s} \"last\": {:{}s} \"label\": {:{}s} \"aa_transitions\": {:{}s} \"All transitions\": \"{}\"}},\n",
+                           fmt::format("{},", section.shown), fmt::format("\"{}\",", section.id), w_id + 3, section.prefix, section.first_v, section.last_v, section.size,
                            section.intersect ? "\"INTRSCT\":1, " : (any_intersect ? "             " : ""), fmt::format("\"{}\",", section.first_name), w_first + 3,
                            fmt::format("\"{}\",", section.last_name), w_last + 3, fmt::format("\"{}\",", section.label), w_label + 3,
                            fmt::format("\"{}\",", section.aa_transitions), w_subs + 3, section.aa_transitions);
@@ -1391,16 +1494,22 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // hz-section separators across the matrix (AD HzSections::add_separators_to_time_series:
         // a grey rule above each section's first leaf and below its last leaf), spanning the
         // time-series matrix only.
+        // AD add_separators_to_time_series iterates the MERGED section list (shown only), not the
+        // `.tal` entries — so a curated split gets its own pair of rules and a hidden section none.
+        // The outer guard stays on params.hz_sections: a `.tal` that never runs an `hz-sections`
+        // command draws no separators at all, exactly as before.
         if (!params.hz_sections.empty()) {
             std::unordered_map<std::string, double> name_y;
             name_y.reserve(layout.leaves.size());
             for (const auto& ln : layout.leaves)
                 name_y.emplace(ln.name, ln.y);
             const double hz_x1 = x_ts0 + ts_w;
-            for (const auto& section : params.hz_sections) {
-                if (const auto it = name_y.find(section.first); it != name_y.end())
+            for (const auto& section : hz_set) {
+                if (!section.shown)
+                    continue;
+                if (const auto it = name_y.find(section.first_name); it != name_y.end())
                     pdf.line(x_ts0, dev_y(it->second - 0.5), hz_x1, dev_y(it->second - 0.5), GREY, 0.4);
-                if (const auto it = name_y.find(section.last); it != name_y.end())
+                if (const auto it = name_y.find(section.last_name); it != name_y.end())
                     pdf.line(x_ts0, dev_y(it->second + 0.5), hz_x1, dev_y(it->second + 0.5), GREY, 0.4);
             }
         }
@@ -1644,8 +1753,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         const double x_spine = x_hzmark0 + strip_w;         // marker strip right edge = spine / arm RIGHT end
         const double marker_lw = 1.0;                       // AD hz-section-marker line_width
         const double label_fs  = 2.5 * strip_w;             // AD label_size × strip width (≈0.0125·treeH)
-        for (const auto& section : params.hz_sections) {
-            const auto itf = name_y.find(section.first), itl = name_y.find(section.last);
+        for (const auto& section : hz_set) {
+            if (!section.shown)
+                continue;
+            const auto itf = name_y.find(section.first_name), itl = name_y.find(section.last_name);
             if (itf == name_y.end() || itl == name_y.end())
                 continue;
             double y_top = dev_y(itf->second - 0.5), y_bot = dev_y(itl->second + 0.5); // gap-lines above/below

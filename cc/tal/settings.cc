@@ -172,8 +172,8 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
             const auto& entry = array[i];
             if (!entry.is_object())
                 continue;
-            params.hz_sections.push_back(HzSection{.first = get_string(entry["first"]), .last = get_string(entry["last"]),
-                                                   .label = get_string(entry["label"]), .prefix = get_string(entry["prefix"])});
+            params.hz_sections.push_back(HzSection{.id = get_string(entry["id"]), .first = get_string(entry["first"]), .last = get_string(entry["last"]),
+                                                   .label = get_string(entry["label"]), .shown = get_bool(entry["show"], true)});
         }
     }
     params.hz_section_labels = get_bool(config["hz_section_labels"]);

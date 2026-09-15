@@ -175,10 +175,17 @@ namespace ae::tal
     // column, with a separator line across the tree at the section's top boundary.
     struct HzSection
     {
+        std::string id{};      // AD hz_section_id_t, "{clade}-{section no}" — the key the curated
+                               // entry is merged onto (AD HzSections::update_from_parameters ->
+                               // find_add_section, acmacs-tal cc/hz-sections.cc:49)
         std::string first{};
         std::string last{};
         std::string label{};
-        std::string prefix{};  // section letter (AD "L": A, B, C…) drawn in the hz-section-marker column
+        bool shown{true};      // AD HzSection::shown — a hidden section still EXISTS (it is reported
+                               // and it takes no letter); it is simply not drawn
+        // AD's curated `aa_transitions` (HzSection::label_aa_transitions) is deliberately NOT read:
+        // the curated-vs-computed section field is a separate design question Sarah deferred on
+        // 15 Sep 2026 — see cc/tal/PORTING.md §"Section-level string parity is NOT a meaningful measure".
     };
 
     struct TreeDrawParameters
