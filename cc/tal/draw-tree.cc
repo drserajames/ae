@@ -865,15 +865,28 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // so no `.taleg` is written and stdout is the only clean capture there.
     // `>>`-prefixed lines are the banner/warning shape; blank lines separate blocks, so both go to
     // stderr and stdout carries only the pasteable JSON. The `.taleg` file keeps the whole block.
-    const auto emit_diag = [&taleg_path, &taleg_started](const std::string& report) {
-        for (std::size_t pos{0}; pos < report.size();) {
-            const auto eol = report.find('\n', pos);
-            const auto end = eol == std::string::npos ? report.size() : eol + 1;
-            const std::string_view line{report.data() + pos, end - pos};
-            fmt::print(line.starts_with(">>") || line == "\n" ? stderr : stdout, "{}", line);
-            pos = end;
+    //
+    // The HZ block is the exception, and it is AD's exception, not ours: AD splits its clade and
+    // aa-transition reports but prints the hz block WHOLLY to stderr, brackets included
+    // (AD/sources/acmacs-tal/cc/hz-sections.cc:212 and :228-230 are all `fmt::print(stderr, …)`,
+    // where clades.cc:224 and draw-aa-transitions.cc:759 use AD_INFO for the banner only). Sarah
+    // ruled on 2026-09-15 that ae matches AD here rather than applying the split uniformly, so
+    // `stderr_only` is passed for that block and nothing else.
+    enum class diag_stream { split, stderr_only };
+    const auto emit_diag = [&taleg_path, &taleg_started](const std::string& report, diag_stream mode = diag_stream::split) {
+        if (mode == diag_stream::stderr_only) {
+            fmt::print(stderr, "{}", report);
         }
-        std::fflush(stdout);
+        else {
+            for (std::size_t pos{0}; pos < report.size();) {
+                const auto eol = report.find('\n', pos);
+                const auto end = eol == std::string::npos ? report.size() : eol + 1;
+                const std::string_view line{report.data() + pos, end - pos};
+                fmt::print(line.starts_with(">>") || line == "\n" ? stderr : stdout, "{}", line);
+                pos = end;
+            }
+            std::fflush(stdout);
+        }
         if (taleg_path.empty())
             return;
         if (std::ofstream out{taleg_path, taleg_started ? std::ios::app : std::ios::trunc}; out) {
@@ -887,6 +900,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     if (params.clades_report && !clade_plan.empty()) {
         fmt::memory_buffer rep;
         const auto app = std::back_inserter(rep);
+        // The HZ block goes to its own buffer so it can be emitted stderr-only, as AD does.
+        fmt::memory_buffer hz_rep;
+        const auto hz_app = std::back_inserter(hz_rep);
 
         // ---- AD Clades::report_clades ----
         fmt::format_to(app, ">>> Clades ({}) vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n", clade_plan.size());
@@ -924,7 +940,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // ---- AD HzSections::report over the merged section set built above ----
         // AD_WARNING in AD; a parent clade containing a child is expected, siblings overlapping is not.
         for (const auto& [one, other] : hz_intersects)
-            fmt::format_to(app, ">> WARNING: HZ Sections \"{}\" and \"{}\" intersect\n", one, other);
+            fmt::format_to(hz_app, ">> WARNING: HZ Sections \"{}\" and \"{}\" intersect\n", one, other);
         const std::vector<HzSectionResolved>& sections = hz_set;
 
         // AD HzSections::report: a `[ … ]` block in the `.tal`'s own `hz` "sections" array shape,
@@ -938,18 +954,19 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             w_subs = std::max(w_subs, section.aa_transitions.size());
         }
         const bool any_intersect = std::any_of(std::begin(sections), std::end(sections), [](const HzSectionResolved& section) { return section.intersect; });
-        fmt::format_to(app, ">>> HZ sections ({})\n[\n", sections.size());
+        fmt::format_to(hz_app, ">>> HZ sections ({})\n[\n", sections.size());
         for (const HzSectionResolved& section : sections)
-            fmt::format_to(app, "    {{\"show\": {:6s} \"id\": {:{}s} \"L\": \"{:1s}\", \"V\": [{:5d}, {:5d}], \"N\": {:5d}, {}\"first\": {:{}s} \"last\": {:{}s} \"label\": {:{}s} \"aa_transitions\": {:{}s} \"All transitions\": \"{}\"}},\n",
+            fmt::format_to(hz_app, "    {{\"show\": {:6s} \"id\": {:{}s} \"L\": \"{:1s}\", \"V\": [{:5d}, {:5d}], \"N\": {:5d}, {}\"first\": {:{}s} \"last\": {:{}s} \"label\": {:{}s} \"aa_transitions\": {:{}s} \"All transitions\": \"{}\"}},\n",
                            fmt::format("{},", section.shown), fmt::format("\"{}\",", section.id), w_id + 3, section.prefix, section.first_v, section.last_v, section.size,
                            section.intersect ? "\"INTRSCT\":1, " : (any_intersect ? "             " : ""), fmt::format("\"{}\",", section.first_name), w_first + 3,
                            fmt::format("\"{}\",", section.last_name), w_last + 3, fmt::format("\"{}\",", section.label), w_label + 3,
                            fmt::format("\"{}\",", section.aa_transitions), w_subs + 3, section.aa_transitions);
-        fmt::format_to(app, "]\n\n");
+        fmt::format_to(hz_app, "]\n\n");
 
         // …and to <output>.taleg, which RUNNING-THE-REPORT.md §10.5 documents reading instead of
         // watching the terminal.
         emit_diag(fmt::to_string(rep));
+        emit_diag(fmt::to_string(hz_rep), diag_stream::stderr_only);
     }
 
     // --clades-report: the diagnostic above is all the caller wanted. Return before make_surface,
