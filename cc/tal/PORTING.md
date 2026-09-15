@@ -984,6 +984,118 @@ Measured on `2026-0921-ssm` (`tree/bvic.after-2021.tal`, `tree/h1.after-2021.tal
   bands at all (one contiguous run); `D.5` and `C.1.9` have strays that both ae *and* AD drop,
   since a full-size band survives. Under either implementation these three yield one section.
 
+## Curated `hz-sections` merged into the computed set — ported 2026-09-15
+
+Port of AD `HzSections::update_from_parameters` (`acmacs-tal/cc/hz-sections.cc:44`), with the
+`sort` / `detect_intersect` / `set_prefix` that follow it (`:93` / `:112` / `:136`). ae had none
+of it, and the gap was invisible on the current round.
+
+**What AD does.** It keeps ONE section list. `Clades::make_clades` fills it from the computed
+clade bands (`HzSections::add_section`); `update_from_parameters` then walks the `.tal`'s static
+`hz` `sections` array and merges each entry **by id** via `find_add_section`:
+
+* an id already in the list **overrides** that section's `first` / `last` / `show` / `label`;
+* an id **not** in the list **adds a section**.
+
+The second half is the whole point. A curator writes `<clade>-1`, `<clade>-2` beside the computed
+`<clade>-0` and AD draws three bands where the tree yields one contiguous run. AD also applies a
+step-back: when the curated `last` resolves to a `leaf_position::first` node it moves to that
+node's previous shown leaf (`:62`), which is what lets a curator close a section by naming the
+first leaf of the section *below* it. And AD never reads the `.tal`'s own `"L"` back —
+`set_prefix` recomputes A, B, C… over the **shown** sections only, so a hidden section takes no
+letter and does not consume one.
+
+**What ae did.** The section set came from `clade_plan` alone (`cc/tal/draw-tree.cc`), and the
+static block reached only `params.hz_sections` (`cc/tal/settings.cc`), where it drove the marker
+column and the time-series separators and nothing else. `settings_v3` additionally dropped every
+`show: false` entry and passed the `.tal`'s `"L"` through as the drawn letter. So the two
+disagreed with each other, and with AD, on any tree whose `.tal` curates splits.
+
+**Why only the Feb-2026 round exposes it — measured, not assumed.** Both rounds' `.tal`s *define*
+an `hz` sub-program, but only the Feb ones **invoke** it in their `tal` program, and
+`settings_v3` correctly fills `hz_sections` only from a command that actually runs. Entries
+reaching the schema: **8 / 6 / 10** (2026-0223 bvic / h1 / h3) versus **0 / 0 / 0** (2026-0921).
+Anyone testing only against the current round measures agreement and concludes there is nothing
+to fix.
+
+### Measured against AD, both sides re-derived in the same session
+
+`AD/bin/tal -s <tal> --first-last-leaves 1 <tjz>` against
+`tal-draw --settings=<schema> --clades-report <tjz>`, compared on `(id, first, last)` in order.
+
+| tree | sections AD / ae | `V` agreement before → after | ids identical | `show` | letters |
+|---|---:|---:|:-:|---:|---:|
+| bvic | 14 / 14 | 12/14 → **14/14** | yes | 14/14 | 14/14 |
+| h1   | 21 / 21 | 9/21 → **19/21** | yes | 21/21 | 21/21 |
+| h3   | 15 / 15 | 7/15 → **15/15** | yes | 15/15 | 15/15 |
+
+Before the fix ae reported **14 / 20 / 11** sections against AD's 14 / 21 / 15, missing
+`D.3.1-1` on h1 and `H.2-1`, `H.2-2`, `H.2.2-0`, `J.2.4-1` on h3 — exactly the curated-only ids.
+
+**h1's two residuals are AD's sentinel, not a gap.** `C.1.7-0` and `C.1.7.2-0` name the *same*
+curated `last` leaf, and that leaf is present in the `.tjz` but hidden by a node mod. AD leaves
+`node_id.vertical` at `node_id_t::NotSet` and prints `V [10101, 4294967295]` / `[11220,
+4294967295]`; ae keeps the computed extent rather than propagating a sentinel into a coordinate.
+Both sections are `show: false`, so neither is drawn either way. Same class as the accepted
+divergence in §1 — do not reproduce it.
+
+**No regression on the live round.** 2026-0921 stays at full parity: **10/10, 13/13, 11/11**,
+ids identical, `show` and letters likewise. Note h3 is 11 because `tree/h3.asr.after-2021.tjz`
+was re-claded at **09:47:55 on 15 Sep 2026** (J.2.4.2 added, K split); it read 9/9 against the
+tree as it stood at 09:16. **`*.tjz` is gitignored, so `git status` is not a witness to a tree
+rebuild — quote the tree's mtime beside any live-round number.** Both sides above were
+re-derived against the 09:47 file.
+
+### It changes the section set, and provably not what these trees draw
+
+Pixel diff, previous round, `pdftoppm -png -scale-to 4000` then `magick compare -metric AE`
+(the **parenthesised** number; the parser was validated against a copy with a known 100×100
+block, which reports exactly 10000):
+
+| tree | raster | differing px, strict | at `-fuzz 30%` |
+|---|---|---:|---:|
+| bvic | 2527×4000 (10.1 Mpx) | **0** | **0** |
+| h1   | 3178×4000 (12.7 Mpx) | **0** | **0** |
+| h3   | 2595×4000 (10.4 Mpx) | **0** | **0** |
+
+That zero is a result, not an absence of one, and the mechanism is worth keeping:
+
+* **These report `.tal`s contain no `hz-section-marker` element at all** (grep: 0 occurrences),
+  so the bracket + letter column is never drawn on a *tree* PDF. The letter change is real but
+  lands on **signature pages**, which are built through `signature_page.py` → `sections_for` →
+  `compute_hz_sections`, a path this work deliberately leaves alone.
+* The only drawn consumer here is the grey hz separators across the time-series matrix. Their
+  `(first, last)` source set is **identical** before and after on h1 and h3; on bvic exactly one
+  section's `last` steps back by one leaf, which over 38 084 leaves at 4000 px is ≈ **0.105 px**
+  and rasterises to the same pixels.
+
+### The signature-page list is NOT curated, and must not be merged
+
+Two callers fill `params.hz_sections` and they mean different things by it. `settings_v3` passes
+a curated list, every entry carrying an `id`. `py/ae/tal/signature_page.py` passes the sections
+the page is actually built from, already lettered in tree order and with **no ids**; that list is
+authoritative for the page and is drawn as given. The merge is therefore gated on entries
+carrying ids, and `prefix` is still read for the caller that assigns it. The first cut of this
+work read neither, and would have dropped the sig-page bracket letters and swapped the page's
+section list for the computed clade bands — caught by `cc/tal/test/test-sigpage-hz-marker.py`
+before it left the branch.
+
+The curated `aa_transitions` override (AD `HzSection::label_aa_transitions`) is **deliberately
+not read** — that is the curated-vs-computed field question Sarah deferred on 15 Sep 2026; see
+the note at the end of §1.
+
+### Regression test
+
+`cc/tal/test/draw-settings-hz-curated.json` + four assertions in `cc/tal/test/test-draw-tree.sh`,
+on synthetic data only (invented leaves A–E, clades X/Y). One assertion per separable behaviour,
+each with its own failure message: a curated id that is not a computed section is **added**; a
+curated `last` landing on a first-child leaf **steps back** one leaf; a curated hidden section is
+still **reported**; and it consumes **no letter**. Verified by reverting the four source files to
+the merge base and rebuilding: the case fails with *"curated hz-sections not merged -- expected 3
+sections, got: >>> HZ sections (2)"*, and the reverted report independently shows all four
+behaviours absent (2 sections, `Y-0` ending at D not C, `X-0` printing `"show": true` and
+consuming letter A).
+
 ## aa-transition label-position dump (`>>> AA transition labels` / `.taleg`) — ported 2026-09-14
 
 Port of AD `DrawAATransitions::report` (acmacs-tal `cc/draw-aa-transitions.cc:756`), the third
