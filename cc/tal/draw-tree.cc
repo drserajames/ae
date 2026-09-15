@@ -246,6 +246,57 @@ namespace ae::tal
         }
     }
 
+    // AD `Node::hide()` (acmacs-tal cc/tree.cc:567) hides a matched node AND ITS WHOLE SUBTREE,
+    // and `Tree::hide()` (cc/tree.cc:594-599) then hides every inode left with no shown child.
+    // ae used to set `shown = false` on the matched node only. The layout and the clade sections
+    // never noticed (both stop descending at a hidden inode, so the vertical numbering is the
+    // same either way), but the aa-transition consensus DID: `children_with_common_aa`
+    // (cc/tree/aa-transitions.cc, AD `number_of_children_with_the_same_common_aa`) reads a
+    // child inode's counter WITHOUT a hidden check, exactly as AD does. In AD a hidden inode's
+    // counter is empty, because `update_common_aa` skipped all of its (also hidden) children;
+    // in ae it was fully populated from descendants that were still marked shown. So a hidden
+    // outlier subtree could still "agree" with its parent's consensus, flipping
+    // `is_common_with_tolerance` / `is_common_with_tolerance_for_child` and moving labels.
+    // On this round's H1 config 4 inodes are hidden by an `edge >= 0.01` mod, covering 12 leaves.
+    static void propagate_hide(ae::tree::Tree& tree)
+    {
+        using namespace ae::tree;
+        // down: everything under a hidden node is hidden (AD Node::hide)
+        struct Frame { node_index_t index; std::size_t cursor; bool hidden; };
+        std::vector<Frame> stack;
+        stack.push_back({Tree::root_index(), 0, !tree.root().shown});
+        while (!stack.empty()) {
+            Frame& frame = stack.back();
+            const Inode& inode = tree.inode(frame.index);
+            if (frame.cursor < inode.children.size()) {
+                const node_index_t child = inode.children[frame.cursor++];
+                const bool hidden = frame.hidden;
+                if (is_leaf(child)) {
+                    if (hidden)
+                        tree.leaf(child).shown = false;
+                }
+                else {
+                    Inode& child_inode = tree.inode(child);
+                    if (hidden)
+                        child_inode.shown = false;
+                    stack.push_back({child, 0, !child_inode.shown});
+                }
+            }
+            else {
+                stack.pop_back();
+            }
+        }
+        // up: an inode with no shown child is hidden (AD Tree::hide)
+        for (auto ref : tree.visit(tree_visiting::inodes_post)) {
+            Inode& inode = *ref.inode();
+            bool any{false};
+            for (const auto child : inode.children)
+                any = any || tree.node(child).visit([](const auto* node) { return node->shown; });
+            if (!any)
+                inode.shown = false;
+        }
+    }
+
     // Apply ONLY the `hide` part of the settings' node mods, marking hidden nodes
     // `shown = false` exactly as the drawing path does before it computes the layout.
     //
@@ -293,7 +344,61 @@ namespace ae::tal
                 stack.pop_back();
             }
         }
+        propagate_hide(tree);
     }
+
+// Per-inode aa-transition dump for differential verification against AD's
+// `tal --first-last-leaves 1` (acmacs-tal `Tree::report_first_last_leaves`, cc/tree.cc:775).
+// One TAB-separated line per inode in pre-order:
+//     <first descendant leaf name> <last descendant leaf name> <shown leaves> <labels>
+// `labels` is AD's `AA_Transitions::display()`: space-joined "{left}{pos}{right}", entries with
+// an empty left or right omitted. The (first, last) pair keys the diff, since AD's node ids
+// ("vertical.horizontal") have no ae equivalent. Leaf counts are the SHOWN ones, as AD's
+// `Node::number_leaves` is (acmacs-tal `Tree::set_first_last_next_node_id`, cc/tree.cc:755-763).
+static void write_transitions_report(const ae::tree::Tree& tree, const std::filesystem::path& filename)
+{
+    using namespace ae::tree;
+    const auto last_leaf = [&tree](node_index_t index) {
+        while (!is_leaf(index))
+            index = tree.inode(index).children.back();
+        return index;
+    };
+    const auto display = [](const transitions_t& transitions) {
+        fmt::memory_buffer out;
+        bool first{true};
+        for (const auto& tr : transitions.transitions) {
+            if (tr.left == ' ' || tr.right == ' ')
+                continue;
+            fmt::format_to(std::back_inserter(out), "{}{}{}{}", first ? "" : " ", tr.left, tr.pos, tr.right);
+            first = false;
+        }
+        return fmt::to_string(out);
+    };
+    // shown-leaf counts, computed here so the dump does not depend on when number_of_leaves_ was last set
+    std::unordered_map<node_index_base_t, std::size_t> shown_leaves;
+    const std::function<std::size_t(node_index_t)> count = [&](node_index_t index) -> std::size_t {
+        if (is_leaf(index))
+            return tree.leaf(index).shown ? 1u : 0u;
+        std::size_t num{0};
+        for (const auto child : tree.inode(index).children)
+            num += count(child);
+        shown_leaves[*index] = num;
+        return num;
+    };
+    count(Tree::root_index());
+
+    std::ofstream out{filename};
+    const std::function<void(node_index_t)> walk = [&](node_index_t index) {
+        const Inode& node = tree.inode(index);
+        out << tree.leaf(tree.first_leaf(index)).name << '\t' << tree.leaf(last_leaf(index)).name << '\t' << shown_leaves[*index] << '\t' << display(node.aa_transitions) << '\n';
+        for (const auto child : node.children) {
+            if (!is_leaf(child))
+                walk(child);
+        }
+    };
+    walk(Tree::root_index());
+    fmt::print(stderr, ">>> transitions-report: {}\n", filename.string());
+}
 
 // Shared tree-render core: compute the page geometry, then draw the whole tree through a surface
 // obtained from make_surface(width, height). The two public entry points differ ONLY in the surface
@@ -369,6 +474,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 stack.pop_back();
             }
         }
+        propagate_hide(tree);
     }
 
     // --- compute aa-substitution transitions when requested, instead of using the
@@ -389,6 +495,14 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                                                                    .method = method,
                                                                    .reset_labels = false,
                                                                    .non_common_tolerance = params.aa_transitions_tolerance});
+    }
+
+    // --- --transitions-report=FILE: per-inode label dump for differential verification against
+    //     AD's `tal --first-last-leaves 1`, keyed on the (first leaf, last leaf) pair. Written
+    //     here, i.e. after the node `hide` mods and the computation, and nothing is drawn. ---
+    if (!params.transitions_report_file.empty()) {
+        write_transitions_report(tree, params.transitions_report_file);
+        return 0;
     }
 
     // --- ladderize (reorder children before layout). "none"/"" keep the .tjz order. ---

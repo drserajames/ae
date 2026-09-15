@@ -572,7 +572,13 @@ namespace ae::tree
 
 void ae::tree::set_aa_nuc_transition_labels_eu_20200915(Tree& tree, const AANucTransitionSettings& settings)
 {
-    tree.update_number_of_leaves_in_subtree(); // stage 3's leaves_ratio needs these
+    // Shown-only, as AD's `Node::number_leaves` always is: stage 3's flip removal compares the
+    // flipping descendants' leaves against the ancestor's, and a subtree the settings hid counts
+    // for nothing in AD. Counting hidden leaves here made ae drop labels AD keeps (measured on the
+    // 2026-0921 H1 tree: an all-hidden 3-leaf subtree gave leaves_ratio 2.1% against its 140-leaf
+    // ancestor, over the 0.5% threshold, so the ancestor's imported label was removed and its
+    // substitution reappeared one level down).
+    tree.update_number_of_leaves_in_subtree(shown_only_t::yes);
     const auto [max_aa, max_nuc] = tree.longest_sequence();
     if (settings.set_aa_labels) {
         set_transitions_eu_20200915_t<aa_nuc_e::aa> set_aa{tree, settings};

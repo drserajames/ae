@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <unordered_map>
+#include <limits>
+#include <cstdlib>
 
 #include "tal/clades.hh"
 #include "tree/tree.hh"
@@ -228,6 +230,51 @@ std::vector<std::string> ae::tal::section_aa_transitions(ae::tree::Tree& tree, c
         else {
             stack.pop_back();
         }
+    }
+
+    // TEMPORARY EXPERIMENT (AE_SECTION_AD_SENTINEL=1): replace the shown-leaf extents with AD's
+    // LITERAL first/last descendant leaf verticals, hidden leaf -> SIZE_MAX (node_id_t::NotSet).
+    if (const char* env = std::getenv("AE_SECTION_AD_SENTINEL"); env != nullptr && *env == '1') {
+        std::unordered_map<node_index_base_t, std::size_t> leaf_vertical;
+        std::size_t v{0};
+        std::vector<std::pair<node_index_t, std::size_t>> st2;
+        st2.push_back({Tree::root_index(), 0});
+        while (!st2.empty()) {
+            auto& [idx, cur] = st2.back();
+            const Inode& in = tree.inode(idx);
+            if (cur < in.children.size()) {
+                const node_index_t child = in.children[cur++];
+                if (is_leaf(child))
+                    leaf_vertical[*child] = tree.leaf(child).shown ? v++ : std::numeric_limits<std::size_t>::max();
+                else
+                    st2.push_back({child, 0});
+            }
+            else
+                st2.pop_back();
+        }
+        const auto lit_first = [&tree, &leaf_vertical](node_index_t i) { while (!is_leaf(i)) i = tree.inode(i).children.front(); return leaf_vertical[*i]; };
+        const auto lit_last = [&tree, &leaf_vertical](node_index_t i) { while (!is_leaf(i)) i = tree.inode(i).children.back(); return leaf_vertical[*i]; };
+        std::size_t slot{0};
+        std::vector<std::pair<node_index_t, std::size_t>> st3;
+        st3.push_back({Tree::root_index(), 0});
+        inode_spans[0].first_vertical = lit_first(Tree::root_index());
+        inode_spans[0].last_vertical = lit_last(Tree::root_index());
+        while (!st3.empty()) {
+            auto& [idx, cur] = st3.back();
+            const Inode& in = tree.inode(idx);
+            if (cur < in.children.size()) {
+                const node_index_t child = in.children[cur++];
+                if (!is_leaf(child) && tree.inode(child).shown) {
+                    ++slot;
+                    inode_spans[slot].first_vertical = lit_first(child);
+                    inode_spans[slot].last_vertical = lit_last(child);
+                    st3.push_back({child, 0});
+                }
+            }
+            else
+                st3.pop_back();
+        }
+        AD_WARNING("AE_SECTION_AD_SENTINEL=1: reproducing AD's literal-extent section rule (experiment)");
     }
 
     // accumulate as transitions (AD AA_Transitions), format once at the end

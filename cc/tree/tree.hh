@@ -23,6 +23,8 @@ namespace ae::tree
 
     inline bool is_leaf(node_index_t index) { return index > 0; }
 
+    enum class shown_only_t { no, yes };
+
     // ----------------------------------------------------------------------
 
     struct Node
@@ -247,7 +249,13 @@ namespace ae::tree
 
         void subtype(const virus::type_subtype_t& subtype) { subtype_ = subtype; }
         void lineage(const sequences::lineage_t& lineage) { lineage_ = lineage; }
-        void update_number_of_leaves_in_subtree();
+        // `shown_only_t::yes` counts only leaves with `shown` set, and stops at a hidden inode --
+        // which is what acmacs-tal's `Node::number_leaves` always is (`Tree::set_first_last_next_node_id`,
+        // AD cc/tree.cc:755-763, sums `if (!child.hidden)`). The eu-20200915 aa-transition method needs
+        // that: its stage-3 flip removal divides the flipping subtrees' leaves by the ancestor's, and
+        // counting hidden leaves there drops labels AD keeps. The default stays all-leaves, because the
+        // tree exporter writes these counts out as the file's own `"L"`.
+        void update_number_of_leaves_in_subtree(shown_only_t shown_only = shown_only_t::no);
         size_t number_of_leaves() const { return root().number_of_leaves(); }
 
         std::vector<std::string> fix_names_by_seqdb(const virus::type_subtype_t& subtype);

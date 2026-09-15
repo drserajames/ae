@@ -26,7 +26,8 @@ static std::string usage(std::string_view prog)
                        "          [--time-series] [--interval=year|month|week|day] [--legend] [--geo-inset]\n"
                        "          [--aa-transitions] [--aa-transitions-compute]\n"
                        "          [--ladderize=none|number-of-leaves|max-edge-length]\n"
-                       "          [--title=TEXT] [--clades-report] <tree.newick|tree.json[.xz]> <output.pdf|.names> [image-size-px]\n"
+                       "          [--title=TEXT] [--clades-report] [--transitions-report=FILE]\n"
+                       "          <tree.newick|tree.json[.xz]> <output.pdf|.names> [image-size-px]\n"
                        "  --aa-transitions          DRAW a label at every inode carrying transitions.\n"
                        "  --aa-transitions-compute  RECOMPUTE the transitions (replacing the tree's stored ones);\n"
                        "                  independent of drawing, as in acmacs-tal — pass both to also draw them.\n"
@@ -47,6 +48,7 @@ int main(int argc, char* const argv[])
         std::string_view settings_file;
         std::string mrca_sidecar; // --mrca-sidecar=PATH: write the WYSIWYG editor geometry sidecar (applied after --settings)
         bool clades_report_only{false}; // --clades-report: print the clade-section diagnostic and exit (applied after --settings)
+        std::string transitions_report;  // --transitions-report=FILE: per-inode aa-transition dump, then exit (applied after --settings)
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg{argv[i]};
             if (arg == "--labels")
@@ -91,6 +93,8 @@ int main(int argc, char* const argv[])
                 mrca_sidecar = std::string{arg.substr(15)};
             else if (arg == "--clades-report")
                 clades_report_only = true;
+            else if (arg.substr(0, 21) == "--transitions-report=")
+                transitions_report = std::string{arg.substr(21)};
             else if (arg == "--help" || arg == "-h") {
                 fmt::print("{}", usage(argv[0]));
                 return 0;
@@ -114,6 +118,8 @@ int main(int argc, char* const argv[])
             params = ae::tal::load_draw_settings(std::filesystem::path{settings_file}, &image_size);
         if (!mrca_sidecar.empty()) // CLI flag wins over (and survives) the settings load
             params.mrca_label_sidecar = mrca_sidecar;
+        if (!transitions_report.empty()) // likewise: dump the per-inode labels and draw nothing
+            params.transitions_report_file = transitions_report;
         if (clades_report_only) { // likewise: --clades-report forces the report on and the drawing off
             params.clades = true;
             params.clades_report = true;
@@ -143,6 +149,10 @@ int main(int argc, char* const argv[])
         }
         else {
             const std::size_t labels_hidden = ae::tal::export_tree_pdf(*tree, output, image_size, params);
+            if (!transitions_report.empty()) {
+                fmt::print("Per-inode aa-transition report written to {} ({} not drawn)\n", transitions_report, positional[1]);
+                return 0;
+            }
             if (clades_report_only) {
                 fmt::print("Clade-section report only ({} not drawn); diagnostic on stderr and in {}\n", positional[1],
                            std::filesystem::path{output}.replace_extension(".taleg").string());
