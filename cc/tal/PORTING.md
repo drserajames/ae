@@ -442,6 +442,25 @@ the `cc/draw/` surface API."*
     program. **Result:** ae now matches the AD references to <0.1px — bvic **631.6**, h3 **648.6**, h1
     **794.3** (×1000), vs AD 631.6 / 648.6 / 794.3. **Verify:** `python3 cc/tal/test/test-settings-v3.py`
     (30/30 green); render the three report `.tal` via `ae.report.trees.make_tree` → `pdfinfo` page size.
+27. **The rendered page was 5% wider than the ratio said (2026-09-15) — DONE.** #26 got the *ratio* right,
+    but the rendered page did not follow it: every ae tree PDF came out **exactly 1.05×** AD's width for the
+    same `.tal` + `.tjz` — bvic 663.2 vs 631.6, h1 834.0 vs 794.3, h3 681.0 vs 648.6 (×1000pt canvas), a
+    5.00% / 5.00% / 5.00% overshoot. Cause: **`cc/tal/draw-tree.cc`** reserved a left band for the
+    auto-placed aa-transition labels and ADDED it to the page —
+    `aa_band = 0.05 * width_base; width = width_base + aa_band` — where AD draws exactly
+    `height_ * width_to_height_ratio_` (cc/draw.cc:43) and reserves nothing. The 0.05 band is an ae-only
+    device (AD has no auto-placer), so **AD is right**: the page is now `width_base` and the band is taken
+    out of the drawable width (`aa_left`, as an earlier attempt did). The two objections that had the
+    carved-out form rejected before do not apply any more — the title is drawn at the root, not the page
+    margin, and the label metrics *improved*: on the three 2026-0223 trees, residual conflicts stay 0/0/0,
+    worst leader 11.6→9.9 / 9.3→5.3 / 12.6→12.1 % of the page, off-envelope 1→0 / 0→0 / 2→1. (Dropping the
+    band to 0 instead is measurably worse: bvic 3 residual leader/leader conflicts, h3 1 leader-over-text,
+    worst tree-ink crossing 33→95 / 30→94 cells.) `settings_v3` also now rounds the ratio to **6** decimals,
+    not 4 — on a 1000pt canvas 4 dp was up to 0.05pt out (measured 0.019/0.014/0.029pt). **Result:** page
+    size is AD's to the printed precision — **631.619 / 794.286 / 648.571 × 1000**, both engines, same run.
+    Only the tree page is affected; the signature-page path reserves no band (`output` is empty there).
+    **Verify:** `python3 cc/tal/test/test-page-size.py` (5 checks; fails with `TAL_DRAW=` pointed at a
+    pre-fix binary, reporting 630 where 600 is expected).
 
 - **Milestone: continent legend (top-right) + curated clade-label column (vs AD refs).** Two gaps
     remained on the report tree page vs `/tmp/ad-{h1,h3,bvic}.*.pdf`: no colour legend, and the clade

@@ -781,20 +781,21 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // A tree page has no whitespace on its left: the root sits on the page margin and the canopy
     // opens to the right, so a label on a basal branch has nowhere to go on the near side and the
     // placer is forced to park it right of its own branch, on a long shallow leader across the
-    // canopy. ADDING a band (rather than taking one out of the tree) is what makes a left-hand
-    // placement possible for those labels without the two costs that had this reserve removed
-    // before: the tree keeps its width, and the title still sits above the root (it is drawn at
-    // the root, not at the page margin — see the title block below).
-    // 0.16 of the tree width: swept over the three report trees, it is the narrowest band that
-    // still lets every label find a left-hand spot (0.12 starts forcing shallow leaders again),
-    // and wider only buys longer leaders as labels drift out into the empty part of the band.
-    // 0.05 of the tree width. Swept 0.00 -> 0.16 against both the overlap metrics and the dead
+    // canopy. A band on the left is what makes a left-hand placement possible for those labels.
+    // 0.05 of the page width. Swept 0.00 -> 0.16 against both the overlap metrics and the dead
     // space actually left over: 0.16 was far too generous (77pt of the h3 band and 58pt of the
-    // B/Vic band went unused), while 0.00 costs real quality — B/Vic loses a conflict-free
-    // layout and the longest leader grows from 12% to 20% of the page. 0.05 keeps every tree
-    // conflict-free with the short leaders, and leaves only ~3-5pt unused on h3 and B/Vic.
+    // B/Vic band went unused), while 0.00 costs real quality — measured on the three 2026-0223
+    // report trees, dropping the band to 0 gives B/Vic 3 residual leader/leader conflicts and h3
+    // 1 leader-over-text, and pushes the worst leader from 9.9%/12.1% of the page to 15.3%/14.7%
+    // and the worst tree-ink crossing from 33/30 cells to 95/94. 0.05 keeps all three trees
+    // conflict-free with short leaders.
     const double aa_band = (!output.empty() && !params.mrca_labels.empty()) ? 0.05 * width_base : 0.0;
-    const double width = width_base + aa_band;
+    // The band is taken OUT of the page, not added to it. `width_to_height_ratio` is the page
+    // aspect acmacs-tal computes from the `.tal` (cc/draw.cc Draw::set_width_to_height_ratio),
+    // and AD then draws a page of exactly height*ratio (cc/draw.cc:43) — so adding anything here
+    // makes every ae tree page wider than AD's for the same input, which it was by exactly
+    // 1 + 0.05 until this was fixed. The page is height*ratio; the band comes out of the tree.
+    const double width = width_base;
 
     // --- horizontal layout: hz-marker column | tree | labels | time-series column | dash bars | clades column ---
     //     The clade column is the RIGHTMOST (acmacs-tal draws it past the time-series, flipped to
@@ -807,13 +808,15 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     const double margin_r = (params.right_margin_ratio > 0.0 ? params.right_margin_ratio : 0.03) * width;
     const double drawable_w = width - margin - margin_r;
     const double gap = 0.012 * width;
-    // The band computed above. It was 0 historically: AD reserves none, and an earlier attempt at a
-    // reserve was rejected because it was carved OUT of the drawable width, which shrank the tree
-    // and shifted the root right, leaving the title beside the root rather than above it (r5 items
-    // #1/#2). The band is now ADDED to the page width instead, so `drawable_w - aa_left` is the
-    // same tree width as before, and the title is drawn at the root. Standalone tree PDFs only —
-    // the signature-page path (export_tree_into, empty `output`) letterboxes the tree into someone
-    // else's rectangle, where a wider page would just shrink it.
+    // The band computed above, inset from the left of the drawable area (so the root sits at
+    // margin + aa_left and the tree loses that width). It was briefly ADDED to the page width
+    // instead, to keep the tree at its full width; that is what made every ae tree page exactly
+    // 5% wider than AD's, so the page is now AD's and the band is taken from the tree. The two
+    // costs that had an earlier carved-out reserve rejected (r5 items #1/#2) do not apply: the
+    // title is drawn at the root, not at the page margin (see the title block below), and the
+    // label metrics improved rather than regressed — see the sweep note at `aa_band`.
+    // Standalone tree PDFs only — the signature-page path (export_tree_into, empty `output`)
+    // letterboxes the tree into someone else's rectangle.
     const double aa_left = aa_band;
     // hz-section marker: the AD sig page draws the section letters (A/B/C) + brackets in a
     // column on the RIGHT, adjacent to the maps (hz_section_labels). The old left reserve
