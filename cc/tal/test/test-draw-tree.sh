@@ -54,6 +54,38 @@ check "tree-clades.json (--labels-overlap)" "$tmp/overlap.pdf"
 "$bin" --settings="$here/draw-settings-hz.json" "$here/tree-clades.json" "$tmp/hz.pdf" >/dev/null
 check "tree-clades.json (hz-sections)" "$tmp/hz.pdf"
 
+# curated hz-sections merged into the computed set (AD HzSections::update_from_parameters,
+# acmacs-tal cc/hz-sections.cc:44). Synthetic tree only: leaves A-E, invented clades X/Y.
+# Guards four separable behaviours, each with its own message so a revert says which one broke.
+rep="$tmp/hz-curated.txt"
+"$bin" --settings="$here/draw-settings-hz-curated.json" --clades-report "$here/tree-clades.json" "$tmp/hz-curated.pdf" > /dev/null 2> "$rep"
+hz_line() { grep "\"id\": \"$1\"," "$rep" | head -1; }
+
+# 1. a curated id that is NOT a computed section must ADD one (clade Y is a single contiguous
+#    run, so Y-1 exists only because the settings ask for it). This is the whole point: it is
+#    how a hand-split clade survives.
+grep -q '>>> HZ sections (3)' "$rep" || {
+    echo "FAIL: curated hz-sections not merged -- expected 3 sections, got: $(grep '>>> HZ sections' "$rep")"; exit 1; }
+hz_line "Y-1" | grep -q '"V": \[    4,     4\]' || {
+    echo "FAIL: curated-only section Y-1 missing or misplaced: $(hz_line Y-1)"; exit 1; }
+
+# 2. the curated `last` D is its parent inode's FIRST child, so AD steps back one leaf to C
+#    (cc/hz-sections.cc:62). Without the step-back Y-0 would end at D, vertical 3.
+hz_line "Y-0" | grep -q '"V": \[    2,     2\], "N":     1, "first": "C", "last": "C"' || {
+    echo "FAIL: curated last not stepped back from a first-child leaf: $(hz_line Y-0)"; exit 1; }
+
+# 3. a curated hidden section is still REPORTED, and takes no letter (set_prefix skips it).
+hz_line "X-0" | grep -q '"show": false' || {
+    echo "FAIL: curated \"show\": false not honoured: $(hz_line X-0)"; exit 1; }
+hz_line "X-0" | grep -q '"L": " "' || {
+    echo "FAIL: hidden section consumed a section letter: $(hz_line X-0)"; exit 1; }
+
+# 4. letters run A, B... over the SHOWN sections in order, recomputed rather than taken from
+#    the settings (AD never reads "L" back).
+hz_line "Y-0" | grep -q '"L": "A"' || { echo "FAIL: first shown section is not lettered A: $(hz_line Y-0)"; exit 1; }
+hz_line "Y-1" | grep -q '"L": "B"' || { echo "FAIL: second shown section is not lettered B: $(hz_line Y-1)"; exit 1; }
+echo "  tree-clades.json (curated hz-sections): merged, stepped back, hidden unlettered"
+
 # dash-bar-aa-at (per-leaf aa-at-position dash column) on the aa-sequence tree
 "$bin" --labels --dash-bar=3 "$here/tree-aa.json" "$tmp/dash.pdf" 400 >/dev/null
 check "tree-aa.json (dash-bar-aa-at pos 3)" "$tmp/dash.pdf"

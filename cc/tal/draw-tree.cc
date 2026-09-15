@@ -695,7 +695,17 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         }
     }
 
-    if (!params.hz_sections.empty()) {
+    // Two callers supply `params.hz_sections`, and they mean different things by it:
+    //   * settings_v3, translating a `.tal` that RUNS an `hz-sections` command — a CURATED list,
+    //     every entry carrying AD's `id`, to be merged into the computed set the way AD does.
+    //   * py/ae/tal/signature_page.py, handing over the sections the page is actually built from
+    //     (`SM.sections_for`), already lettered in tree order and with NO ids. That list is
+    //     authoritative for the page and must be drawn as given, not merged into anything.
+    // The presence of an id is the discriminator, so the signature-page column is untouched.
+    const bool hz_curated_by_id =
+        std::any_of(std::begin(params.hz_sections), std::end(params.hz_sections), [](const HzSection& section) { return !section.id.empty(); });
+
+    if (hz_curated_by_id) {
         // seq_id -> vertical, the same numbering cc/tal/clades.cc uses: a counter over SHOWN
         // leaves in tree order, which is exactly the index into layout.leaves.
         std::unordered_map<std::string_view, long> vertical;
@@ -796,6 +806,25 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         const std::vector<std::string> transitions = section_aa_transitions(tree, spans);
         for (std::size_t no{0}; no < hz_set.size(); ++no)
             hz_set[no].aa_transitions = transitions[no];
+    }
+
+    // What the marker column and the time-series separators actually draw. With a curated,
+    // id-bearing list this is the MERGED set (so a hand-split clade draws its own brackets and
+    // rules, and a `show: false` section draws none); with the signature page's authoritative
+    // list it is that list verbatim, prefixes and all, exactly as before this merge existed.
+    struct HzDrawn
+    {
+        std::string first_name, last_name, prefix;
+        bool shown{true};
+    };
+    std::vector<HzDrawn> hz_drawn;
+    if (hz_curated_by_id) {
+        for (const HzSectionResolved& section : hz_set)
+            hz_drawn.push_back(HzDrawn{.first_name = section.first_name, .last_name = section.last_name, .prefix = section.prefix, .shown = section.shown});
+    }
+    else {
+        for (const HzSection& section : params.hz_sections)
+            hz_drawn.push_back(HzDrawn{.first_name = section.first, .last_name = section.last, .prefix = section.prefix, .shown = section.shown});
     }
 
     // --- clade-section diagnostic: AD Clades::report_clades + HzSections::report/detect_intersect ---
@@ -1504,12 +1533,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             for (const auto& ln : layout.leaves)
                 name_y.emplace(ln.name, ln.y);
             const double hz_x1 = x_ts0 + ts_w;
-            for (const auto& section : hz_set) {
-                if (!section.shown)
+            for (const auto& [first_name, last_name, prefix, shown] : hz_drawn) {
+                if (!shown)
                     continue;
-                if (const auto it = name_y.find(section.first_name); it != name_y.end())
+                if (const auto it = name_y.find(first_name); it != name_y.end())
                     pdf.line(x_ts0, dev_y(it->second - 0.5), hz_x1, dev_y(it->second - 0.5), GREY, 0.4);
-                if (const auto it = name_y.find(section.last_name); it != name_y.end())
+                if (const auto it = name_y.find(last_name); it != name_y.end())
                     pdf.line(x_ts0, dev_y(it->second + 0.5), hz_x1, dev_y(it->second + 0.5), GREY, 0.4);
             }
         }
@@ -1753,10 +1782,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         const double x_spine = x_hzmark0 + strip_w;         // marker strip right edge = spine / arm RIGHT end
         const double marker_lw = 1.0;                       // AD hz-section-marker line_width
         const double label_fs  = 2.5 * strip_w;             // AD label_size × strip width (≈0.0125·treeH)
-        for (const auto& section : hz_set) {
-            if (!section.shown)
+        for (const auto& [first_name, last_name, prefix, shown] : hz_drawn) {
+            if (!shown)
                 continue;
-            const auto itf = name_y.find(section.first_name), itl = name_y.find(section.last_name);
+            const auto itf = name_y.find(first_name), itl = name_y.find(last_name);
             if (itf == name_y.end() || itl == name_y.end())
                 continue;
             double y_top = dev_y(itf->second - 0.5), y_bot = dev_y(itl->second + 0.5); // gap-lines above/below
@@ -1765,7 +1794,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             pdf.line(x_table, y_top, x_spine, y_top, BLACK, marker_lw);   // top arm    (table -> spine)
             pdf.line(x_table, y_bot, x_spine, y_bot, BLACK, marker_lw);   // bottom arm  (table -> spine)
             pdf.line(x_spine, y_top, x_spine, y_bot, BLACK, marker_lw);   // spine       (far/right side)
-            if (!section.prefix.empty()) {
+            if (!prefix.empty()) {
                 // r10 — letter sits BELOW the top arm, inside the bracket, matching AD exactly
                 // (hz-sections.cc:270-271). Sarah's r8 straddle (glyph centred ON the arm) read too
                 // HIGH, overlapping the horizontal arm; she asked to bring the letter + white box down
@@ -1776,9 +1805,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 // ae's pdf.text y is the glyph-box TOP (not baseline), y increasing downward, so
                 // glyph-box-top = y_top+1.0h reproduces AD's [y_top+1.0h, y_top+2.0h]. The white box
                 // (top y_top+0.5h, height 2.0h) leaves the arm itself visible above it.
-                const auto [w, h] = pdf.text_size(section.prefix, label_fs);
+                const auto [w, h] = pdf.text_size(prefix, label_fs);
                 pdf.rectangle(x_spine - w * 0.7, y_top + h * 0.5, w * 1.4, h * 2.0, WHITE, 0.0, WHITE);
-                pdf.text(x_spine - w * 0.5, y_top + h * 1.0, section.prefix, label_fs, BLACK, /*center=*/false);
+                pdf.text(x_spine - w * 0.5, y_top + h * 1.0, prefix, label_fs, BLACK, /*center=*/false);
             }
         }
     }

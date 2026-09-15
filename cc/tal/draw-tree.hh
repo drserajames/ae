@@ -181,6 +181,10 @@ namespace ae::tal
         std::string first{};
         std::string last{};
         std::string label{};
+        std::string prefix{};  // section letter, when the CALLER assigns it (the signature-page
+                               // path does: py/ae/tal/signature_page.py supplies the sections the
+                               // page is really built from, already lettered in tree order). The
+                               // `.tal`'s own "L" is NOT read — see settings_v3.
         bool shown{true};      // AD HzSection::shown — a hidden section still EXISTS (it is reported
                                // and it takes no letter); it is simply not drawn
         // AD's curated `aa_transitions` (HzSection::label_aa_transitions) is deliberately NOT read:
