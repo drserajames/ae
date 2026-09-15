@@ -874,6 +874,27 @@ So h1's 10 differing sections and h3's 5 are AD's `HzSections::set_aa_transition
 character for character — not port defects, and deliberately not reproduced. The switch exists only
 to re-derive that claim; it prints a warning and is off by default.
 
+> **`AE_SECTION_AD_SENTINEL` SHIPS — Sarah, 15 Sep 2026.** Asked explicitly whether to keep it,
+> make it test-only, or remove it now this section records the finding; she chose **keep it as
+> it is**. So it stays a `tal-draw`-reachable environment switch, off by default and warning when
+> set, and the reason is that it makes a parity question here re-derivable in one command instead
+> of by rebuilding an argument. It is **not** a licence to turn it on: the divergence above is
+> accepted and ae stays correct. Re-derived on the merged tree (`aa-hidden-land`, 2026-09-15) and
+> still reproduces AD character for character — h1 3/13 → 13/13, h3 4/9 → 9/9, bvic 10/10 either
+> way — so the switch is itself covered by the numbers above.
+
+> **Section-level string parity is NOT a meaningful measure** (`eu-70`/`ssm-a0`, 15 Sep 2026).
+> AD has **two** fields where ae has one: `aa_transitions` is **curated** — hand-authored, the
+> delta relative to the clade, empty whenever the section simply *is* a clade — and it is what
+> the title template prints; `All transitions` is the **computed** cumulative root-to-section
+> list, diagnostic only. ae puts the computed list into `aa_transitions` and `section_title`
+> (`py/ae/tal/section_maps.py`) concatenates it unconditionally. The two engines were therefore
+> never reporting the same quantity, which is the real explanation of the "differs in both
+> directions" observation that opened this work. **Read the per-inode numbers, not the
+> per-section ones.** Whether ae should grow a separate curated field is a design question;
+> Sarah deferred it on 15 Sep 2026 — decide it separately, do not fold it into hidden-handling
+> or aa-transition work.
+
 ### Reported from the DRAWING path, not `compute_hz_sections`
 
 The diagnostic reports the `clade_plan` bands `draw-tree.cc` actually draws. That matters,
