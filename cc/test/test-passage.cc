@@ -4,6 +4,7 @@
 #include "virus/passage.hh"
 
 static size_t passage_parsing_test(bool verbose);
+static size_t passage_classification_test(bool verbose);
 
 // ======================================================================
 
@@ -11,7 +12,7 @@ int main(int argc, const char* const* argv)
 {
     const bool verbose{argc > 1 && std::string_view{argv[1]} == "-v"};
     try {
-        return static_cast<int>(passage_parsing_test(verbose));
+        return static_cast<int>(passage_parsing_test(verbose) + passage_classification_test(verbose));
     }
     catch (std::exception& err) {
         fmt::print("> {}\n", err.what());
@@ -57,6 +58,10 @@ size_t passage_parsing_test(bool verbose)
         D{"Clinical Specimen", "OR"},                                                                                           //
         D{"10 passages - embryonated chicken eggs; Passage Line 5", "10 PASSAGES - EMBRYONATED CHICKEN EGGS; PASSAGE LINE 5"}, //
         D{"embryonated hen egg", "EMBRYONATED HEN EGG"},                                                                       //
+        D{"MDCK1/MK2", "MDCK1/MK2"},                                                                                           //
+        D{"E3/SPE1", "E3/SPE1"},                                                                                               //
+        D{"E3/SPE1/E1", "E3/SPE1/E1"},                                                                                         //
+        D{"M1", "MK1"},                                                                                                        //
     };
 
     size_t errors = 0;
@@ -87,5 +92,66 @@ size_t passage_parsing_test(bool verbose)
     return errors;
 
 } // passage_parsing_test
+
+// ----------------------------------------------------------------------
+
+// ----------------------------------------------------------------------
+
+struct CD
+{
+    std::string_view raw_name;
+    bool egg;
+    bool cell;
+};
+
+// egg/cell classification (Passage::is_egg / is_cell -> deconstructed_t::last().egg()/cell()).
+// This is what chart select_antigens(passage_is(...)) and hence semantic.vaccine.find() rely on.
+size_t passage_classification_test(bool verbose)
+{
+    const std::array data{
+        // --- the cases this test was added for: "MK" (monkey kidney) and "SPE" (SPF egg) ---
+        CD{"MDCK1/MK2", false, true},  // Crick B/Vic
+        CD{"E3/SPE1", true, false},    // Crick B/Vic
+        CD{"E3/SPE1/E1", true, false}, // VIDRL - last element E1, egg before and after
+        CD{"MK1", false, true},        //
+        CD{"SPE4/SPE3", true, false},  // NIID - SPE in both elements
+        CD{"M1", false, true},         // conversion::apply maps bare "M" -> "MK"
+        // --- regressions: the token lists that were already there ---
+        CD{"MDCK1", false, true},       //
+        CD{"MDCK1/SIAT1", false, true}, //
+        CD{"SIAT2", false, true},       //
+        CD{"HCK1", false, true},        //
+        CD{"MDCK1/HCK2", false, true},  // NIID
+        CD{"SPFCK1", false, true},      //
+        CD{"E3", true, false},          //
+        CD{"E3/E1/E1", true, false},    // CNIC
+        CD{"E4", true, false},          // NIID
+        CD{"SPFCE2", true, false},      //
+        CD{"C1", false, true},          // conversion "C" -> "MDCK"
+        CD{"EGG3", true, false},        // conversion "EGG" -> "E"
+        // --- neither egg nor cell ---
+        CD{"OR", false, false},   //
+        CD{"CS", false, false},   //
+        CD{"QMC2", false, false}, // still unclassified - deliberately not part of this change
+        CD{"SPF3", false, false}, // ditto
+        CD{"", false, false},     // empty passage
+    };
+
+    size_t errors = 0;
+    for (const auto& entry : data) {
+        const ae::virus::Passage passage{entry.raw_name};
+        const auto egg = passage.is_egg(), cell = passage.is_cell();
+        if (egg != entry.egg || cell != entry.cell) {
+            fmt::print("> \"{}\" -> \"{}\"  egg={} cell={}  expected: egg={} cell={}\n", entry.raw_name, passage.to_string(), egg, cell, entry.egg, entry.cell);
+            ++errors;
+        }
+        else if (verbose)
+            fmt::print("  {:30s} -> {:20s} egg={:5} cell={:5}\n", fmt::format("\"{}\"", entry.raw_name), fmt::format("\"{}\"", passage.to_string()), egg, cell);
+    }
+    if (errors)
+        fmt::print("> {} classification errors found\n", errors);
+    return errors;
+
+} // passage_classification_test
 
 // ----------------------------------------------------------------------

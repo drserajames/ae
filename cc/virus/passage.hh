@@ -34,8 +34,10 @@ namespace ae::virus::passage
                 return result;
             }
 
-            bool egg() const { return name == "E" || name == "SPFCE"; }
-            bool cell() const { return name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK"; }
+            // "SPE" = SPF egg (Crick/NIID, e.g. "E3/SPE1"); it also occurs mid-string ("E3/SPE1/E1").
+            bool egg() const { return name == "E" || name == "SPFCE" || name == "SPE"; }
+            // "MK" = monkey kidney (Crick/CNIC, e.g. "MDCK1/MK2"); note conversion::apply maps a bare "M" to "MK".
+            bool cell() const { return name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK" || name == "MK"; }
             bool good() const { return !name.empty() && (name == "OR" || !count.empty()); }
         };
 
