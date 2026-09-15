@@ -886,12 +886,9 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
     # columns out internally as fractions of the page width.
     tree_ratio = schema.pop("tree_width_to_height_ratio", None)
     if tree_ratio:  # a `tree` element with an explicit width-to-height-ratio sets the page
-        # 6 dp, not 4: the ratio multiplies a 1000pt canvas, so a 4-dp round costs up to
-        # 0.05pt of page width against AD (measured 0.019/0.014/0.029pt on the three
-        # 2026-0223 report trees). 6 dp puts it under 0.001pt.
         schema["width_to_height_ratio"] = round(
             _compute_layout_width(tal, defines, warnings, program=program,
-                                  include_builtin_hooks=(program == "tal")), 6)
+                                  include_builtin_hooks=(program == "tal")), 4)
     # de-duplicate warnings, keep order
     seen: set = set()
     schema_warnings = [w for w in warnings if not (w in seen or seen.add(w))]
