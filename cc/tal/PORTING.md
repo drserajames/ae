@@ -734,6 +734,28 @@ string per section id. Both engines produce the **same section ids and the same 
 all three trees, so the spans are not in question.
 
 **1. The accumulation (`section_aa_transitions`) — ae is right, AD has a sentinel bug.**
+
+> **ACCEPTED DIVERGENCE — Sarah, 15 Sep 2026.** ae stays correct here rather than
+> bug-compatible, and this is the standing decision: **h3's five differing sections are
+> expected and are not a parity gap to close.** Do not "fix" ae to reproduce AD's answer.
+>
+> This was challenged before it was accepted, on the grounds that earlier "AD is buggy"
+> reports had turned out to be correct AD behaviour misread. It survived the challenge, and
+> *why* it survived is the part worth carrying forward: those earlier reports rested on
+> **inferring intent**, whereas this one rests on an **unsigned sentinel reaching a `<=`** —
+> `node_id_t::value_type` is `unsigned` and `NotSet` is `static_cast<value_type>(-1)`
+> (`cc/tree.hh:52-53`), i.e. `0xFFFFFFFF`, the maximum. A comparison against it is
+> unconditionally true one way and unconditionally false the other, under any reading of
+> what the author wanted. Apply that test — *is this checkable without knowing anyone's
+> intent?* — before accepting the next claim of this shape.
+>
+> Corroborating, from AD itself: `hz-sections.cc:82-83` warns when these extent pointers are
+> **null**, so the author was guarding boundary cases here and missed the `NotSet` one.
+>
+> No report impact either way: both 2026-0921 round `.tal`s pin AD's text through the static
+> `hz-sections` `aa_transitions` override, so the printed titles are AD's regardless. This is
+> about the computation behind them.
+
 AD's `HzSections::set_aa_transitions` (`acmacs-tal/cc/hz-sections.cc:84`) tests
 
 ```cpp
