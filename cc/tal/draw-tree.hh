@@ -3,8 +3,11 @@
 #include <cstddef>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
+#include <regex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // ======================================================================
@@ -51,11 +54,29 @@ namespace ae::tal
         double label_offset_y{0.0};
     };
 
-    // A node-select / node-apply mod — the core of the acmacs-tal settings pipeline.
-    // A node matches when every set criterion holds (empty criteria match anything).
+    // One `seq_id` selector, compiled. AD matches a `seq_id` select as an UNANCHORED,
+    // case-insensitive ECMAScript regex (acmacs-tal cc/tree.cc:396 `select_by_seq_id`), so a
+    // pattern is a *substring* test, not equality: `X/1/2024_ABC1234` also selects
+    // `X/1/2024_ABC1234D`. Compiled once at settings-load time because a report tree is ~1000
+    // selectors x ~100k leaves; a pattern carrying no regex metacharacters takes a
+    // case-insensitive substring fast path and never constructs a std::regex.
+    struct SeqIdMatcher
+    {
+        std::string pattern{};                   // exactly as written in the settings
+        std::string lowered{};                   // pattern, lowercased — the literal fast path
+        std::shared_ptr<const std::regex> re{};  // compiled iff `pattern` has metacharacters
+        bool is_literal() const { return re == nullptr; }
+        bool matches(std::string_view name) const;
+        bool equals(std::string_view name) const; // case-insensitive equality, for the diagnostic
+    };
+
+    // Build a matcher for one settings `seq_id` string (a bad regex degrades to a literal, with
+    // a warning, rather than throwing out of the whole render).
+    SeqIdMatcher make_seq_id_matcher(std::string_view pattern);
+
     struct NodeSelect
     {
-        std::vector<std::string> seq_id{};      // leaf-name is one of these (leaves only)
+        std::vector<SeqIdMatcher> seq_id{};     // leaf-name matches one of these (leaves only)
         std::optional<double> cumulative_min{}; // node cumulative edge length >= this
         std::optional<double> edge_min{};       // node's own edge length >= this (hide long-edge outliers)
         std::string date_min{};                 // leaf date >= this "YYYY-MM-DD" (leaves only)
@@ -248,6 +269,12 @@ namespace ae::tal
     // before computing its layout. For callers that compute a layout themselves — notably
     // tal-draw's `.names` dump, which otherwise lists every leaf regardless of the settings.
     void apply_node_hide_mods(ae::tree::Tree& tree, const TreeDrawParameters& params);
+
+    // Diagnostic for `seq_id` selectors, run once per render. Reports selectors that select
+    // nothing (a stale id left over from an earlier cycle), and — the case that hid a real bug
+    // in the 2026-0921 round for years — a selector with no regex metacharacters that matched
+    // only as a *substring*, i.e. a truncated or mistyped id silently selecting a longer leaf.
+    void report_node_mod_selectors(const ae::tree::Tree& tree, const TreeDrawParameters& params);
 
     std::size_t export_tree_pdf(ae::tree::Tree& tree, const std::filesystem::path& output, double image_size = 1000.0, const TreeDrawParameters& params = {});
 

@@ -725,6 +725,82 @@ same clade, and the sibling-intersect warnings — without waiting out a full re
   of `compute_hz_sections` so the diagnostic and the signature-page path report identically.
   They are empty when the tree's inodes carry no `A` field (B/Vic this round) — as in AD.
 
+### Section aa-transitions: where ae deliberately does NOT match AD
+
+Two independent things decide a section's aa-transitions text, and only one of them was ever
+wrong in ae. Measured 2026-09-14 on the current round's three trees, AD (`AD/bin/tal`) and ae
+(`tal-draw --clades-report`) re-derived in the same session, comparing the `All transitions`
+string per section id. Both engines produce the **same section ids and the same `V` ranges** on
+all three trees, so the spans are not in question.
+
+**1. The accumulation (`section_aa_transitions`) — ae is right, AD has a sentinel bug.**
+
+> **ACCEPTED DIVERGENCE — Sarah, 15 Sep 2026.** ae stays correct here rather than
+> bug-compatible, and this is the standing decision: **h3's five differing sections are
+> expected and are not a parity gap to close.** Do not "fix" ae to reproduce AD's answer.
+>
+> This was challenged before it was accepted, on the grounds that earlier "AD is buggy"
+> reports had turned out to be correct AD behaviour misread. It survived the challenge, and
+> *why* it survived is the part worth carrying forward: those earlier reports rested on
+> **inferring intent**, whereas this one rests on an **unsigned sentinel reaching a `<=`** —
+> `node_id_t::value_type` is `unsigned` and `NotSet` is `static_cast<value_type>(-1)`
+> (`cc/tree.hh:52-53`), i.e. `0xFFFFFFFF`, the maximum. A comparison against it is
+> unconditionally true one way and unconditionally false the other, under any reading of
+> what the author wanted. Apply that test — *is this checkable without knowing anyone's
+> intent?* — before accepting the next claim of this shape.
+>
+> Corroborating, from AD itself: `hz-sections.cc:82-83` warns when these extent pointers are
+> **null**, so the author was guarding boundary cases here and missed the `NotSet` one.
+>
+> No report impact either way: both 2026-0921 round `.tal`s pin AD's text through the static
+> `hz-sections` `aa_transitions` override, so the printed titles are AD's regardless. This is
+> about the computation behind them.
+
+AD's `HzSections::set_aa_transitions` (`acmacs-tal/cc/hz-sections.cc:84`) tests
+
+```cpp
+(section.first->node_id.vertical >= node.first_prev_leaf->node_id.vertical) &&
+(section.last ->node_id.vertical <= node.last_next_leaf->node_id.vertical)
+```
+
+where an inode's `first_prev_leaf`/`last_next_leaf` (`Tree::set_first_last_next_node_id`,
+`cc/tree.cc:748-754`) are its **literal** first/last descendant leaf — taken from
+`subtree.front()`/`subtree.back()` with no regard to `hidden`. A hidden leaf's
+`node_id.vertical` is left at the sentinel `node_id_t::NotSet == 0xFFFFFFFF` (`cc/tree.cc:726`),
+so an inode whose last descendant leaf happens to be hidden makes the second test
+**vacuously true** and its substitutions are attributed to *every* section starting at or below
+it; mirror-image, an inode whose first descendant leaf is hidden fails the first test and is
+dropped from sections it genuinely contains. ae uses the first/last **shown** leaf instead,
+which is what the test is meant to ask.
+
+Verified by re-implementing both rules independently in Python straight off the `.tjz` JSON
+(no AD, no ae) on the round's H3 tree, where both engines start from the *same* stored labels
+(that `.tal` asks for `method: imported`): the literal-extent rule reproduces AD **9/9**
+sections string-for-string, the shown-extent rule reproduces ae **9/9** — and the five sections
+where they differ are exactly the ones fed by inodes whose literal last leaf is hidden. On that
+tree 13 label-carrying inodes leak that way and 9 are dropped; on H1, 33 and 23. In the worst
+case a 2-leaf clade's substitutions were attributed to five sections spanning tens of thousands
+of leaves. **Not reproduced in ae**; if a round ever needs AD's exact text, its `.tal` can pin
+it with the static `hz-sections` `"aa_transitions"` override (AD's `label_aa_transitions`,
+`acmacs-tal/cc/settings.cc:981`), which is what the current round does.
+
+**2. The per-inode labels — ae was wrong, fixed 2026-09-14.** AD's
+`Settings::add_draw_aa_transitions` (`acmacs-tal/cc/settings.cc:1256`) sets
+`aa_transitions.calculate = true` for **every** `draw-aa-transitions` command, curated or not;
+the `per-node` list only chooses what is *drawn*. `settings_v3.py` was dropping the whole
+`aa_transitions` schema entry whenever the block carried curated `per-node` labels (which every
+report tree `.tal` does), so a `.tal` asking for `method: eu-20200915` silently fell back to the
+tree's stored `imported` labels. Now `show` and `compute` are decided separately — and, to match
+AD, `tal-draw` computes **after** the node `hide` mods (both engines' consensus counters skip
+hidden children) and with `reset_labels = false`. Sections matching AD exactly, before → after:
+**B/Vic 0/10 → 10/10**, **H1 0/13 → 3/13**, **H3 4/9 → 4/9** (unchanged: that `.tal` is
+`imported`, so nothing is computed; its 5 diffs are the AD sentinel bug above).
+
+H1's residual 10/13 is a **third, separate** defect — per-inode differences in the eu-20200915
+port itself (`cc/tree/aa-transitions.cc`) on a 100k-leaf tree, a handful of positions per
+section rather than the wholly disjoint lists it produced before. It does not involve
+`section_aa_transitions`.
+
 ### Reported from the DRAWING path, not `compute_hz_sections`
 
 The diagnostic reports the `clade_plan` bands `draw-tree.cc` actually draws. That matters,

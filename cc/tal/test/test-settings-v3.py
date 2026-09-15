@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "py"))
 
-from ae.tal.settings_v3 import load_tal, _eval_condition, translate, _expand_seq_id
+from ae.tal.settings_v3 import load_tal, _eval_condition, translate
 
 
 def check_imported_no_curation() -> dict:
@@ -32,19 +32,61 @@ def check_imported_no_curation() -> dict:
     }
 
 
-def check_seq_id_alternation() -> dict:
-    """A `(A|B|C)` alternation seq_id (AD regex; tal-draw matches exactly) must expand
-    into its exact members so long-branch hides actually fire."""
-    expanded = _expand_seq_id("(A/X/1_aa|A/Y/2_bb|A/Z/3_cc)")
+def check_curated_method_still_computes() -> dict:
+    """Curated `per-node` labels suppress the BLANKET per-inode labels (`show`), but they
+    must NOT suppress the COMPUTATION the block asks for.
+
+    AD's Settings::add_draw_aa_transitions (acmacs-tal cc/settings.cc:1256) sets
+    `aa_transitions.calculate = true` for every `draw-aa-transitions` command, curated or
+    not, and HzSections::set_aa_transitions accumulates the resulting per-inode labels into
+    each hz-section's aa-transitions text — the text printed on every signature-page map
+    title. Dropping the whole block for a curated `.tal` silently fell back to the tree's
+    stored "imported" labels, so a `.tal` asking for eu-20200915 never got it.
+
+    An "imported" curated block has nothing to compute, so it still emits no entry."""
+    curated = [{"name": "Q1R", "show": True, "?first": "A", "?last": "C"}]
+    eu, _ = translate({"tal": [
+        {"N": "draw-aa-transitions", "method": "eu-20200915", "non-common-tolerance": 0.7,
+         "minimum-number-leaves-in-subtree": 4, "per-node": curated},
+    ]})
+    eu_aa = eu.get("aa_transitions", {})
+    imported, _ = translate({"tal": [
+        {"N": "draw-aa-transitions", "method": "imported", "per-node": curated},
+    ]})
+    blanket, _ = translate({"tal": [
+        {"N": "draw-aa-transitions", "method": "eu-20200915"},
+    ]})
+    return {
+        "curated eu-20200915: compute kept on": eu_aa.get("compute") is True,
+        "curated eu-20200915: blanket labels off": eu_aa.get("show") is False,
+        "curated eu-20200915: method passed through": eu_aa.get("method") == "eu-20200915",
+        "curated eu-20200915: tolerance passed through": eu_aa.get("tolerance") == 0.7,
+        "curated eu-20200915: min_leaves passed through": eu_aa.get("min_leaves") == 4,
+        "curated eu-20200915: mrca label still emitted": len(eu.get("mrca_labels", [])) == 1,
+        "curated imported: nothing to compute -> no entry": "aa_transitions" not in imported,
+        "uncurated eu-20200915: show and compute both on": (
+            blanket.get("aa_transitions", {}).get("show") is True
+            and blanket.get("aa_transitions", {}).get("compute") is True),
+    }
+
+
+def check_seq_id_passthrough() -> dict:
+    """A `seq_id` select is passed to tal-draw verbatim, whatever its shape. AD matches it as
+    an unanchored, case-insensitive regex and tal-draw now does the same (SeqIdMatcher,
+    cc/tal/draw-tree.hh), so the translator must NOT rewrite an alternation into its members
+    any more — a `(A|B|C)` group is a regex the matcher handles natively."""
     tal = {"tal": [
         {"N": "nodes", "select": {"seq_id": "(P/1_h|Q/2_h|R/3_h)"}, "apply": {"hide": True}},
+        {"N": "nodes", "select": {"seq_id": "S/4_h"}, "apply": {"hide": True}},
+        {"N": "nodes", "select": {"seq_id": ["T/5_h", "U/6*"]}, "apply": {"hide": True}},
     ]}
     schema, _ = translate(tal)
-    sel = schema.get("nodes", [{}])[0].get("select", {}).get("seq_id", [])
+    nodes = schema.get("nodes", [])
+    sel = [n.get("select", {}).get("seq_id", []) for n in nodes]
     return {
-        "seq_id alternation -> exact list": expanded == ["A/X/1_aa", "A/Y/2_bb", "A/Z/3_cc"],
-        "plain seq_id passes through": _expand_seq_id("A/X/1_aa") == ["A/X/1_aa"],
-        "nodes seq_id alternation expanded": sel == ["P/1_h", "Q/2_h", "R/3_h"],
+        "alternation kept intact as one regex": sel[0] == ["(P/1_h|Q/2_h|R/3_h)"],
+        "plain seq_id -> single-entry list": sel[1] == ["S/4_h"],
+        "list form preserved, order and all": sel[2] == ["T/5_h", "U/6*"],
     }
 
 
@@ -81,17 +123,31 @@ def check_dash_bar_colors() -> dict:
 
 
 def check_tip_names_and_edges() -> dict:
-    """node-id-size enables per-leaf tip names; a tree color-by sets color_edges (so edges
-    recolour) while time-series/clades-whocc continent does NOT (edges stay black)."""
+    """node-id-size enables per-leaf tip names; continent colouring — whether asked for by
+    the `tree` element or by time-series/clades-whocc — must NOT set color_edges.
+
+    AD reference (~/AC/eu/AD/sources/acmacs-tal/): DrawTree strokes every edge in
+    `node.color_edge_line` (cc/draw-tree.cc:73 leaf, :88 inode), whose only writers are an
+    explicit `nodes apply.tree-edge-line-color` mod (cc/settings.cc:292-295) and the
+    branches-by-edge diagnostic (cc/tree.cc:268, RED); its default is BLACK
+    (cc/tree.hh:108). A `tree` color-by feeds `coloring()`, which colours the leaf *label*
+    (cc/draw-tree.cc:77) plus the matrix/legend/world map — never the edges. So continent
+    colouring leaves the tree black. `color_by_pos` is the one color-by ae still maps to
+    color_edges (no AD reference render to check it against yet)."""
     tal_tip = {"tal": [{"N": "node-id-size", "size": 0.0002}]}
     s_tip, _ = translate(tal_tip)
     tal_tree_cb = {"tal": [{"N": "tree", "color-by": "continent"}]}
     s_tree, _ = translate(tal_tree_cb)
+    tal_tree_pos = {"tal": [{"N": "tree", "color-by": {"N": "pos-aa-frequency", "pos": 135}}]}
+    s_pos, _ = translate(tal_tree_pos)
     tal_ts = {"tal": [{"N": "time-series", "start": "2024-03", "end": "2026-03", "color-by": "continent"}]}
     s_ts, _ = translate(tal_ts)
     return {
         "node-id-size -> tip_names": s_tip.get("tip_names") is True,
-        "tree color-by continent sets color_edges": s_tree.get("color_edges") is True,
+        "tree color-by continent sets color_by_continent": s_tree.get("color_by_continent") is True,
+        "tree continent does NOT set color_edges (AD edges stay black)": "color_edges" not in s_tree,
+        "tree color-by pos DOES set color_edges": s_pos.get("color_edges") is True
+            and s_pos.get("color_by_pos") == {"pos": 135},
         "time-series continent does NOT set color_edges": "color_edges" not in s_ts,
     }
 
@@ -184,7 +240,8 @@ def main():
     }
     checks.update(check_eval_condition())
     checks.update(check_imported_no_curation())
-    checks.update(check_seq_id_alternation())
+    checks.update(check_curated_method_still_computes())
+    checks.update(check_seq_id_passthrough())
     checks.update(check_dash_bar_colors())
     checks.update(check_tip_names_and_edges())
     checks.update(check_time_series_slot())

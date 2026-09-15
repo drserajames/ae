@@ -321,20 +321,6 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list,
     return (width + margins["left"] + margins["right"]) / (1.0 + margins["top"] + margins["bottom"])
 
 
-def _expand_seq_id(sid: str) -> list:
-    """AD matches a `seq_id` select as a regex. The report `.tal`s use that only as a
-    top-level alternation of exact seq_ids — `(A|B|C)` to hide many long-branch strains
-    at once (tal-draw matches seq_ids exactly, so the literal `(A|B|C)` would match
-    nothing). Expand such an alternation into its exact members; pass any other string
-    through unchanged."""
-    s = sid.strip()
-    if len(s) >= 3 and s[0] == "(" and s[-1] == ")" and "|" in s:
-        inner = s[1:-1]
-        if "(" not in inner and ")" not in inner:   # flat alternation, no nested groups
-            return [part for part in inner.split("|") if part]
-    return [sid]
-
-
 def _dash_bar_legend(labels) -> list:
     """A dash-bar's legend: [{text, color, aa}] for each real label (text != ".") so the bar can
     show its position+amino-acid variants in their colours (AD dash-bar labels). `labels` is
@@ -373,10 +359,11 @@ def _select(select: dict, warnings: list) -> dict:
     if "seq_id" in select:
         sid = select["seq_id"]
         ids = sid if isinstance(sid, list) else [sid]
-        expanded: list = []
-        for one in ids:
-            expanded.extend(_expand_seq_id(one) if isinstance(one, str) else [one])
-        out["seq_id"] = expanded
+        # Passed through verbatim: tal-draw compiles each entry the way AD does — an
+        # unanchored, case-insensitive ECMAScript regex (see SeqIdMatcher in
+        # cc/tal/draw-tree.hh). An `(A|B|C)` alternation therefore needs no expansion here;
+        # it is a regex the matcher handles natively, as AD always did.
+        out["seq_id"] = [one for one in ids]
     if "cumulative >=" in select:
         out["cumulative_min"] = select["cumulative >="]
     if "edge >=" in select:
@@ -686,21 +673,23 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                 # AD draws the curated per-node labels OR (when no curation is given) every
                 # stored inode transition — never both. When we emitted curated MRCA labels,
                 # leaving aa_transitions.show on would flood the tree with every stored inode
-                # transition (the H3/H1 purple flood). Only enable show for an "imported"
-                # block that carries NO per-node curation.
+                # transition (the H3/H1 purple flood), so `show` stays off for a curated block.
+                #
+                # `compute` is a SEPARATE question from `show`, and curation must NOT switch it
+                # off: AD's Settings::add_draw_aa_transitions (acmacs-tal cc/settings.cc:1256)
+                # sets `aa_transitions.calculate = true` for EVERY `draw-aa-transitions`
+                # command, curated or not, and the labels it computes are what
+                # HzSections::set_aa_transitions (cc/hz-sections.cc:77) then accumulates into
+                # each hz-section's aa-transitions text — the text `sp.tal` prints on every
+                # signature-page map title. Dropping the whole block for a curated `.tal`
+                # (which every report tree `.tal` is) silently fell back to the tree's stored
+                # "imported" labels, so a `.tal` asking for `method: eu-20200915` never got it.
                 method = cmd.get("method", "imported")
-                if not emitted_mrca and method == "imported":
-                    aa = schema.setdefault("aa_transitions", {})
-                    aa["show"] = True
-                    aa["compute"] = False  # use the tree's stored ("imported") transitions
-                    mn = cmd.get("minimum-number-leaves-in-subtree")
-                    if isinstance(mn, (int, float)) and mn >= 1:
-                        aa["min_leaves"] = int(mn)
-                elif not emitted_mrca and method in ("eu-20200915", "eu_20200915", "eu-20200915-low-mem"):
+                if method in ("eu-20200915", "eu_20200915", "eu-20200915-low-mem"):
                     # ported in cc/tree/aa-transitions.cc and verified label-for-label against
                     # AD; compute it rather than fall back to the tree's stored labels.
                     aa = schema.setdefault("aa_transitions", {})
-                    aa["show"] = True
+                    aa["show"] = not emitted_mrca
                     aa["compute"] = True
                     aa["method"] = "eu-20200915"
                     if isinstance(cmd.get("non-common-tolerance"), (int, float)):
@@ -708,7 +697,17 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     mn = cmd.get("minimum-number-leaves-in-subtree")
                     if isinstance(mn, (int, float)) and mn >= 1:
                         aa["min_leaves"] = int(mn)
-                elif method not in ("imported", "eu-20200915", "eu_20200915", "eu-20200915-low-mem"):
+                elif method == "imported":
+                    # nothing to compute; the stored labels are already on the tree, so a
+                    # curated block needs no aa_transitions entry at all.
+                    if not emitted_mrca:
+                        aa = schema.setdefault("aa_transitions", {})
+                        aa["show"] = True
+                        aa["compute"] = False  # use the tree's stored ("imported") transitions
+                        mn = cmd.get("minimum-number-leaves-in-subtree")
+                        if isinstance(mn, (int, float)) and mn >= 1:
+                            aa["min_leaves"] = int(mn)
+                else:
                     warnings.append(f"draw-aa-transitions: method {method!r} not ported (only 'imported' and 'eu-20200915')")
             elif name == "hz-sections":
                 schema["hz_sections"] = [
