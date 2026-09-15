@@ -32,7 +32,9 @@ static std::string usage(std::string_view prog)
                        "  --aa-transitions-compute  RECOMPUTE the transitions (replacing the tree's stored ones);\n"
                        "                  independent of drawing, as in acmacs-tal — pass both to also draw them.\n"
                        "  --clades-report print the clade-section diagnostic (band counts, gaps, hz sections,\n"
-                       "                  intersect warnings) to stderr and <output>.taleg, then exit WITHOUT drawing.\n"
+                       "                  intersect warnings), then exit WITHOUT drawing. As in acmacs-tal the\n"
+                       "                  pasteable rows go to STDOUT and the banners/warnings to stderr, so\n"
+                       "                  `... > rows.txt` captures the block; <output>.taleg gets both.\n"
                        "  --settings=FILE loads all draw options (incl. per-clade colour/name overrides) from\n"
                        "  a JSON config; other flags are ignored when it is given (image-size-px still overrides).\n"
                        "  --help, -h      show this help\n",
@@ -154,7 +156,8 @@ int main(int argc, char* const argv[])
                 return 0;
             }
             if (clades_report_only) {
-                fmt::print("Clade-section report only ({} not drawn); diagnostic on stderr and in {}\n", positional[1],
+                // stderr: stdout carries the pasteable diagnostic rows and nothing else.
+                fmt::print(stderr, "Clade-section report only ({} not drawn); rows on stdout, banners on stderr, both in {}\n", positional[1],
                            std::filesystem::path{output}.replace_extension(".taleg").string());
                 return 0;
             }

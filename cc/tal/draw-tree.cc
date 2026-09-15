@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <array>
 #include <cmath>
@@ -9,6 +10,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -855,8 +857,23 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     if (taleg_path == std::filesystem::path{"-"})
         taleg_path.clear();
     bool taleg_started{false};
+    // AD splits every one of these blocks across the two streams: the `vvvv`/`^^^^` banners and the
+    // intersect warnings are AD_INFO/AD_WARNING (stderr), while the pasteable rows and their
+    // enclosing `[`/`]` are fmt::print (stdout) — see AD/sources/acmacs-tal/cc/clades.cc:224 and
+    // draw-aa-transitions.cc:757. That is what makes `./0do <page> > labels.txt` capture the block
+    // and nothing else, which matters most on the signature-page path: it passes an empty `output`,
+    // so no `.taleg` is written and stdout is the only clean capture there.
+    // `>>`-prefixed lines are the banner/warning shape; blank lines separate blocks, so both go to
+    // stderr and stdout carries only the pasteable JSON. The `.taleg` file keeps the whole block.
     const auto emit_diag = [&taleg_path, &taleg_started](const std::string& report) {
-        fmt::print(stderr, "{}", report);
+        for (std::size_t pos{0}; pos < report.size();) {
+            const auto eol = report.find('\n', pos);
+            const auto end = eol == std::string::npos ? report.size() : eol + 1;
+            const std::string_view line{report.data() + pos, end - pos};
+            fmt::print(line.starts_with(">>") || line == "\n" ? stderr : stdout, "{}", line);
+            pos = end;
+        }
+        std::fflush(stdout);
         if (taleg_path.empty())
             return;
         if (std::ofstream out{taleg_path, taleg_started ? std::ios::app : std::ios::trunc}; out) {
