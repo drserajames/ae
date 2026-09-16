@@ -129,6 +129,11 @@ size_t passage_classification_test(bool verbose)
         CD{"E3/D9/SPE1/E6", true, false}, // NIID, D and SPE in one string
         CD{"SPFCK1", false, true},     // SPFCK stays CELL despite the new SPF egg token
         CD{"SPFCE2", true, false},     // and SPFCE stays egg
+        // --- free text that does not parse, but plainly describes an egg passage (GISAID deflines) ---
+        CD{"embryonated hen egg", true, false},                                   //
+        CD{"10 passages - embryonated chicken eggs; Passage Line 5", true, false}, //
+        CD{"EMBRYONATED CHICKEN EGG", true, false},                               // already uppercase
+        CD{"egg", true, false},                                                   // bare word, no count
         // --- regressions: the token lists that were already there ---
         CD{"MDCK1", false, true},       //
         CD{"MDCK1/SIAT1", false, true}, //
@@ -147,6 +152,8 @@ size_t passage_classification_test(bool verbose)
         CD{"CS", false, false},   //
         CD{"VW10131161", false, false}, // VIDRL internal id, not a passage - still neither
         CD{"NULL1", false, false},      // placeholder - still neither
+        CD{"ORGAN SAMPLE", false, false},   // free text, not an egg - still neither
+        CD{"MDCK-MIX2/MDCK1", false, false}, // unparsed cell free text - still neither (scoped separately)
         CD{"", false, false},     // empty passage
     };
 

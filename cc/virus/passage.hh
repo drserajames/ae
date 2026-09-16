@@ -37,7 +37,18 @@ namespace ae::virus::passage
             // Egg tokens. "SPE"/"SPF" = SPF egg, "D" = egg-derived; all three also occur mid-string
             // ("E3/SPE1/E1", "E3SPF1/E1", "E3/D9/SPE1/E6"), where the last element decides.
             // Matches AD's re_egg set (E|D|SPF|SPFCE|SPE|EGG) - see py/ae/semantic/serum_circle.py.
-            bool egg() const { return name == "E" || name == "SPFCE" || name == "SPE" || name == "SPF" || name == "D"; }
+            bool egg() const
+            {
+                if (name == "E" || name == "SPFCE" || name == "SPE" || name == "SPF" || name == "D")
+                    return true;
+                // Free text that did not parse: the fallback in passage::parse() stores the whole raw
+                // source as the name with an EMPTY count, so this cannot fire on a parsed element (those
+                // are <=5 chars and conversion::apply already maps "EGG" -> "E"). GISAID deflines carry
+                // "EMBRYONATED HEN EGG" / "10 passages - embryonated chicken eggs; ...", which are eggs
+                // by any reading. AD's re_egg matches a bare "EGG" anywhere in the string; "EMBRYON"
+                // additionally catches the wording that spells out the substrate without the word egg.
+                return count.empty() && (name.find("EGG") != std::string::npos || name.find("EMBRYON") != std::string::npos);
+            }
             // Cell lines. "MK" = monkey kidney (conversion::apply maps a bare "M" to "MK"),
             // "QMC" = qualified MDCK cell (CDC/VIDRL, e.g. "QMC2/SIAT1").
             bool cell() const { return name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK" || name == "MK" || name == "QMC"; }
