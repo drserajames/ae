@@ -379,12 +379,17 @@ disables the gate. Raises if the chart has fewer than 2 layers.)")) //
         // ----------------------------------------------------------------------
 
         .def(
-            "grid_test", [](Chart& chart, size_t projection_no) { return grid_test::test(chart, projection_index{projection_no}); }, "projection_no"_a = 0) //
+            "grid_test", [](Chart& chart, size_t projection_no) { return grid_test::test(chart, projection_index{projection_no}); }, "projection_no"_a = 0,
+            pybind11::doc("test every connected point for a better position on a lattice of step 0.1 spanning the box of (partner +/- table distance) over its titers. "
+                          "Cost is per point (extent / 0.1 + 1) ^ dimensions probes, each summing that point's titers, so it grows by a factor of about extent / 0.1 "
+                          "(typically ~150) per added dimension: on a 1221 x 37 chart one pass took 0.5 s in 2D and 78 s in 3D; 4D would be hours. See TODO.md #14.")) //
         .def(
             "move_trapped_points_relax",
             [](Chart& chart, size_t projection_no, size_t n_iter) { chart.move_trapped_points_relax(projection_index{projection_no}, n_iter); },
             "projection_no"_a = 0, "n_iter"_a = 5,
-            pybind11::doc("interleave grid-test with LBFGS relaxation to resolve trapped/hemisphering points")) //
+            pybind11::doc("interleave grid-test with LBFGS relaxation to resolve trapped/hemisphering points: up to n_iter rounds, each a full grid_test() pass then relax, "
+                          "stopping early when nothing is trapped or hemisphering. Cheap in 2D; above 2D the grid_test() pass dominates and grows geometrically with "
+                          "dimensions (1221 x 37 chart: 2D 1.5 s, 3D 380 s for n_iter=5, while relax itself stays under 1.5 s up to 5D). See grid_test() and TODO.md #14.")) //
 
         // ----------------------------------------------------------------------
 
@@ -672,6 +677,11 @@ disables the gate. Raises if the chart has fewer than 2 layers.)")) //
     pybind11::class_<ProjectionRef>(chart_v3_submodule, "Projection")                                                                                         //
         .def("stress", &ProjectionRef::stress)                                                                                                                //
         .def("recalculate_stress", &ProjectionRef::recalculate_stress)                                                                                        //
+        .def("stress_table", &ProjectionRef::stress_table,
+             pybind11::doc("(n_antigens x n_sera) nested list: each titer's part of the stress, computed by the same C++ terms as recalculate_stress(), "
+                           "so nansum(stress_table()) == recalculate_stress(). < titers carry their sigmoid-weighted one-sided term. "
+                           "NaN where no titer is fitted: missing and > titers (ae does not fit >), dodgy titers unless the projection treats them as regular, "
+                           "and titers of disconnected points. Compare with recalculate_stress(), not stress(): stress() may be a cached value.")) //
         .def("comment", &ProjectionRef::comment)                                                                                                              //
         .def("minimum_column_basis", &ProjectionRef::minimum_column_basis)                                                                                    //
         .def("forced_column_bases", &ProjectionRef::forced_column_bases)                                                                                      //

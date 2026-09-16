@@ -1,4 +1,5 @@
 #include "chart/v3/chart.hh"
+#include "chart/v3/stress.hh"
 #include "chart/v3/avidity-test.hh"
 #include "chart/v3/selected-antigens-sera.hh"
 #include "chart/v3/serum-circles.hh"
@@ -22,6 +23,17 @@ namespace ae::py
 
         double stress() const { return projection.stress(*chart, ae::chart::v3::recalculate_stress::if_necessary); }
         double recalculate_stress() const { projection.reset_stress(); return projection.stress(*chart); }
+
+        // (n_antigens x n_sera) per-titer parts of the stress, NaN where no titer is fitted; sums to recalculate_stress()
+        std::vector<std::vector<double>> stress_table() const
+        {
+            const size_t n_ag = *chart->antigens().size(), n_sr = *chart->sera().size();
+            const auto flat = ae::chart::v3::stress_factory(*chart, projection, ae::chart::v3::optimization_options{}.mult).table(projection.layout().span(), n_ag, n_sr);
+            std::vector<std::vector<double>> result(n_ag);
+            for (size_t ag = 0; ag < n_ag; ++ag)
+                result[ag].assign(flat.begin() + static_cast<std::ptrdiff_t>(ag * n_sr), flat.begin() + static_cast<std::ptrdiff_t>((ag + 1) * n_sr));
+            return result;
+        }
         std::string_view comment() const { return projection.comment(); }
         std::string minimum_column_basis() const { return projection.minimum_column_basis().format("{}", ae::chart::v3::minimum_column_basis::use_none::yes); }
         const std::vector<double>& forced_column_bases() const { return projection.forced_column_bases().data(); }
