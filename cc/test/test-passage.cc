@@ -116,6 +116,19 @@ size_t passage_classification_test(bool verbose)
         CD{"MK1", false, true},        //
         CD{"SPE4/SPE3", true, false},  // NIID - SPE in both elements
         CD{"M1", false, true},         // conversion::apply maps bare "M" -> "MK"
+        // --- QMC (cell), SPF and D (egg) ---
+        CD{"QMC2", false, true},       // CDC/VIDRL qualified MDCK cell
+        CD{"QMC2/SIAT1", false, true}, // CDC
+        CD{"QMC2/HCK1", false, true},  // NIID
+        CD{"QMC1/QMC9", false, true},  //
+        CD{"SPF2", true, false},       // CDC, standalone SPF egg
+        CD{"E3SPF10", true, false},    // CDC, E-prefixed, no separator
+        CD{"E3SPF1/E1", true, false},  // last element E1 - egg before and after
+        CD{"E3/D1", true, false},      // VIDRL
+        CD{"E3/D8/D1", true, false},   // NIID
+        CD{"E3/D9/SPE1/E6", true, false}, // NIID, D and SPE in one string
+        CD{"SPFCK1", false, true},     // SPFCK stays CELL despite the new SPF egg token
+        CD{"SPFCE2", true, false},     // and SPFCE stays egg
         // --- regressions: the token lists that were already there ---
         CD{"MDCK1", false, true},       //
         CD{"MDCK1/SIAT1", false, true}, //
@@ -132,8 +145,8 @@ size_t passage_classification_test(bool verbose)
         // --- neither egg nor cell ---
         CD{"OR", false, false},   //
         CD{"CS", false, false},   //
-        CD{"QMC2", false, false}, // still unclassified - deliberately not part of this change
-        CD{"SPF3", false, false}, // ditto
+        CD{"VW10131161", false, false}, // VIDRL internal id, not a passage - still neither
+        CD{"NULL1", false, false},      // placeholder - still neither
         CD{"", false, false},     // empty passage
     };
 

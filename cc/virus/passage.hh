@@ -34,10 +34,13 @@ namespace ae::virus::passage
                 return result;
             }
 
-            // "SPE" = SPF egg (Crick/NIID, e.g. "E3/SPE1"); it also occurs mid-string ("E3/SPE1/E1").
-            bool egg() const { return name == "E" || name == "SPFCE" || name == "SPE"; }
-            // "MK" = monkey kidney (Crick/CNIC, e.g. "MDCK1/MK2"); note conversion::apply maps a bare "M" to "MK".
-            bool cell() const { return name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK" || name == "MK"; }
+            // Egg tokens. "SPE"/"SPF" = SPF egg, "D" = egg-derived; all three also occur mid-string
+            // ("E3/SPE1/E1", "E3SPF1/E1", "E3/D9/SPE1/E6"), where the last element decides.
+            // Matches AD's re_egg set (E|D|SPF|SPFCE|SPE|EGG) - see py/ae/semantic/serum_circle.py.
+            bool egg() const { return name == "E" || name == "SPFCE" || name == "SPE" || name == "SPF" || name == "D"; }
+            // Cell lines. "MK" = monkey kidney (conversion::apply maps a bare "M" to "MK"),
+            // "QMC" = qualified MDCK cell (CDC/VIDRL, e.g. "QMC2/SIAT1").
+            bool cell() const { return name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK" || name == "MK" || name == "QMC"; }
             bool good() const { return !name.empty() && (name == "OR" || !count.empty()); }
         };
 
