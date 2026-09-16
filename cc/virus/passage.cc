@@ -42,6 +42,9 @@ namespace ae::virus::passage
         {
             if (const auto found = std::find_if(std::begin(table), std::end(table), [&look_for](const auto& cc) { return cc.trigger == look_for; }); found != std::end(table))
                 return std::string{found->replacement};
+            // "MDCK-MIX"/"MDCKMIX" end in X, but it spells MIX and is not an unknown-count marker
+            else if (is_compound_cell_name(look_for))
+                return look_for;
             else if (look_for.size() > 1 && (look_for.back() == 'X' || look_for.back() == 'x'))
                 return look_for.substr(0, look_for.size() - 1);
             else
@@ -66,9 +69,9 @@ namespace ae::virus::passage
         // static constexpr auto H = dsl::lit_c<'H'> / dsl::lit_c<'h'>;
         static constexpr auto I = dsl::lit_c<'I'> / dsl::lit_c<'i'>;
         // static constexpr auto J = dsl::lit_c<'J'> / dsl::lit_c<'j'>;
-        // static constexpr auto K = dsl::lit_c<'K'> / dsl::lit_c<'k'>;
+        static constexpr auto K = dsl::lit_c<'K'> / dsl::lit_c<'k'>;
         static constexpr auto L = dsl::lit_c<'L'> / dsl::lit_c<'l'>;
-        // static constexpr auto M = dsl::lit_c<'M'> / dsl::lit_c<'m'>;
+        static constexpr auto M = dsl::lit_c<'M'> / dsl::lit_c<'m'>;
         // static constexpr auto N = dsl::lit_c<'N'> / dsl::lit_c<'n'>;
         static constexpr auto O = dsl::lit_c<'O'> / dsl::lit_c<'o'>;
         static constexpr auto P = dsl::lit_c<'P'> / dsl::lit_c<'p'>;
@@ -84,6 +87,7 @@ namespace ae::virus::passage
         // static constexpr auto Z = dsl::lit_c<'Z'> / dsl::lit_c<'z'>;
 
         static constexpr auto PLUS = dsl::lit_c<'+'>;
+        static constexpr auto HASH = dsl::lit_c<'#'>;
         static constexpr auto OPEN = dsl::lit_c<'('>;
         static constexpr auto CLOSE = dsl::lit_c<')'>;
         static constexpr auto WS = dsl::whitespace(dsl::ascii::space);
@@ -124,17 +128,31 @@ namespace ae::virus::passage
         {
             static constexpr auto cond = dsl::peek(dsl::ascii::alpha);
             static constexpr auto letter_not_x = dsl::ascii::alpha - dsl::lit_c<'X'> - dsl::lit_c<'x'>;
-            static constexpr auto rule = dsl::capture(dsl::ascii::alpha + dsl::while_(letter_not_x));
+            static constexpr auto component = dsl::ascii::alpha + dsl::while_(letter_not_x);
+            // "MDCKMIX" has to be matched literally: its trailing X would otherwise be taken as an
+            // unknown-count marker, leaving the name "MDCKMI" and the count "X2". The hyphenated
+            // spellings do not need that because the X is consumed by the tail below.
+            static constexpr auto mdckmix = M + D + C + K + M + I + X;
+            // A compound cell line: "MDCK-MIX2", "MDCK-SIAT1", "MDCK-ATL1". Only taken when a LETTER
+            // follows the hyphen, so "MDCK-1" still reads as MDCK count 1 (passage_number eats the
+            // hyphen), and the optional trailing X is the one in MIX.
+            static constexpr auto hyphen_tail = dsl::hyphen + component + dsl::if_(X);
+            static constexpr auto rule =
+                dsl::capture((dsl::peek(mdckmix) >> mdckmix) | (dsl::else_ >> (component + dsl::if_(dsl::peek(dsl::hyphen + dsl::ascii::alpha) >> hyphen_tail))));
             static constexpr auto value = lexy::callback<std::string>([](auto captured) {
-                if ((captured.end() - captured.begin()) > 5)
+                auto name = string::uppercase(captured.begin(), captured.end());
+                // The 5-character limit is what keeps free text ("EMBRYONATED", "UNKNOWN") out of
+                // the grammar, so an over-long name is only allowed when it is a known compound.
+                if (name.size() > 5 && !is_compound_cell_name(name))
                     throw invalid_input{"passage name too long"};
-                return std::string{conversion::apply(string::uppercase(captured.begin(), captured.end()))};
+                return std::string{conversion::apply(name)};
             });
         };
 
         struct passage_number
         {
-            static constexpr auto hyphen = dsl::while_(dsl::hyphen);
+            // VIDRL writes "MDCK#1" where other labs write "MDCK1" or "MDCK-1"
+            static constexpr auto hyphen = dsl::while_(dsl::hyphen / HASH);
             static constexpr auto symbol = dsl::digit<> | X | dsl::question_mark;
             static constexpr auto cond = dsl::peek(hyphen + dsl::digit<>);
             static constexpr auto rule = dsl::peek(hyphen + symbol) >> (hyphen + dsl::capture(dsl::while_(symbol)));
@@ -149,7 +167,7 @@ namespace ae::virus::passage
 
         struct passage_separator
         {
-            static constexpr auto symbol = dsl::slash | dsl::backslash | dsl::comma | PLUS;
+            static constexpr auto symbol = dsl::slash | dsl::backslash | dsl::comma | PLUS | dsl::period;
             static constexpr auto rule = symbol >> dsl::capture(dsl::while_(symbol));
             static constexpr auto value = lexy::as_string<std::string>;
         };
@@ -213,8 +231,15 @@ namespace ae::virus::passage
 
             static constexpr auto value = lexy::fold_inplace<deconstructed_t>(0, [](deconstructed_t& target, const auto& val) {
                 if constexpr (std::is_same_v<decltype(val), const part_without_name_t&>) {
-                    if (!target.elements.empty())
+                    if (!target.elements.empty()) {
+                        // A bare count repeats the previous name ("MDCK-SIAT1 2 +HCK1" = MDCK-SIAT1,
+                        // MDCK-SIAT2, HCK1), which is a new passage step, so the PREVIOUS element needs
+                        // the separator - exactly as the branch below does for two adjacent elements
+                        // that share a name. Without this, construct() runs them together as
+                        // "MDCK-SIAT1MDCK-SIAT2/HCK1".
+                        target.elements.back().new_lab = true;
                         target.elements.push_back({.name = target.elements.back().name, .count = val->count, .subtype = val->subtype, .new_lab = val->new_lab});
+                    }
                     // else
                     //     fmt::print("> ae::virus::passage::grammar::passages: adding part_without_name_t to an empty passage\n");
                 }

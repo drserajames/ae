@@ -12,6 +12,17 @@
 
 namespace ae::virus::passage
 {
+    // Compound cell-line names, e.g. Crick's "MDCK-MIX2/MDCK1" and its unhyphenated spelling
+    // "MDCKMIX2". They are longer than the 5-character limit a plain passage name gets, and
+    // "MDCK-MIX"/"MDCKMIX" end in an X that is part of the name rather than an unknown-count
+    // marker. THREE places rely on this one list, which is why it lives here and not in the
+    // grammar: passage-parse accepts an over-long name only if it is one of these,
+    // conversion::apply must not strip their trailing X, and element_t::cell() classifies them.
+    inline bool is_compound_cell_name(std::string_view name)
+    {
+        return name == "MDCK-MIX" || name == "MDCK-SIAT" || name == "MDCK-ATL" || name == "MDCKMIX";
+    }
+
     struct deconstructed_t
     {
         struct element_t
@@ -51,7 +62,13 @@ namespace ae::virus::passage
             }
             // Cell lines. "MK" = monkey kidney (conversion::apply maps a bare "M" to "MK"),
             // "QMC" = qualified MDCK cell (CDC/VIDRL, e.g. "QMC2/SIAT1").
-            bool cell() const { return name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK" || name == "MK" || name == "QMC"; }
+            bool cell() const
+            {
+                return name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK" || name == "MK" || name == "QMC" || is_compound_cell_name(name);
+            }
+            // A recognised passage token. An element carrying an unknown count is still usable
+            // when its name is one of these ("MDCKX/MDCK" is two knowns, not garbage) - see good().
+            bool known() const { return egg() || cell() || name == "OR"; }
             bool good() const { return !name.empty() && (name == "OR" || !count.empty()); }
         };
 
@@ -94,7 +111,11 @@ namespace ae::virus::passage
 
         bool good() const
         {
-            return !elements.empty() && elements.front().good() && std::count_if(std::begin(elements), std::end(elements), [](const auto& elt) { return !elt.good() || elt.count[0] == '?'; }) < 2;
+            // An unknown count is only evidence of garbage when the NAME is unrecognised too.
+            // "MDCKX/MDCK" and "PX/MDCK" are real passages with the counts not recorded, whereas
+            // "N/A, MDCK1" is two unrecognised single letters and must still be rejected.
+            const auto unrecognised = [](const auto& elt) { return !elt.good() || (elt.count[0] == '?' && !elt.known()); };
+            return !elements.empty() && elements.front().good() && std::count_if(std::begin(elements), std::end(elements), unrecognised) < 2;
         }
     };
 
