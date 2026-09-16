@@ -4,6 +4,7 @@
 #include "virus/passage.hh"
 
 static size_t passage_parsing_test(bool verbose);
+static size_t passage_classification_test(bool verbose);
 
 // ======================================================================
 
@@ -11,7 +12,7 @@ int main(int argc, const char* const* argv)
 {
     const bool verbose{argc > 1 && std::string_view{argv[1]} == "-v"};
     try {
-        return static_cast<int>(passage_parsing_test(verbose));
+        return static_cast<int>(passage_parsing_test(verbose) + passage_classification_test(verbose));
     }
     catch (std::exception& err) {
         fmt::print("> {}\n", err.what());
@@ -57,6 +58,26 @@ size_t passage_parsing_test(bool verbose)
         D{"Clinical Specimen", "OR"},                                                                                           //
         D{"10 passages - embryonated chicken eggs; Passage Line 5", "10 PASSAGES - EMBRYONATED CHICKEN EGGS; PASSAGE LINE 5"}, //
         D{"embryonated hen egg", "EMBRYONATED HEN EGG"},                                                                       //
+        D{"MDCK1/MK2", "MDCK1/MK2"},                                                                                           //
+        D{"E3/SPE1", "E3/SPE1"},                                                                                               //
+        D{"E3/SPE1/E1", "E3/SPE1/E1"},                                                                                         //
+        D{"M1", "MK1"},                                                                                                        //
+        // --- compound cell lines, '#', '.', and counts that were never recorded ---
+        D{"MDCK-MIX2/MDCK1", "MDCK-MIX2/MDCK1"},                                                                               //
+        D{"MDCK-MIX2", "MDCK-MIX2"},                                                                                           //
+        D{"MDCKMIX2/MDCK1", "MDCKMIX2/MDCK1"},                                                                                 // unhyphenated spelling
+        D{"MDCK-SIAT1P2/SIAT1", "MDCK-SIAT1P2/SIAT1"},                                                                         //
+        D{"MDCK-ATL1/MDCK1", "MDCK-ATL1/MDCK1"},                                                                               //
+        D{"MDCK-SIAT, SIAT1", "MDCK-SIAT?/SIAT1"},                                                                             //
+        D{"MDCK-SIAT1 2 +HCK1", "MDCK-SIAT1/MDCK-SIAT2/HCK1"},                                                                 // bare count repeats the name
+        D{"MDCK1 2", "MDCK1/MDCK2"},                                                                                           // ditto, short name
+        D{"MDCK#1, MDCK1", "MDCK1/MDCK1"},                                                                                     // VIDRL '#'
+        D{"MDCK-MIX2/SIAT2.SIAT3", "MDCK-MIX2/SIAT2/SIAT3"},                                                                   // '.' as separator
+        D{"PX/MDCK", "P?/MDCK?"},                                                                                              // no counts recorded at all
+        D{"MDCKX/MDCK", "MDCK?/MDCK?"},                                                                                        //
+        // regressions for the X and hyphen handling the above must not disturb
+        D{"MDCK-1", "MDCK1"},                                                                                                  // hyphen+digit is still a count
+        D{"AX41HCK2/MDCK1", "AX41HCK2/MDCK1"},                                                                                 // X-then-digit is still a count
     };
 
     size_t errors = 0;
@@ -87,5 +108,107 @@ size_t passage_parsing_test(bool verbose)
     return errors;
 
 } // passage_parsing_test
+
+// ----------------------------------------------------------------------
+
+// ----------------------------------------------------------------------
+
+struct CD
+{
+    std::string_view raw_name;
+    bool egg;
+    bool cell;
+};
+
+// egg/cell classification (Passage::is_egg / is_cell -> deconstructed_t::last().egg()/cell()).
+// This is what chart select_antigens(passage_is(...)) and hence semantic.vaccine.find() rely on.
+size_t passage_classification_test(bool verbose)
+{
+    const std::array data{
+        // --- the cases this test was added for: "MK" (monkey kidney) and "SPE" (SPF egg) ---
+        CD{"MDCK1/MK2", false, true},  // Crick B/Vic
+        CD{"E3/SPE1", true, false},    // Crick B/Vic
+        CD{"E3/SPE1/E1", true, false}, // VIDRL - last element E1, egg before and after
+        CD{"MK1", false, true},        //
+        CD{"SPE4/SPE3", true, false},  // NIID - SPE in both elements
+        CD{"M1", false, true},         // conversion::apply maps bare "M" -> "MK"
+        // --- QMC (cell), SPF and D (egg) ---
+        CD{"QMC2", false, true},       // CDC/VIDRL qualified MDCK cell
+        CD{"QMC2/SIAT1", false, true}, // CDC
+        CD{"QMC2/HCK1", false, true},  // NIID
+        CD{"QMC1/QMC9", false, true},  //
+        CD{"SPF2", true, false},       // CDC, standalone SPF egg
+        CD{"E3SPF10", true, false},    // CDC, E-prefixed, no separator
+        CD{"E3SPF1/E1", true, false},  // last element E1 - egg before and after
+        CD{"E3/D1", true, false},      // VIDRL
+        CD{"E3/D8/D1", true, false},   // NIID
+        CD{"E3/D9/SPE1/E6", true, false}, // NIID, D and SPE in one string
+        // --- compound cell lines and the other newly-parsing forms, all CELL ---
+        CD{"MDCK-MIX2/MDCK1", false, true},       // Crick
+        CD{"MDCK-MIX2", false, true},             //
+        CD{"MDCKMIX2", false, true},              // unhyphenated spelling
+        CD{"MDCK-SIAT1P2/SIAT1", false, true},    //
+        CD{"MDCK-SIAT1 2 +HCK1", false, true},    // NIID
+        CD{"MDCK-ATL1/MDCK1", false, true},       //
+        CD{"MDCK-SIAT, SIAT1", false, true},      //
+        CD{"MDCK-MIX2/MDCK", false, true},        // trailing element with no count
+        CD{"MDCK#1, MDCK1", false, true},         // VIDRL '#'
+        CD{"MDCK-MIX2/SIAT2.SIAT3", false, true}, // '.' separator
+        CD{"PX/MDCK", false, true},               // no counts recorded
+        CD{"MDCKX/MDCK", false, true},            //
+        CD{"SIATX/MDCK", false, true},            //
+        CD{"SPFCK1", false, true},     // SPFCK stays CELL despite the new SPF egg token
+        CD{"SPFCE2", true, false},     // and SPFCE stays egg
+        // --- free text that does not parse, but plainly describes an egg passage (GISAID deflines) ---
+        CD{"embryonated hen egg", true, false},                                   //
+        CD{"10 passages - embryonated chicken eggs; Passage Line 5", true, false}, //
+        CD{"EMBRYONATED CHICKEN EGG", true, false},                               // already uppercase
+        CD{"egg", true, false},                                                   // bare word, no count
+        // --- regressions: the token lists that were already there ---
+        CD{"MDCK1", false, true},       //
+        CD{"MDCK1/SIAT1", false, true}, //
+        CD{"SIAT2", false, true},       //
+        CD{"HCK1", false, true},        //
+        CD{"MDCK1/HCK2", false, true},  // NIID
+        CD{"SPFCK1", false, true},      //
+        CD{"E3", true, false},          //
+        CD{"E3/E1/E1", true, false},    // CNIC
+        CD{"E4", true, false},          // NIID
+        CD{"SPFCE2", true, false},      //
+        CD{"C1", false, true},          // conversion "C" -> "MDCK"
+        CD{"EGG3", true, false},        // conversion "EGG" -> "E"
+        // --- neither egg nor cell ---
+        CD{"OR", false, false},   //
+        CD{"CS", false, false},   //
+        // --- no recognisable token at all: NOT passages, and must stay unclassified ---
+        CD{"VW10131161", false, false},   // VIDRL specimen id
+        CD{"NULL1", false, false},        // placeholder
+        CD{"ORGAN SAMPLE", false, false}, // free text naming neither egg nor cell
+        CD{"MCDK1", false, false},        // MDCK typo - parses, so the text fallback never applies
+        CD{"MDCK-SIAT1 P3/MDK1", false, false}, // ditto: parses, last element is the typo "MDK1"
+        // --- unparsed text that still names a cell line, or lost its name in transcription ---
+        CD{"N/A, MDCK1", false, true},       // annotation the grammar cannot read, but MDCK1 is there
+        CD{"UNKNOWN, MDCK1", false, true},   // ditto
+        CD{"QMC-HI", false, true},           // QMC cell line with an assay suffix
+        CD{"2", false, true},                // bare count, cell-line name dropped in transcription
+        CD{"", false, false},     // empty passage
+    };
+
+    size_t errors = 0;
+    for (const auto& entry : data) {
+        const ae::virus::Passage passage{entry.raw_name};
+        const auto egg = passage.is_egg(), cell = passage.is_cell();
+        if (egg != entry.egg || cell != entry.cell) {
+            fmt::print("> \"{}\" -> \"{}\"  egg={} cell={}  expected: egg={} cell={}\n", entry.raw_name, passage.to_string(), egg, cell, entry.egg, entry.cell);
+            ++errors;
+        }
+        else if (verbose)
+            fmt::print("  {:30s} -> {:20s} egg={:5} cell={:5}\n", fmt::format("\"{}\"", entry.raw_name), fmt::format("\"{}\"", passage.to_string()), egg, cell);
+    }
+    if (errors)
+        fmt::print("> {} classification errors found\n", errors);
+    return errors;
+
+} // passage_classification_test
 
 // ----------------------------------------------------------------------

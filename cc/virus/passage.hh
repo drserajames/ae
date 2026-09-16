@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -12,6 +14,17 @@
 
 namespace ae::virus::passage
 {
+    // Compound cell-line names, e.g. Crick's "MDCK-MIX2/MDCK1" and its unhyphenated spelling
+    // "MDCKMIX2". They are longer than the 5-character limit a plain passage name gets, and
+    // "MDCK-MIX"/"MDCKMIX" end in an X that is part of the name rather than an unknown-count
+    // marker. THREE places rely on this one list, which is why it lives here and not in the
+    // grammar: passage-parse accepts an over-long name only if it is one of these,
+    // conversion::apply must not strip their trailing X, and element_t::cell() classifies them.
+    inline bool is_compound_cell_name(std::string_view name)
+    {
+        return name == "MDCK-MIX" || name == "MDCK-SIAT" || name == "MDCK-ATL" || name == "MDCKMIX";
+    }
+
     struct deconstructed_t
     {
         struct element_t
@@ -34,8 +47,46 @@ namespace ae::virus::passage
                 return result;
             }
 
-            bool egg() const { return name == "E" || name == "SPFCE"; }
-            bool cell() const { return name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK"; }
+            // Egg tokens. "SPE"/"SPF" = SPF egg, "D" = egg-derived; all three also occur mid-string
+            // ("E3/SPE1/E1", "E3SPF1/E1", "E3/D9/SPE1/E6"), where the last element decides.
+            // Matches AD's re_egg set (E|D|SPF|SPFCE|SPE|EGG) - see py/ae/semantic/serum_circle.py.
+            bool egg() const
+            {
+                if (name == "E" || name == "SPFCE" || name == "SPE" || name == "SPF" || name == "D")
+                    return true;
+                // Free text that did not parse: the fallback in passage::parse() stores the whole raw
+                // source as the name with an EMPTY count, so this cannot fire on a parsed element (those
+                // are <=5 chars and conversion::apply already maps "EGG" -> "E"). GISAID deflines carry
+                // "EMBRYONATED HEN EGG" / "10 passages - embryonated chicken eggs; ...", which are eggs
+                // by any reading. AD's re_egg matches a bare "EGG" anywhere in the string; "EMBRYON"
+                // additionally catches the wording that spells out the substrate without the word egg.
+                return count.empty() && (name.find("EGG") != std::string::npos || name.find("EMBRYON") != std::string::npos);
+            }
+            // Cell lines. "MK" = monkey kidney (conversion::apply maps a bare "M" to "MK"),
+            // "QMC" = qualified MDCK cell (CDC/VIDRL, e.g. "QMC2/SIAT1").
+            bool cell() const
+            {
+                if (name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK" || name == "MK" || name == "QMC" || is_compound_cell_name(name))
+                    return true;
+                // Free text that did not parse (see egg()): take a recognised cell line named
+                // ANYWHERE in it as evidence, the same way egg() takes "EGG". "QMC-HI",
+                // "N/A, MDCK1" and "UNKNOWN, MDCK1" are real cell passages carrying an annotation
+                // the grammar cannot read, and a passage that is nothing but a number ("2") is a
+                // transcription that lost its cell-line name.
+                // Deliberately NOT a blanket "unparsed means cell": a string with no recognisable
+                // token at all - VIDRL's "VW10131161" specimen ids, "NULL1" - stays unclassified,
+                // because those are not passages rather than passages we failed to read.
+                if (!count.empty() || name.empty() || egg())
+                    return false;
+                for (const auto token : {"MDCK", "SIAT", "HCK", "QMC", "SPFCK"}) {
+                    if (name.find(token) != std::string::npos)
+                        return true;
+                }
+                return std::all_of(std::begin(name), std::end(name), [](unsigned char cc) { return std::isdigit(cc) || std::isspace(cc); });
+            }
+            // A recognised passage token. An element carrying an unknown count is still usable
+            // when its name is one of these ("MDCKX/MDCK" is two knowns, not garbage) - see good().
+            bool known() const { return egg() || cell() || name == "OR"; }
             bool good() const { return !name.empty() && (name == "OR" || !count.empty()); }
         };
 
@@ -78,7 +129,11 @@ namespace ae::virus::passage
 
         bool good() const
         {
-            return !elements.empty() && elements.front().good() && std::count_if(std::begin(elements), std::end(elements), [](const auto& elt) { return !elt.good() || elt.count[0] == '?'; }) < 2;
+            // An unknown count is only evidence of garbage when the NAME is unrecognised too.
+            // "MDCKX/MDCK" and "PX/MDCK" are real passages with the counts not recorded, whereas
+            // "N/A, MDCK1" is two unrecognised single letters and must still be rejected.
+            const auto unrecognised = [](const auto& elt) { return !elt.good() || (elt.count[0] == '?' && !elt.known()); };
+            return !elements.empty() && elements.front().good() && std::count_if(std::begin(elements), std::end(elements), unrecognised) < 2;
         }
     };
 
