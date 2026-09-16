@@ -62,6 +62,22 @@ size_t passage_parsing_test(bool verbose)
         D{"E3/SPE1", "E3/SPE1"},                                                                                               //
         D{"E3/SPE1/E1", "E3/SPE1/E1"},                                                                                         //
         D{"M1", "MK1"},                                                                                                        //
+        // --- compound cell lines, '#', '.', and counts that were never recorded ---
+        D{"MDCK-MIX2/MDCK1", "MDCK-MIX2/MDCK1"},                                                                               //
+        D{"MDCK-MIX2", "MDCK-MIX2"},                                                                                           //
+        D{"MDCKMIX2/MDCK1", "MDCKMIX2/MDCK1"},                                                                                 // unhyphenated spelling
+        D{"MDCK-SIAT1P2/SIAT1", "MDCK-SIAT1P2/SIAT1"},                                                                         //
+        D{"MDCK-ATL1/MDCK1", "MDCK-ATL1/MDCK1"},                                                                               //
+        D{"MDCK-SIAT, SIAT1", "MDCK-SIAT?/SIAT1"},                                                                             //
+        D{"MDCK-SIAT1 2 +HCK1", "MDCK-SIAT1/MDCK-SIAT2/HCK1"},                                                                 // bare count repeats the name
+        D{"MDCK1 2", "MDCK1/MDCK2"},                                                                                           // ditto, short name
+        D{"MDCK#1, MDCK1", "MDCK1/MDCK1"},                                                                                     // VIDRL '#'
+        D{"MDCK-MIX2/SIAT2.SIAT3", "MDCK-MIX2/SIAT2/SIAT3"},                                                                   // '.' as separator
+        D{"PX/MDCK", "P?/MDCK?"},                                                                                              // no counts recorded at all
+        D{"MDCKX/MDCK", "MDCK?/MDCK?"},                                                                                        //
+        // regressions for the X and hyphen handling the above must not disturb
+        D{"MDCK-1", "MDCK1"},                                                                                                  // hyphen+digit is still a count
+        D{"AX41HCK2/MDCK1", "AX41HCK2/MDCK1"},                                                                                 // X-then-digit is still a count
     };
 
     size_t errors = 0;
@@ -127,6 +143,20 @@ size_t passage_classification_test(bool verbose)
         CD{"E3/D1", true, false},      // VIDRL
         CD{"E3/D8/D1", true, false},   // NIID
         CD{"E3/D9/SPE1/E6", true, false}, // NIID, D and SPE in one string
+        // --- compound cell lines and the other newly-parsing forms, all CELL ---
+        CD{"MDCK-MIX2/MDCK1", false, true},       // Crick
+        CD{"MDCK-MIX2", false, true},             //
+        CD{"MDCKMIX2", false, true},              // unhyphenated spelling
+        CD{"MDCK-SIAT1P2/SIAT1", false, true},    //
+        CD{"MDCK-SIAT1 2 +HCK1", false, true},    // NIID
+        CD{"MDCK-ATL1/MDCK1", false, true},       //
+        CD{"MDCK-SIAT, SIAT1", false, true},      //
+        CD{"MDCK-MIX2/MDCK", false, true},        // trailing element with no count
+        CD{"MDCK#1, MDCK1", false, true},         // VIDRL '#'
+        CD{"MDCK-MIX2/SIAT2.SIAT3", false, true}, // '.' separator
+        CD{"PX/MDCK", false, true},               // no counts recorded
+        CD{"MDCKX/MDCK", false, true},            //
+        CD{"SIATX/MDCK", false, true},            //
         CD{"SPFCK1", false, true},     // SPFCK stays CELL despite the new SPF egg token
         CD{"SPFCE2", true, false},     // and SPFCE stays egg
         // --- free text that does not parse, but plainly describes an egg passage (GISAID deflines) ---
@@ -153,7 +183,10 @@ size_t passage_classification_test(bool verbose)
         CD{"VW10131161", false, false}, // VIDRL internal id, not a passage - still neither
         CD{"NULL1", false, false},      // placeholder - still neither
         CD{"ORGAN SAMPLE", false, false},   // free text, not an egg - still neither
-        CD{"MDCK-MIX2/MDCK1", false, false}, // unparsed cell free text - still neither (scoped separately)
+        CD{"N/A, MDCK1", false, false},      // placeholder - must NOT become cell
+        CD{"UNKNOWN, MDCK1", false, false},  // ditto
+        CD{"QMC-HI", false, false},          // not a passage
+        CD{"2", false, false},               // bare number, no name
         CD{"", false, false},     // empty passage
     };
 
