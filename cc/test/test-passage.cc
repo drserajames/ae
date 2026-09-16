@@ -180,13 +180,17 @@ size_t passage_classification_test(bool verbose)
         // --- neither egg nor cell ---
         CD{"OR", false, false},   //
         CD{"CS", false, false},   //
-        CD{"VW10131161", false, false}, // VIDRL internal id, not a passage - still neither
-        CD{"NULL1", false, false},      // placeholder - still neither
-        CD{"ORGAN SAMPLE", false, false},   // free text, not an egg - still neither
-        CD{"N/A, MDCK1", false, false},      // placeholder - must NOT become cell
-        CD{"UNKNOWN, MDCK1", false, false},  // ditto
-        CD{"QMC-HI", false, false},          // not a passage
-        CD{"2", false, false},               // bare number, no name
+        // --- no recognisable token at all: NOT passages, and must stay unclassified ---
+        CD{"VW10131161", false, false},   // VIDRL specimen id
+        CD{"NULL1", false, false},        // placeholder
+        CD{"ORGAN SAMPLE", false, false}, // free text naming neither egg nor cell
+        CD{"MCDK1", false, false},        // MDCK typo - parses, so the text fallback never applies
+        CD{"MDCK-SIAT1 P3/MDK1", false, false}, // ditto: parses, last element is the typo "MDK1"
+        // --- unparsed text that still names a cell line, or lost its name in transcription ---
+        CD{"N/A, MDCK1", false, true},       // annotation the grammar cannot read, but MDCK1 is there
+        CD{"UNKNOWN, MDCK1", false, true},   // ditto
+        CD{"QMC-HI", false, true},           // QMC cell line with an assay suffix
+        CD{"2", false, true},                // bare count, cell-line name dropped in transcription
         CD{"", false, false},     // empty passage
     };
 

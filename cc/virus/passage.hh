@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -64,7 +66,23 @@ namespace ae::virus::passage
             // "QMC" = qualified MDCK cell (CDC/VIDRL, e.g. "QMC2/SIAT1").
             bool cell() const
             {
-                return name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK" || name == "MK" || name == "QMC" || is_compound_cell_name(name);
+                if (name == "MDCK" || name == "SIAT" || name == "HCK" || name == "SPFCK" || name == "MK" || name == "QMC" || is_compound_cell_name(name))
+                    return true;
+                // Free text that did not parse (see egg()): take a recognised cell line named
+                // ANYWHERE in it as evidence, the same way egg() takes "EGG". "QMC-HI",
+                // "N/A, MDCK1" and "UNKNOWN, MDCK1" are real cell passages carrying an annotation
+                // the grammar cannot read, and a passage that is nothing but a number ("2") is a
+                // transcription that lost its cell-line name.
+                // Deliberately NOT a blanket "unparsed means cell": a string with no recognisable
+                // token at all - VIDRL's "VW10131161" specimen ids, "NULL1" - stays unclassified,
+                // because those are not passages rather than passages we failed to read.
+                if (!count.empty() || name.empty() || egg())
+                    return false;
+                for (const auto token : {"MDCK", "SIAT", "HCK", "QMC", "SPFCK"}) {
+                    if (name.find(token) != std::string::npos)
+                        return true;
+                }
+                return std::all_of(std::begin(name), std::end(name), [](unsigned char cc) { return std::isdigit(cc) || std::isspace(cc); });
             }
             // A recognised passage token. An element carrying an unknown count is still usable
             // when its name is one of these ("MDCKX/MDCK" is two knowns, not garbage) - see good().
