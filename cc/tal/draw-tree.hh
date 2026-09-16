@@ -187,9 +187,11 @@ namespace ae::tal
                                // `.tal`'s own "L" is NOT read — see settings_v3.
         bool shown{true};      // AD HzSection::shown — a hidden section still EXISTS (it is reported
                                // and it takes no letter); it is simply not drawn
-        // AD's curated `aa_transitions` (HzSection::label_aa_transitions) is deliberately NOT read:
-        // the curated-vs-computed section field is a separate design question Sarah deferred on
-        // 15 Sep 2026 — see cc/tal/PORTING.md §"Section-level string parity is NOT a meaningful measure".
+        std::optional<std::string> aa_transitions{}; // AD HzSection::label_aa_transitions — the CURATED
+                               // section text. nullopt when the entry has no key, "" when it is
+                               // hand-blanked: the two must stay distinct. The hz-sections dump prints
+                               // it in place of the computed list when set (AD aa_transitions_format);
+                               // nothing drawn depends on it. See cc/tal/PORTING.md.
     };
 
     struct TreeDrawParameters
