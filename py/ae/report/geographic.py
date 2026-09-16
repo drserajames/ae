@@ -266,15 +266,17 @@ def _present(v) -> bool:
 def _norm_coloring(spec: dict):
     """Normalise a report `geographic_coloring(subtype)` spec the way vcm's
     `_preprocess_coloring` does: `aa` given as a space-separated string -> list of
-    "POSAA" tokens, and `fill` -> `color`. Returns (default_dict, list_of_rules)."""
+    "POSAA" tokens, and `fill` -> `color`. An optional `nuc` field is normalised the same
+    way into "POSNUC" tokens (absent/empty -> []). Returns (default_dict, list_of_rules)."""
     default = dict(spec.get("default") or {})
     rules = []
     for raw in (spec.get("apply") or []):
         r = dict(raw)
-        aa = r.get("aa")
-        if isinstance(aa, str):
-            aa = aa.split()
-        r["aa"] = list(aa) if aa else []
+        for field in ("aa", "nuc"):
+            tokens = r.get(field)
+            if isinstance(tokens, str):
+                tokens = tokens.split()
+            r[field] = list(tokens) if tokens else []
         r["color"] = r.get("color") if _present(r.get("color")) else r.get("fill")
         rules.append(r)
     return default, rules
@@ -284,10 +286,17 @@ class _Coloring:
     """Apply a report `geographic_coloring(subtype)` spec to antigens — a faithful Python port
     of AD `ColoringByAminoAcid::color`. For each antigen the aa sequence is fetched from the
     subtype's seqdb (name/reassortant/passage match) and the ordered `apply` rules are evaluated:
-    a `sequenced` rule sets only the fill; an `aa` rule whose `SequenceAA.matches_all` (incl. `!`
-    negation and `-` deletions) is satisfied overrides fill/outline/outline_width; later matches
-    win. Unsequenced / unmatched antigens keep the `default` colouring. Results memoised per
-    (name, reassortant, passage)."""
+    a `sequenced` rule sets only the fill; an `aa` and/or `nuc` rule overrides fill/outline/
+    outline_width when every non-empty one of its `aa`/`nuc` token lists is satisfied by
+    `matches_all` (incl. `!` negation and `-` deletions); later matches win. Unsequenced /
+    unmatched antigens keep the `default` colouring. Results memoised per
+    (name, reassortant, passage).
+
+    `nuc` tokens use the same 1-based positions as clades.json `nuc` entries — both are tested
+    with `matches_all` on the seqdb ref's (master-resolved) `nuc`, as `SeqdbSelected::find_clades`
+    does. One deliberate difference from `Clades::clades`: there a missing nucleotide sequence
+    counts as matching; here a rule with `nuc` tokens does NOT match an antigen with no
+    nucleotide sequence. An antigen with no aa sequence is unsequenced and gets the default."""
 
     def __init__(self, ae_backend, seqdb_subtype: str, spec: dict):
         """Normalise the colouring `spec` into a default plus ordered rules, and open the
@@ -307,24 +316,40 @@ class _Coloring:
             "outline_width": float(self._default["outline_width"]) if _present(self._default.get("outline_width")) else 1.0,
         }
 
-    def _aa_for(self, name, reassortant, passage):
+    def _sequences_for(self, name, reassortant, passage):
+        """(aa, nuc) of the first seqdb match, each None if absent."""
         if self._seqdb is None:
-            return None
+            return None, None
         try:
             sel = self._seqdb.select_all().filter_name(name=name, reassortant=reassortant, passage=passage)
             if len(sel):
                 sel.find_masters()      # seqdb v4 hash-dedups identical seqs into master/slave;
                                         # slaves carry no inline aa — resolve to the master first,
                                         # else ~half the strains read empty aa -> transparent dot.
-                aa = sel[0].aa
-                return aa if aa else None
+                aa, nuc = sel[0].aa, sel[0].nuc
+                return (aa if aa else None), (nuc if nuc else None)
         except Exception:
-            return None
-        return None
+            return None, None
+        return None, None
+
+    @staticmethod
+    def _matches(seq, tokens) -> bool:
+        if seq is None:
+            return False
+        try:
+            return bool(seq.matches_all(tokens))
+        except Exception:
+            return False
+
+    def _rule_matches(self, r, aa, nuc) -> bool:
+        """aa and nuc are each a constraint only when non-empty; a rule with neither never matches."""
+        if not r["aa"] and not r["nuc"]:
+            return False
+        return (not r["aa"] or self._matches(aa, r["aa"])) and (not r["nuc"] or self._matches(nuc, r["nuc"]))
 
     def color(self, ag) -> dict:
         """Resolve a hidb antigen's fill/outline colouring by evaluating the ordered
-        `aa`/`sequenced` rules against its seqdb sequence (later matches win), memoised;
+        `aa`/`nuc`/`sequenced` rules against its seqdb sequences (later matches win), memoised;
         the default colouring if unsequenced or unmatched."""
         name = ag.name()
         passage = getattr(ag, "passage", "") or ""
@@ -333,20 +358,15 @@ class _Coloring:
         if key in self._cache:
             return self._cache[key]
         result = self._default_result()
-        aa = self._aa_for(name, reassortant, passage)
+        aa, nuc = self._sequences_for(name, reassortant, passage)
         if aa is not None:
             for r in self._rules:
                 if _truthy(r.get("sequenced")):
                     result["color"] = r.get("color") or "pink"   # AD: sequenced rule sets fill only
-                elif r["aa"]:
-                    try:
-                        matched = aa.matches_all(r["aa"])
-                    except Exception:
-                        matched = False
-                    if matched:
-                        result["color"] = r.get("color") or "pink"
-                        result["outline"] = r["outline"] if _present(r.get("outline")) else "transparent"
-                        result["outline_width"] = float(r["outline_width"]) if _present(r.get("outline_width")) else 0.0
+                elif self._rule_matches(r, aa, nuc):
+                    result["color"] = r.get("color") or "pink"
+                    result["outline"] = r["outline"] if _present(r.get("outline")) else "transparent"
+                    result["outline_width"] = float(r["outline_width"]) if _present(r.get("outline_width")) else 0.0
         self._cache[key] = result
         return result
 
