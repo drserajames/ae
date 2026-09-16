@@ -672,6 +672,11 @@ disables the gate. Raises if the chart has fewer than 2 layers.)")) //
     pybind11::class_<ProjectionRef>(chart_v3_submodule, "Projection")                                                                                         //
         .def("stress", &ProjectionRef::stress)                                                                                                                //
         .def("recalculate_stress", &ProjectionRef::recalculate_stress)                                                                                        //
+        .def("stress_table", &ProjectionRef::stress_table,
+             pybind11::doc("(n_antigens x n_sera) nested list: each titer's part of the stress, computed by the same C++ terms as recalculate_stress(), "
+                           "so nansum(stress_table()) == recalculate_stress(). < titers carry their sigmoid-weighted one-sided term. "
+                           "NaN where no titer is fitted: missing and > titers (ae does not fit >), dodgy titers unless the projection treats them as regular, "
+                           "and titers of disconnected points. Compare with recalculate_stress(), not stress(): stress() may be a cached value.")) //
         .def("comment", &ProjectionRef::comment)                                                                                                              //
         .def("minimum_column_basis", &ProjectionRef::minimum_column_basis)                                                                                    //
         .def("forced_column_bases", &ProjectionRef::forced_column_bases)                                                                                      //

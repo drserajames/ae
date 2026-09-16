@@ -1,4 +1,5 @@
 #include "ext/range-v3.hh"
+#include "utils/log.hh"
 #include "chart/v3/vector-math.hh"
 #include "chart/v3/sigmoid.hh"
 #include "chart/v3/stress.hh"
@@ -188,6 +189,26 @@ double ae::chart::v3::Stress::value(const Layout& aLayout) const
     return value(aLayout.span());
 
 } // ae::chart::v3::Stress::value
+
+// ----------------------------------------------------------------------
+
+std::vector<double> ae::chart::v3::Stress::table(std::span<const double> args, size_t number_of_antigens, size_t number_of_sera) const
+{
+    std::vector<double> result(number_of_antigens * number_of_sera, std::numeric_limits<double>::quiet_NaN());
+    // entry.point_1 is the antigen, entry.point_2 is number_of_antigens + serum (see TableDistances::update)
+    const auto cell = [&result, number_of_antigens, number_of_sera](const auto& entry) -> double& {
+        const auto antigen = entry.point_1.get(), serum = entry.point_2.get() - number_of_antigens;
+        if (antigen >= number_of_antigens || serum >= number_of_sera)
+            throw std::runtime_error{AD_FORMAT("Stress::table: entry ({}, {}) outside {} antigens x {} sera", entry.point_1.get(), entry.point_2.get(), number_of_antigens, number_of_sera)};
+        return result[antigen * number_of_sera + serum];
+    };
+    for (const auto& entry : table_distances().regular())
+        cell(entry) = contribution_regular(entry.point_1, entry.point_2, entry.distance, args, number_of_dimensions_, entry.weight);
+    for (const auto& entry : table_distances().less_than())
+        cell(entry) = contribution_less_than(entry.point_1, entry.point_2, entry.distance, args, number_of_dimensions_, entry.weight);
+    return result;
+
+} // ae::chart::v3::Stress::table
 
 // ----------------------------------------------------------------------
 

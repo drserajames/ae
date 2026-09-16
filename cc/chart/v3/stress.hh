@@ -51,6 +51,10 @@ namespace ae::chart::v3
 
         double value(std::span<const double> args) const;
         double value(const Layout& aLayout) const;
+        // Per-titer parts of value(): one cell per table-distance entry, in (n_antigens x n_sera) row-major order,
+        // each the same weighted term value() sums. NaN where the table contributes nothing: missing and
+        // more-than titers, dodgy titers unless dodgy_titer_is_regular, and titers of disconnected points.
+        std::vector<double> table(std::span<const double> args, size_t number_of_antigens, size_t number_of_sera) const;
         double contribution(point_index point_no, std::span<const double> args) const;
         double contribution(point_index point_no, const Layout& aLayout) const;
         double contribution(point_index point_no, const TableDistancesForPoint& table_distances_for_point, std::span<const double> args) const;
