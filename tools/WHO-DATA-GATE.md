@@ -139,8 +139,12 @@ Two files. Neither ever holds a **strain name** in plaintext:
 # Whole tree (what CI runs)
 tools/who-data-gate.py --all
 
-# Staged blobs only (what the pre-commit hook runs)
+# Staged blobs only (what the pre-commit hook runs) — the INDEX: `git add` first
 tools/who-data-gate.py --staged
+
+# Every commit in a range, one at a time (run this before a push or a merge)
+tools/who-data-gate.py --range main..HEAD
+tools/who-data-gate.py --range origin/main...HEAD
 
 # A commit message
 tools/who-data-gate.py --message-file .git/COMMIT_EDITMSG
@@ -151,6 +155,43 @@ tools/who-data-gate.py path/to/file.py some/dir
 ```
 
 Exit codes: `0` clean · `1` potential WHO data found (blocked) · `2` usage/environment error.
+
+### What each mode examines — and what it cannot see
+
+| Mode | Examines | Blind to |
+|------|----------|----------|
+| `--all` | the current tree (git-tracked files) | untracked and gitignored files; **all history** |
+| `--staged` | the **index** — staged blobs | anything not yet `git add`ed; **all history** |
+| `--range A..B` | **each commit** in the range: the blobs it touched, and its message | commits outside the range |
+| paths | those files on disk, as they are now | history |
+
+**`--staged` reads the index, not the working tree.** Edit a file, forget to stage it, run
+`--staged`, and there is nothing to scan. That once printed `clean` and exited 0.
+
+**Only `--range` sees history.** A name added in one commit and removed in a later one is
+gone from the tip, so `--all`, `--staged` and paths all pass — but it still ships in the
+history you push. `--range` scans every commit on its own, never the range's net diff
+(`git diff A..B`), which would net the name out to nothing. For a merge commit it scans the
+combined diff (`-c`): content the merge itself introduced, such as a conflict resolution.
+Content brought in from a parent is scanned at the commit that introduced it. That commit
+is in the range unless the range's base can already reach it.
+
+Findings from `--range` carry `<commit>:<path>` (or `<commit>:<commit-message>`), followed by
+a per-commit tally that labels each commit **`[tip]`** or **`[history]`**. The label tells
+you the remedy. A `[tip]` hit can be removed with `git commit --amend`. A `[history]` hit
+cannot be fixed by a later commit. Rewrite that commit (interactive rebase) or redo the
+work on a fresh branch.
+
+`--range` uses the allowlist and baseline **as they are in the checkout you run from**, not
+as they were at each commit. The baseline records a hash of each file's whole token set, so
+an older version of a grandfathered file will not match it. Expect `--range` over long
+history to report such files. Keep the ranges you gate short: the commits you are about to
+push.
+
+**Every run says what it examined:** `clean — examined N file(s) and M commit message(s)`.
+It never prints `clean` having examined nothing. An empty index, an empty range, paths that
+contain no scannable file, or no input at all print a `WARNING` (even under `--quiet`) and
+`no findings, but NOT a pass`. **Under `--strict` each of these fails** (exit 1).
 
 ## Git hook wiring (local enforcement)
 
@@ -168,7 +209,11 @@ git config core.hooksPath .githooks
 
 CI (`.github/workflows/who-data-gate.yml`) enforces the same scan on every push and PR —
 file contents **and** the pushed/PR commit messages — so the gate holds even if a
-contributor has not set `core.hooksPath`.
+contributor has not set `core.hooksPath`. Its file scan is `--all`, i.e. the pushed **tip**
+only, so it cannot see data that a pushed commit added and a later one removed. Before
+pushing, run `tools/who-data-gate.py --range <remote>/main..HEAD` yourself.
+
+There is no pre-push hook.
 
 ## Bypassing is forbidden
 

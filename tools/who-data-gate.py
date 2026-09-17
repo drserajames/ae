@@ -34,6 +34,18 @@ Every run prints how much the baseline suppressed. Use --redact when the output
 goes somewhere public (CI logs): findings are then reported by location and rule
 only, never by value.
 
+WHAT IT EXAMINES, and why that is printed every time:
+  * --all          the current tree (git-tracked files)
+  * --staged       the INDEX — not the working tree; stage first
+  * --range A..B   every commit in the range, one at a time: the blobs that commit
+                   touched and its message. A name added in one commit and removed in a
+                   later one still ships in the history; the range's net diff would net it
+                   out to nothing, and every tip-only mode above cannot see it at all.
+  * paths / --message / --message-file   exactly what they say
+Every run reports how many files and commit messages it examined, and never prints
+"clean" having examined nothing: an empty index, an empty range or a run with no input
+is reported as such, and fails under --strict.
+
 Exit codes: 0 = clean, 1 = potential WHO data found, 2 = usage/environment error.
 """
 from __future__ import annotations
@@ -345,7 +357,8 @@ def scan_text(text: str, source: str, cfg: Config, collect_tokens=None) -> list[
 
     if collect_tokens is None:
         if cfg.baselined(source, (t for _, _, t, _ in candidates)):
-            cfg.suppressed[source] = len(candidates)
+            # accumulate: --range can scan the same path once per commit
+            cfg.suppressed[source] = cfg.suppressed.get(source, 0) + len(candidates)
         else:
             findings += [Finding(source, i, r, t, l) for i, r, t, l in candidates]
 
@@ -386,17 +399,6 @@ def read_text(path: str) -> str | None:
             return None
 
 
-def scan_file(path: str, relpath: str, cfg: Config, collect_tokens=None) -> list[Finding]:
-    if os.path.splitext(relpath)[1] in SKIP_EXT:
-        return []
-    if cfg.path_skipped(relpath):
-        return []
-    text = read_text(path)
-    if text is None:
-        return []
-    return scan_text(text, relpath, cfg, collect_tokens)
-
-
 # --------------------------------------------------------------------------- #
 # Git helpers
 # --------------------------------------------------------------------------- #
@@ -420,11 +422,7 @@ def staged_files(root: str) -> list[str]:
     return [f for f in out.splitlines() if f]
 
 
-def staged_blob(root: str, relpath: str) -> str | None:
-    try:
-        data = subprocess.check_output(["git", "-C", root, "show", f":{relpath}"])
-    except subprocess.CalledProcessError:
-        return None
+def decode_blob(data: bytes) -> str | None:
     if is_binary(data):
         return None
     for enc in ("utf-8", "latin-1"):
@@ -433,6 +431,66 @@ def staged_blob(root: str, relpath: str) -> str | None:
         except UnicodeDecodeError:
             continue
     return None
+
+
+def staged_blob(root: str, relpath: str) -> str | None:
+    try:
+        data = subprocess.check_output(["git", "-C", root, "show", f":{relpath}"])
+    except subprocess.CalledProcessError:
+        return None
+    return decode_blob(data)
+
+
+class RangeCommit:
+    def __init__(self, sha: str, parents: list[str], message: str):
+        self.sha = sha
+        self.parents = parents
+        self.message = message
+        self.tip = False   # no other commit in the range has this one as a parent
+
+    @property
+    def short(self) -> str:
+        return self.sha[:12]
+
+
+def range_commits(root: str, rev_range: str) -> list[RangeCommit]:
+    """Every commit in `rev_range`, oldest first. Raises CalledProcessError on a bad range."""
+    listing = git(root, "rev-list", "--topo-order", "--reverse", "--parents", rev_range, "--")
+    commits = []
+    for line in listing.splitlines():
+        sha, *parents = line.split()
+        message = git(root, "log", "-1", "--format=%B", sha)
+        commits.append(RangeCommit(sha, parents, message))
+    in_range_parents = {p for c in commits for p in c.parents}
+    for c in commits:
+        c.tip = c.sha not in in_range_parents
+    return commits
+
+
+def commit_files(root: str, commit: RangeCommit) -> list[str]:
+    """The paths a commit touched, with the same A/C/M filter --staged uses. For a merge,
+    the combined diff (-c): only paths whose merged content differs from EVERY parent,
+    i.e. content the merge itself introduced. What it brought in from a parent is scanned
+    at the commit that introduced it — which is in the range whenever it is not already
+    reachable from the range's base."""
+    if len(commit.parents) > 1:
+        out = git(root, "diff-tree", "-r", "-c", "-z", "--no-commit-id", "--name-only",
+                  commit.sha)
+    else:
+        out = git(root, "diff-tree", "-r", "--root", "-z", "--no-commit-id", "--name-only",
+                  "--diff-filter=ACM", commit.sha)
+    return [f for f in out.split("\0") if f]
+
+
+def commit_blob(root: str, sha: str, relpath: str) -> str | None:
+    """Mirror of staged_blob, reading from a commit instead of the index. None for a path
+    the commit deleted (possible in a merge's combined diff) and for binary content."""
+    try:
+        data = subprocess.check_output(["git", "-C", root, "cat-file", "blob", f"{sha}:{relpath}"],
+                                       stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        return None
+    return decode_blob(data)
 
 
 # --------------------------------------------------------------------------- #
@@ -499,7 +557,11 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="WHO-data gate scanner")
     ap.add_argument("paths", nargs="*", help="explicit files/dirs to scan")
     ap.add_argument("--all", action="store_true", help="scan all git-tracked files (CI)")
-    ap.add_argument("--staged", action="store_true", help="scan git staged blobs (pre-commit)")
+    ap.add_argument("--staged", action="store_true",
+                    help="scan git staged blobs (pre-commit) — the INDEX, so stage first")
+    ap.add_argument("--range", metavar="REV-RANGE",
+                    help="scan every commit in a revision range (A..B, A...B): the blobs "
+                         "each commit touched and each commit's message (pre-push)")
     ap.add_argument("--message-file", help="also scan the commit message in this file")
     ap.add_argument("--message", help="also scan this literal message text")
     ap.add_argument("--root", help="repo root (default: git toplevel of cwd)")
@@ -565,29 +627,94 @@ def main(argv=None) -> int:
             print(f"who-data-gate: WARNING — {msg}", file=sys.stderr)
 
     findings: list[Finding] = []
+    # What was actually examined. "clean" is only ever printed over a non-zero count: the
+    # gate has twice passed while reading nothing (an empty index; a tip-only scan of work
+    # whose history carried the data), and the output could not tell that from a pass.
+    examined = {"files": 0, "messages": 0, "skipped": 0}
+    empty_inputs: list[str] = []   # requested inputs that yielded nothing to scan
+
+    def scan_blob(text: str | None, rel: str) -> list[Finding]:
+        if text is None:           # binary, undecodable or unreadable
+            examined["skipped"] += 1
+            return []
+        examined["files"] += 1
+        return scan_text(text, rel, cfg)
+
+    def excluded(rel: str) -> bool:
+        if os.path.splitext(rel)[1] in SKIP_EXT or cfg.path_skipped(rel):
+            examined["skipped"] += 1
+            return True
+        return False
 
     if args.all:
+        before = examined["files"]
         for rel in tracked_files(root):
-            findings += scan_file(os.path.join(root, rel), rel, cfg)
+            if not excluded(rel):
+                findings += scan_blob(read_text(os.path.join(root, rel)), rel)
+        if examined["files"] == before:
+            empty_inputs.append("--all examined 0 files (no scannable tracked files)")
     if args.staged:
-        for rel in staged_files(root):
-            if os.path.splitext(rel)[1] in SKIP_EXT or cfg.path_skipped(rel):
-                continue
-            text = staged_blob(root, rel)
-            if text is not None:
-                findings += scan_text(text, rel, cfg)
-    for p in args.paths:
-        if os.path.isdir(p):
-            for dirpath, _dirs, names in os.walk(p):
-                for n in names:
-                    fp = os.path.join(dirpath, n)
-                    rel = os.path.relpath(fp, root)
-                    findings += scan_file(fp, rel, cfg)
-        elif os.path.isfile(p):
-            rel = os.path.relpath(p, root)
-            findings += scan_file(p, rel, cfg)
-        else:
-            print(f"who-data-gate: no such path: {p}", file=sys.stderr)
+        before = examined["files"]
+        staged = staged_files(root)
+        for rel in staged:
+            if not excluded(rel):
+                findings += scan_blob(staged_blob(root, rel), rel)
+        if not staged:
+            empty_inputs.append("nothing staged — examined 0 files. --staged reads the INDEX, "
+                                "not the working tree: `git add` first")
+        elif examined["files"] == before:
+            empty_inputs.append(f"--staged examined 0 files ({len(staged)} staged, all binary "
+                                "or skip-listed)")
+
+    commits: list[RangeCommit] = []
+    hits_by_commit: dict[str, int] = {}
+    if args.range is not None:
+        if not args.range or args.range.startswith("-"):
+            print(f"who-data-gate: --range {args.range!r} is not a revision range", file=sys.stderr)
+            return 2
+        try:
+            commits = range_commits(root, args.range)
+        except subprocess.CalledProcessError:
+            print(f"who-data-gate: --range {args.range!r}: git cannot resolve it "
+                  "(see git's message above)", file=sys.stderr)
+            return 2
+        if not commits:
+            empty_inputs.append(f"--range {args.range} contains 0 commits — examined nothing")
+        # Per commit, never the range's net diff: a name added in one commit and removed in
+        # a later one nets out to nothing, yet still ships in the history.
+        for c in commits:
+            before = len(findings)
+            for rel in commit_files(root, c):
+                if excluded(rel):
+                    continue
+                for f in scan_blob(commit_blob(root, c.sha, rel), rel):
+                    f.source = f"{c.short}:{rel}"   # rev:path — pasteable into `git show`
+                    findings.append(f)
+            examined["messages"] += 1
+            for f in scan_text(c.message, "<commit-message>", cfg):
+                f.source = f"{c.short}:<commit-message>"
+                findings.append(f)
+            if len(findings) > before:
+                hits_by_commit[c.sha] = len(findings) - before
+
+    if args.paths:
+        before = examined["files"]
+        for p in args.paths:
+            if os.path.isdir(p):
+                for dirpath, _dirs, names in os.walk(p):
+                    for n in names:
+                        fp = os.path.join(dirpath, n)
+                        rel = os.path.relpath(fp, root)
+                        if not excluded(rel):
+                            findings += scan_blob(read_text(fp), rel)
+            elif os.path.isfile(p):
+                rel = os.path.relpath(p, root)
+                if not excluded(rel):
+                    findings += scan_blob(read_text(p), rel)
+            else:
+                print(f"who-data-gate: no such path: {p}", file=sys.stderr)
+        if examined["files"] == before:
+            empty_inputs.append("the given paths examined 0 files")
 
     if args.message_file:
         try:
@@ -596,11 +723,32 @@ def main(argv=None) -> int:
             # strip them so scissored/commented text isn't scanned.
             msg = "\n".join(l for l in msg.splitlines() if not l.lstrip().startswith("#"))
             findings += scan_text(msg, "<commit-message>", cfg)
+            examined["messages"] += 1
         except OSError as exc:
             print(f"who-data-gate: cannot read message file: {exc}", file=sys.stderr)
             return 2
     if args.message:
         findings += scan_text(args.message, "<commit-message>", cfg)
+        examined["messages"] += 1
+
+    if not (args.all or args.staged or args.range is not None or args.paths
+            or args.message_file or args.message):
+        empty_inputs.append("no input given (--all, --staged, --range, paths or a message) "
+                            "— examined nothing")
+
+    summary = (f"examined {examined['files']} file(s) and {examined['messages']} "
+               "commit message(s)")
+    if args.range is not None:
+        summary += f" across {len(commits)} commit(s) in {args.range}"
+    if examined["skipped"]:
+        summary += f"; {examined['skipped']} binary or skip-listed file(s) not scanned"
+
+    # Loud whatever --quiet says: this is the line that distinguishes a pass from a run
+    # that looked at nothing.
+    for msg in empty_inputs:
+        print(f"who-data-gate: WARNING — {msg}", file=sys.stderr)
+        if args.strict:
+            hard_errors.append(msg)
 
     # Always report what the baseline hid — a silent suppression is how real data
     # sat in TODO.md unnoticed. Counts only; never the values.
@@ -618,6 +766,24 @@ def main(argv=None) -> int:
               f"({len(findings)} hit(s)) — commit/push BLOCKED:\n", file=sys.stderr)
         for f in findings:
             print(str(f), file=sys.stderr)
+        print(f"\n  ({summary})", file=sys.stderr)
+        if hits_by_commit:
+            # Tip and history hits need different remedies, so name which each one is.
+            print(f"\nHits by commit in {args.range}, oldest first:", file=sys.stderr)
+            for c in commits:
+                if c.sha in hits_by_commit:
+                    print(f"  {c.short} [{'tip' if c.tip else 'history'}]  "
+                          f"{hits_by_commit[c.sha]} hit(s)", file=sys.stderr)
+            if any(not c.tip for c in commits if c.sha in hits_by_commit):
+                print("  [history] — NOT the newest commit on its line. A later commit that "
+                      "removes the data does\n"
+                      "      not remove it from the history that ships: rewrite that commit "
+                      "(interactive rebase)\n"
+                      "      or redo the work on a fresh branch.", file=sys.stderr)
+            if any(c.tip for c in commits if c.sha in hits_by_commit):
+                print("  [tip] — the newest commit on its line: `git commit --amend` removes it, "
+                      "provided no\n"
+                      "      [history] commit above carries it too.", file=sys.stderr)
         print("\nIf this is a genuine false positive, extend the allowlist "
               "(tools/who-data-gate-allowlist.txt) — see tools/WHO-DATA-GATE.md.\n"
               "Do NOT bypass the gate to commit real WHO data.", file=sys.stderr)
@@ -631,8 +797,14 @@ def main(argv=None) -> int:
         print("\nSee tools/WHO-DATA-GATE.md.", file=sys.stderr)
         return 1
 
+    if empty_inputs:
+        # Not "clean": at least one requested input had nothing in it.
+        if not args.quiet:
+            print(f"who-data-gate: no findings, but NOT a pass — see WARNING above ({summary}).",
+                  file=sys.stderr)
+        return 0
     if not args.quiet:
-        print("who-data-gate: clean.", file=sys.stderr)
+        print(f"who-data-gate: clean — {summary}.", file=sys.stderr)
     return 0
 
 
