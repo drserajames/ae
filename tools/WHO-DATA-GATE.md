@@ -209,10 +209,18 @@ git config core.hooksPath .githooks
 
 CI (`.github/workflows/who-data-gate.yml`) enforces the same scan on every push and PR —
 file contents **and** the pushed/PR commit messages — so the gate holds even if a
-contributor has not set `core.hooksPath`. Its file scan is `--all`, i.e. the pushed **tip**
-only, so it cannot see data that a pushed commit added and a later one removed. Before
-pushing, run `tools/who-data-gate.py --range <remote>/main..HEAD` yourself.
+contributor has not set `core.hooksPath`. It runs two steps, both with `--redact`
+because CI logs are public:
 
+- `--all`: the pushed **tip**.
+- `--range`: **every commit in the push or PR**, both files and messages. The range is
+  `origin/<base>..<head>` for a PR, and `<before>..<after>` for a push. A new branch, a
+  force-push whose old tip is gone, or a manual run uses `origin/<default>..<after>`
+  instead. It is never the whole history: see the baseline note above.
+
+CI has no private strain list, so it runs the regex rules only and cannot use `--strict`.
+**That makes CI a backstop, not a substitute.** Before pushing, run
+`tools/who-data-gate.py --range <remote>/main..HEAD` locally, where the private list loads.
 There is no pre-push hook.
 
 ## Bypassing is forbidden
