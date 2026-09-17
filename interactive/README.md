@@ -21,7 +21,7 @@ interactive/
     main.js               #   entry point (loaded last); wires bundle → modules
   CONTRACT.md             # F0: the JSON bundle schema both exporter and viewer build against
   PLAN.md                 # the v2 roadmap (issues + features, task ownership, parallelism)
-  run.sh                  # wires up the ae arm64 / Python-3.10 env and runs the exporter
+  run.sh                  # wires up the ae arm64 env (build/, Homebrew python3) and runs the exporter
   data/                   # local scratch only — git-ignored, do NOT keep outputs here
 ```
 
@@ -176,8 +176,9 @@ Stage-2 data (E2), for the colour-by-AA and stress/error overlays:
 
 ## Environment
 
-`ae_backend` here is a CPython **3.10 arm64** extension. `run.sh` sets
-`PYTHONPATH=$AE/build-arm64:$AE/py:$EU/acmacs-data` (the last for `semantic_clades`) and runs
-`arch -arm64 "$AE_PYTHON"` (default: the arm64 framework python3.10; override with `AE_PYTHON`).
-Use `run.sh` rather than a bare `python3` (the system Homebrew Python is 3.14 and
-cannot load the extension).
+`run.sh` uses whichever arm64 `ae_backend` extension `$AE/build` points at (`build-py314/`
+today). It sets `PYTHONPATH=$AE/build:$AE/py:$EU/acmacs-data` (the last for `semantic_clades`)
+and runs `arch -arm64 "$AE_PYTHON"` (default: `/opt/homebrew/bin/python3`; override with
+`AE_PYTHON`). It stops with a clear message if the interpreter's version does not match the
+extension's `cpython-3XX` tag. Use `run.sh` rather than a bare `python3`: `/usr/local/bin/python3`
+is x86_64 and cannot load the extension.
