@@ -54,7 +54,7 @@ Legend for field status:
 > itself when it carries no AA-motif digits (`"K"` → `K`), else `null` for a bare AA
 > motif (`"135K"`). Lets the viewer label by the short clade name when one exists.
 
-The `aa` table maps each matched `norm` to its **aligned full-HA AA sequence
+The `aa` table maps each matched `norm` (linked tips only, in either tree mode) to its **aligned full-HA AA sequence
 string** (reconstructed from the `.asr` tree; HA1 is the prefix, so HA1 numbering
 still applies). Residue at 1-based position `p` is `aa[norm][p-1]` — same numbering
 as clade names and tree-node `A` transitions. A string (not a `{pos: aa}` dict)
@@ -76,7 +76,9 @@ subtype prefix is stripped from chart names — `A(...)/`, `B(...)/`, or a bare 
   "assay": "HI",
   "tree_file": "h3.asr.tjz",
   "n_tree_leaves": 70000,   // leaves in the full source tree
-  "n_kept_leaves": 2100,    // leaves kept after pruning to linked tips
+  "n_kept_leaves": 2100,    // leaves kept after pruning to linked tips (all leaves under tree_tips "all")
+  "tree_tips": "all",       // [full-tree] present only for --tree-tips all; ABSENT means "linked"
+                            //   (the default export omits it so its bundle is unchanged)
   "n_matched_norms": 2100,  // distinct norms matched between charts and tree
   "generated": "2026-06-19" // [v6 F1] page-generation date (ISO, local date)
 }
@@ -87,7 +89,14 @@ subtype prefix is stripped from chart names — `A(...)/`, `B(...)/`, or a bare 
 ## Tree node (`tree` is the root node) 
 
 Nested via `children` (empty array at leaves). Degree-2 internal nodes are
-collapsed during pruning. `x` is **cumulative branch length** from the root
+collapsed during pruning.
+
+**Unlinked leaves [full-tree].** With `meta.tree_tips == "all"` the tree also holds
+leaves whose `norm` has no antigen on any chart. Such a leaf has **no `children`, `ag`
+or `passage` key** (treat a missing `children` as a leaf) and its `clade` is derived
+from the tree leaf's own clades + sequence (see README *How the link is made*), not from
+an antigen. Its sequence is **not** in `aa`. A consumer tells linked from unlinked by
+whether any chart antigen has that `norm`; there is no per-leaf flag. `x` is **cumulative branch length** from the root
 (genetic distance) — the viewer scales it to the pane width.
 
 ```jsonc

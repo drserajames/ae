@@ -377,10 +377,15 @@
   function updateTitles() {
     const m = IV.DATA.meta, ch = IV.DATA.charts[State.chartIdx];
     document.getElementById("title").textContent = `${m.subtype || ""} ${m.assay || ""} — tree + antigenic map`.trim();
-    document.getElementById("metaline").textContent =
-      `${m.n_kept_leaves} linked tips / ${m.n_tree_leaves} in tree · ${m.n_matched_norms} strains matched`;
-    document.getElementById("treeTitle").textContent =
-      `Phylogenetic tree (${m.tree_file}) — ${IV.Tree.leaves.length} linked tips`;
+    // meta.tree_tips: "all" = the full source tree; absent (older bundles, default export) =
+    // pruned to linked tips. Say which on the page so a reader knows what the tree shows.
+    const nLinked = IV.Tree.leaves.length - IV.Tree.nUnlinked;
+    document.getElementById("metaline").textContent = m.tree_tips === "all"
+      ? `full tree: all ${m.n_tree_leaves} tips, ${nLinked} linked to a chart · ${m.n_matched_norms} strains matched`
+      : `${m.n_kept_leaves} linked tips / ${m.n_tree_leaves} in tree · ${m.n_matched_norms} strains matched`;
+    document.getElementById("treeTitle").textContent = m.tree_tips === "all"
+      ? `Phylogenetic tree (${m.tree_file}) — full tree, ${IV.Tree.leaves.length} tips (${nLinked} linked, ${IV.Tree.nUnlinked} unlinked shown small)`
+      : `Phylogenetic tree (${m.tree_file}) — ${IV.Tree.leaves.length} linked tips`;
     document.getElementById("mapTitle").textContent = `Antigenic map — ${ch.label}: ${ch.name}`;
     document.getElementById("foot").textContent =
       "Hover a tip or map point to link the two panels by strain. " +

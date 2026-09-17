@@ -37,6 +37,13 @@
   let hitG = null;           // transformed <g> of (invisible) branch-click hit paths
   let edgeSegs = [];         // tree-space edge segments {kind:'v'|'h',...}, projected each apply()
   let infoOpen = false;      // is the T4 AA panel showing?
+  // Full-tree mode (meta.tree_tips "all"): tips with no antigen on any chart ("unlinked",
+  // leaf._unlinked) are painted on a <canvas> under the SVG instead of as SVG glyphs —
+  // ~90k SVG tips made hover/pan/recolour take 0.3–4 s. Linked tips stay SVG, exactly as in
+  // the default mode, so every per-tip interaction on assayed strains is unchanged.
+  let nUnlinked = 0;         // 0 in the default (linked-tips) mode → no canvas at all
+  let canvas = null;         // unlinked-tip layer, screen space, below the SVG
+  let hoverRing = null;      // SVG ring marking the hovered unlinked tip
 
   // viewport: X is always fit (screen_x = pad + kx*tx). Y zooms/pans:
   // screen_y = z*ky*ty + (z*pad + Ty). z=1, Ty=0 fits the whole tree to the pane.
@@ -58,6 +65,14 @@
       else n.children.forEach(walk);
     })(root);
     leaves.forEach((lf, i) => { lf._y = i; if (lf.x > maxX) maxX = lf.x; });
+    // Full-tree mode: a handful of outlier sequences (9 H3 leaves at >= 0.06, which the
+    // report PDF hides) would otherwise set the X scale and squash the tree into a sliver.
+    // Fit X to 1.5x the 99.9th-percentile tip distance instead; the few longer branches
+    // run off the right edge. The default (linked-tips) mode keeps the true maximum.
+    if (IV.DATA && IV.DATA.meta && IV.DATA.meta.tree_tips === "all" && leaves.length) {
+      const xs = leaves.map(lf => lf.x).sort((a, b) => a - b);
+      maxX = Math.min(maxX, 1.5 * xs[Math.floor(0.999 * (xs.length - 1))]);
+    }
     (function setY(n) {
       if (!n.children || !n.children.length) return n._y;
       const ys = n.children.map(setY);
@@ -180,7 +195,8 @@
     const pass = lf.passage ? `<br>passage: <b>${esc(lf.passage)}</b>` : "";
     return `<b>${esc(lf.name)}</b><br>${esc(lf.date || "?")} · ${esc(lf.country || lf.continent || "")}` +
       (lf.clade ? `<br>clade: <b>${esc(lf.clade)}</b>` : "") + pass +
-      (lf.ag && lf.ag.length ? `<br>${lf.ag.length} antigen(s) on map` : "<br><i>no antigen on this map</i>");
+      (lf._unlinked ? "<br><i>not on any chart (unlinked tip)</i>"
+        : lf.ag && lf.ag.length ? `<br>${lf.ag.length} antigen(s) on map` : "<br><i>no antigen on this map</i>");
   }
 
   // ---- per-tip glyphs, via the shared IV.Glyph factory so the tree and map draw
@@ -374,6 +390,8 @@
     ensureStyle();
     computeFit();
     buildNormMeta();
+    nUnlinked = 0;
+    leaves.forEach(lf => { lf._unlinked = !normMeta[lf.norm]; if (lf._unlinked) nUnlinked++; });
     computeCladeLabels(IV.DATA.tree);
     const svg = document.getElementById("treeSvg");
     svgEl = svg;
@@ -398,6 +416,7 @@
       edgeSegs.push({ kind: "v", x: n.x, y0: Math.min(...ys), y1: Math.max(...ys) }); // riser, no gaps
       kids.forEach(c => {
         edgeSegs.push({ kind: "h", x: n.x, x1: c.x, y: c._y });                       // branch into child
+        if (c._unlinked) return;   // no branch-click target into a single unlinked tip
         const hit = el("path", { class: "ehit", d: `M${n.x} ${c._y}H${c.x}` });
         // keep S1's box-select from starting on a branch press; act on click
         hit.addEventListener("mousedown", ev => ev.stopPropagation());
@@ -414,6 +433,7 @@
     const tipsG = el("g", { id: "treeTips" });
     svg.appendChild(tipsG);
     leaves.forEach(lf => {
+      if (lf._unlinked) { lf._fill = Colour.leaf(lf); return; }   // painted on the canvas
       const g = tipGlyph(lf);   // {kind, r, vac}
       const opts = {
         class: "tip", fill: Colour.leaf(lf), dataNorm: lf.norm,
@@ -445,6 +465,7 @@
       L.el = t;
     });
 
+    setupCanvas(svg);
     IV.installSelect(svg);   // S1: click / drag-box selection (shared, idempotent)
     bindViewport(svg);
     apply();
@@ -463,6 +484,102 @@
     if (!userInteracted) resetView();
     clampPan();
     apply();
+  }
+
+  // ---- unlinked-tip canvas (full-tree mode) ----
+  // Unlinked tips are drawn smaller than linked ones, without an outline and slightly
+  // transparent, so assayed strains (SVG glyphs with an outline) stay easy to pick out.
+  // Only the rows on screen are painted: leaves[i]._y === i, so that is an index range.
+  function setupCanvas(svg) {
+    const sc = document.getElementById("treeScroll");
+    canvas = document.getElementById("treeCanvas");
+    if (!nUnlinked) { if (canvas) canvas.remove(); canvas = null; hoverRing = null; return; }
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      canvas.id = "treeCanvas";
+      canvas.style.cssText = "position:absolute;left:0;top:0;pointer-events:none;";
+      sc.insertBefore(canvas, sc.firstChild);
+    }
+    svg.style.position = "relative";   // keep the SVG (edges, linked tips) above the canvas
+    hoverRing = el("circle", { r: 4, fill: "none", stroke: "#000", "stroke-width": 1.2,
+      "pointer-events": "none", display: "none" });
+    svg.appendChild(hoverRing);
+  }
+  function drawCanvas(m, showLabels) {
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = Math.round(fit.W * dpr), H = Math.round(fit.H * dpr);
+    if (canvas.width !== W || canvas.height !== H) {
+      canvas.width = W; canvas.height = H;
+      canvas.style.width = fit.W + "px"; canvas.style.height = fit.H + "px";
+    }
+    const g = canvas.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, fit.W, fit.H);
+    const i0 = Math.max(0, Math.floor((-6 - m.f) / m.d)), i1 = Math.min(leaves.length - 1, Math.ceil((fit.H + 6 - m.f) / m.d));
+    const r = clamp(m.d * 0.45, 0.5, 2.4);   // rows are ~0.01 px apart at fit, so mostly ticks
+    const tick = r < 1;
+    let fill = null, alpha = null;
+    const sel = [];
+    for (let i = i0; i <= i1; i++) {
+      const lf = leaves[i];
+      if (!lf._unlinked) continue;
+      const a = lf._dim ? 0.12 : 0.7;
+      if (a !== alpha) { g.globalAlpha = alpha = a; }
+      if (lf._fill !== fill) { g.fillStyle = fill = lf._fill; }
+      const cx = m.a * lf.x + m.e, cy = m.d * i + m.f;
+      if (tick) g.fillRect(cx, cy - 0.5, 4, 1);
+      else { g.beginPath(); g.arc(cx + r, cy, r, 0, 2 * Math.PI); g.fill(); }
+      if (lf._sel) sel.push([cx + Math.max(r, 1), cy]);
+    }
+    g.globalAlpha = 1;
+    if (sel.length) {                       // S1 selection ring, as .sel on SVG tips
+      g.strokeStyle = "#1558d6"; g.lineWidth = 2;
+      g.beginPath();
+      for (const [x, y] of sel) { g.moveTo(x + r + 2, y); g.arc(x, y, r + 2, 0, 2 * Math.PI); }
+      g.stroke();
+    }
+    if (showLabels) {
+      g.font = "9px -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif"; g.fillStyle = "#333";
+      for (let i = i0; i <= i1; i++) {
+        const lf = leaves[i];
+        if (!lf._unlinked) continue;
+        const cx = m.a * lf.x + m.e;
+        if (cx <= fit.W) g.fillText(shortName(lf.name), cx + 2 * r + 4, m.d * i + m.f + 3);
+      }
+    }
+    if (hoverRing && hoverRing.getAttribute("display") !== "none" && hoverRing._leaf) {
+      const lf = hoverRing._leaf;
+      hoverRing.setAttribute("cx", m.a * lf.x + m.e + r); hoverRing.setAttribute("cy", m.d * lf._y + m.f);
+    }
+  }
+  // hover an unlinked tip: nearest row under the pointer, within a few px of its tip
+  function unlinkedAt(e) {
+    const rc = svgEl.getBoundingClientRect(), mx = e.clientX - rc.left, my = e.clientY - rc.top;
+    const m = mat(), row = Math.round((my - m.f) / m.d);
+    const tol = Math.max(3, m.d / 2);
+    let best = null, bd = Infinity;
+    for (let i = Math.max(0, row - 2); i <= Math.min(leaves.length - 1, row + 2); i++) {
+      const lf = leaves[i];
+      if (!lf._unlinked) continue;
+      const dy = Math.abs(m.d * i + m.f - my), dx = mx - (m.a * lf.x + m.e);
+      if (dy <= tol && dx >= -4 && dx <= 10 && dy < bd) { best = lf; bd = dy; }
+    }
+    return best;
+  }
+  function onCanvasHover(e) {
+    if (!canvas || !hoverRing) return;
+    const lf = e.target.closest && e.target.closest("[data-norm]") ? null : unlinkedAt(e);
+    if (!lf) {
+      if (hoverRing._leaf) { hoverRing._leaf = null; hoverRing.setAttribute("display", "none"); IV.UI.hideTip(); }
+      return;
+    }
+    if (hoverRing._leaf !== lf) {
+      hoverRing._leaf = lf;
+      hoverRing.setAttribute("display", "");
+      drawCanvas(mat(), (view.z * fit.ky) >= 9);   // positions the ring
+      IV.UI.showTip(e, tipHtml(lf));
+    } else IV.UI.moveTip(e);
   }
 
   // ---- viewport apply (positions everything from view state) ----
@@ -498,6 +615,7 @@
       }
     }
     placeCladeLabels(m);   // F4: reposition + de-overlap clade labels
+    drawCanvas(m, showLabels);
     const hud = document.getElementById("treeHud");
     if (hud) hud.textContent = view.z <= 1.001
       ? "fit · scroll = pan tips · ⌘/ctrl+scroll or pinch = expand · drag = select · click branch = AA"
@@ -517,7 +635,8 @@
     view.Ty = clamp(view.Ty, lo, hi);
   }
   function zoomAtY(my, factor) {
-    const nz = clamp(view.z * factor, 1, 120);
+    // 120x is plenty for a few thousand tips; a full tree needs rows ~12 px apart at max zoom
+    const nz = clamp(view.z * factor, 1, Math.max(120, leaves.length * 12 / (fit.H || 600)));
     if (nz <= 1.0001) { resetView(); }
     else {
       view.Ty = my - (nz / view.z) * (my - view.Ty);  // keep tree point under cursor fixed
@@ -552,6 +671,8 @@
     }, { passive: false });
 
     sc.addEventListener("dblclick", () => { userInteracted = false; resetView(); scheduleApply(); });
+    sc.addEventListener("mousemove", onCanvasHover);
+    sc.addEventListener("mouseleave", e => { if (hoverRing && hoverRing._leaf) onCanvasHover({ target: sc, clientX: -1e6, clientY: -1e6 }); });
 
     // #1: re-fit whenever the pane's measured size changes — this is what catches the
     // initial layout settle (e.g. 156px → full height) as well as later window resizes.
@@ -569,6 +690,11 @@
   function refresh() {
     applyTipOutlines(false);    // base outline, or the F3 serum-coverage outline (#4)
     leaves.forEach(lf => {
+      if (lf._unlinked) {
+        const e = State.emphasis(lf.norm, lf.clade);
+        lf._dim = e.dim; lf._sel = e.sel;
+        return;
+      }
       (tipNodes[lf.norm] || []).forEach(c => {
         const e = State.emphasis(lf.norm, lf.clade);
         c.classList.toggle("dim", e.dim);
@@ -576,6 +702,7 @@
         c.classList.toggle("sel", e.sel);
       });
     });
+    if (nUnlinked) drawCanvas(mat(), (view.z * fit.ky) >= 9);
     // selection cleared elsewhere (e.g. click on empty space) also closes the AA panel
     if (infoOpen && !State.hasSelection()) hideInfo();
   }
@@ -584,6 +711,13 @@
     layout, render, refresh,
     get leaves() { return leaves; },
     get normToLeaves() { return normToLeaves; },
+    get nUnlinked() { return nUnlinked; },   // tips with no antigen on any chart (full-tree mode)
+    // client (viewport) coordinates of a leaf's tip under the current view — lets a test
+    // or a caller point at a canvas-painted tip, which has no element of its own
+    tipClientXY(lf) {
+      const m = mat(), rc = svgEl.getBoundingClientRect();
+      return { x: rc.left + m.a * lf.x + m.e, y: rc.top + m.d * lf._y + m.f };
+    },
   };
   State.subscribe(refresh);
 })(window.IV);

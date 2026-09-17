@@ -85,6 +85,12 @@ needs no server (all data is inlined; the viewer is plain SVG + JavaScript).
 Each `--chart` is `LABEL=PATH`; the label names the centre in the viewer's
 **Centre** dropdown. The tree is shared across all charts.
 
+`--tree-tips {linked,all}` picks which tree the page shows. **`linked` (the default)**
+prunes it to the tips that link to an antigen on one of the charts; **`all`** keeps every
+leaf of the source tree, so clade proportions on the page match the report's PDF tree
+(see *How the link is made*). Both kinds of page open the same way; the header says which
+one you are looking at.
+
 ## What it shows
 
 - **Left:** phylogram (x = cumulative branch length / genetic distance, tips
@@ -117,10 +123,42 @@ Each `--chart` is `LABEL=PATH`; the label names the centre in the viewer's
 Tree tip names (`EXAMPLEB/764/2022_OR_0BADC0DE`) and chart antigen names
 (`A(H3N2)/EXAMPLEC/8/2022`) are normalised to a common `LOCATION/ID/YEAR` key
 (passage tag + sequence hash stripped from tips; subtype prefix stripped from
-antigens). The full ~70 k-leaf seqdb tree is **pruned to the induced subtree of
-linked tips** (degree-2 nodes collapsed) so the file stays light and every visible
-tip corresponds to an assayed strain. Clades are re-derived canonically (E1, see
-below) and each tip inherits its matched antigen's clade.
+antigens). By default (`--tree-tips linked`) the full ~70–100 k-leaf seqdb tree is
+**pruned to the induced subtree of linked tips** (degree-2 nodes collapsed) so the file
+stays light and every visible tip corresponds to an assayed strain. Clades are
+re-derived canonically (E1, see below) and each tip inherits its matched antigen's clade.
+
+The cost of pruning is that clade proportions on the page reflect what was **tested**,
+not what was **sequenced**: a clade that is assayed more often than average fills more
+of the pruned tree than of the report's PDF tree, and one assayed less often fills less
+(differences of tens of percentage points have been measured between assays).
+
+**`--tree-tips all` keeps every leaf.** Only nodes that already have a single child in the
+source tree are collapsed. What that changes:
+
+- **Linked tips are exported and drawn exactly as in the default mode**: same fields,
+  same SVG glyphs, same hover, selection, map linking and coverage outlines.
+- **Unlinked tips** (no antigen on any chart) carry `id`/`x`/`name`/`norm`/`date`/
+  `continent`/`country`/`clade` only: no `ag`, no `passage`, no `children`.
+- **Their clade** is derived from the tree leaf the way a chart antigen's is: the leaf's
+  own Pango labels (`L`), plus each `semantic_clades` attribute whose parent clade is present
+  and whose AA motif matches the leaf's sequence. That set is then reduced to the displayed
+  clade by the report's own clade rules. Checked against *linked* tips, where both exist,
+  it reproduces the chart's clade for >99 % of tips on every subtype.
+- **How they look.** They are painted on a `<canvas>` under the SVG, smaller than linked
+  tips, with no outline and at 70 % opacity, so assayed strains (outlined SVG glyphs) stay
+  easy to pick out. At full zoom-out a tip is a short tick in its clade colour. Hovering
+  one shows its tooltip ("not on any chart"). Search and branch-click select them, and a
+  selection draws the usual blue ring. Box-drag and a plain click only pick SVG (linked)
+  tips, which are the ones with something on the map. As SVG, ~90 k tips took 0.3–4 s per
+  hover or pan.
+- **No AA sequence** is exported for unlinked tips, so in colour-by-AA they are grey.
+  On a ~90 k-leaf H3 tree, a sequence for every tip adds ≈54 MB, or ≈16 MB deduplicated,
+  against a ≈33 MB page.
+- **X fit.** The X axis fits 1.5× the 99.9th-percentile tip distance rather than the
+  maximum, so a handful of outlier sequences (which the report PDF hides) don't squash
+  the tree; their branches run off the right edge. Zoom goes deep enough for tip rows
+  ~12 px apart.
 
 For the H3N2 2026-0223 report, ~1.5 k of 2.9 k antigens (one centre) and ~2.1 k
 across all centres link to a tree tip; unmatched antigens are typically
@@ -162,9 +200,11 @@ Stage-2 data (E2), for the colour-by-AA and stress/error overlays:
 > adds its titer/logged matrices). All-centres files scale with the number of charts.
 
 ## Known limitations / next steps
-- **Pruned context.** Only linked tips are kept. An option to retain surrounding
-  tree context (or a full-tree mode with on-demand sequence loading) is a natural
-  follow-up.
+- **Pruned context.** By default only linked tips are kept. `--tree-tips all` keeps the
+  whole tree (above), but unlinked tips carry no AA sequence, so colour-by-AA greys
+  them. On-demand or deduplicated sequences would be the follow-up. Unlinked tips also
+  can't be box-selected, and a full-tree page is roughly 1.5–4.5× the size of the
+  linked-tips page, depending on how much of the tree is assayed.
 - **Name matching** is string-based (~50–70 % of antigens). Matching on the
   seqdb sequence hash that already appears in the tip name would be more robust.
 - **Sera** are not linked to the tree (antisera have no HA sequence).

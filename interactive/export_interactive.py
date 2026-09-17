@@ -4,9 +4,9 @@ export_interactive.py — build a self-contained interactive tree+map viewer.
 
 Loads a phylogenetic tree (.tjz) and one or more antigenic charts (.ace) via
 ae_backend, links tree tips to chart antigens by normalised strain name, prunes
-the (large) tree to the induced subtree of linked tips, and injects the result
-into viewer_template.html to produce a single standalone .html file that opens
-offline with no external dependencies.
+the (large) tree to the induced subtree of linked tips (or, with --tree-tips all,
+keeps every leaf), and injects the result into viewer_template.html to produce a
+single standalone .html file that opens offline with no external dependencies.
 
 Usage (see run.sh for the environment wiring):
     export_interactive.py --tree h3.asr.tjz \
@@ -401,6 +401,7 @@ def load_chart(label, path, fallback, clade_acc, cont_acc, stats, clade_style="a
             else "no clade style in chart R"
         print(f"[clade] {label}: {miss}; semantic_clades fallback "
               f"({len(eff)} entries)", file=sys.stderr)
+    stats.setdefault("rules", eff)               # --tree-tips all: clades for unlinked tips
     for c, f, l, p in eff:                       # accumulate the shared clade palette
         clade_acc["color"][c] = f
         clade_acc["legend"][c] = l
@@ -706,15 +707,46 @@ def reconstruct_indels(troot: dict, min_frac: float = 0.01):
     return frozenset(del_cols)
 
 
+def tree_tip_clades(L: list, aa: str, attributes: list) -> list:
+    """Clade tokens for a tree leaf, derived the way a chart antigen gets its `T.C`: the
+    leaf's own Pango clades (the tree's `L` labels, which populate_from_seqdb also gives a
+    chart antigen) plus every semantic_clades attribute whose parent clade is already
+    present (exact token, as SemanticAttributes::has_clade) and whose AA motif matches
+    the leaf sequence (1-based, e.g. "135K 189R"). Attributes apply in list order, so one
+    may key on a name an earlier one added — as ae.semantic.clade.attributes does."""
+    tokens = list(L or [])
+    have = set(tokens)
+    for e in attributes:
+        if e.get("clade") and e["clade"] not in have:
+            continue
+        ok = bool(e.get("aa"))
+        for motif in (e.get("aa") or "").split():
+            pos, res = motif[:-1], motif[-1]
+            p = int(pos) if pos.isdigit() else 0
+            if not (0 < p <= len(aa) and aa[p - 1] == res):
+                ok = False
+                break
+        if ok and e["name"] not in have:
+            tokens.append(e["name"])
+            have.add(e["name"])
+    return tokens
+
+
 def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
                norm_pt: dict, parent_aa: str = "", aa_table: dict = None,
-               del_cols=frozenset()):
+               del_cols=frozenset(), linked_norms=None, unlinked_clade=None):
     """Return (pruned_node | None) keeping only paths to leaves whose normalised
     name is in keep_norms. Degree-2 internal nodes are collapsed (path
     compression); x = cumulative edge length ('c'). `parent_aa` is the reconstructed
     AA sequence of the nearest kept ancestor, used to compute edge AA transitions.
     If `aa_table` is given, each kept leaf's reconstructed AA sequence is recorded
-    there as norm -> sequence string (E2 shared norm->aa table for C1)."""
+    there as norm -> sequence string (E2 shared norm->aa table for C1).
+
+    `linked_norms` / `unlinked_clade` are set only by `--tree-tips all`, where keep_norms
+    is every tree leaf: a leaf whose norm is not in linked_norms (no antigen on any chart
+    — an unlinked tip) is emitted compactly — no `ag`, `passage` or `children`, clade
+    from unlinked_clade(leaf) — and its sequence is not added to aa_table. Linked leaves
+    are emitted exactly as in the default mode."""
     children = root.get("t", [])
     cum = root.get("c", root.get("M", 0.0)) or 0.0
     node_aa = root.get("a", "")
@@ -725,6 +757,19 @@ def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
         nn = norm_tree_name(name)
         if nn not in keep_norms:
             return None
+        if linked_norms is not None and nn not in linked_norms:
+            node = {
+                "id": root.get("I"),
+                "x": round(float(cum), 5),
+                "name": name, "norm": nn,
+                "date": root.get("d", ""),
+                "continent": root.get("C", ""),
+                "country": root.get("D", ""),
+                "clade": unlinked_clade(root),
+            }
+            if A:
+                node["A"] = A
+            return node
         if aa_table is not None and node_aa and nn not in aa_table:
             aa_table[nn] = node_aa
         node = {
@@ -746,7 +791,8 @@ def prune_tree(root: dict, keep_norms: set, norm_clade: dict, norm_ag: dict,
     # Children diff against THIS node's aa unless this node is collapsed away, in which
     # case its transitions must roll up onto the surviving descendant — handled below.
     kept = [k for k in (prune_tree(c, keep_norms, norm_clade, norm_ag, norm_pt,
-                                   node_aa, aa_table, del_cols)
+                                   node_aa, aa_table, del_cols, linked_norms,
+                                   unlinked_clade)
                         for c in children) if k]
     if not kept:
         return None
@@ -782,6 +828,32 @@ def sanitise(obj):
     return obj
 
 
+def unlinked_clade_fn(rules, subtype, norm_clade, stats):
+    """For --tree-tips all: return (leaf -> primary clade | None, [n_unlinked, n_coloured]).
+    An unlinked tip has no chart antigen, so its clade is derived from the tree leaf the
+    way the chart derives an antigen's (tree_tip_clades), then reduced to the displayed
+    clade with the report's own rules (primary_clade), and added to used_clades so the
+    legend and palette carry it."""
+    try:
+        import semantic_clades as SC
+        attributes = SC.semantic_attribute_data_for_subtype(
+            semantic_clades_token(subtype)).get("clades", [])
+    except Exception as e:
+        print(f"[tree-tips] WARNING: semantic_clades attributes unavailable ({e!r}); "
+              f"unlinked tips use the tree's L clades only", file=sys.stderr)
+        attributes = []
+    counts = [0, 0]
+
+    def clade(leaf):
+        c = primary_clade(tree_tip_clades(leaf.get("L"), leaf.get("a", ""), attributes), rules)
+        counts[0] += 1
+        if c:
+            counts[1] += 1
+            stats["used_clades"].add(c)
+        return c
+    return clade, counts
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -804,6 +876,11 @@ def main():
     ap.add_argument("--no-indels", action="store_true",
                     help="disable deletion reconstruction (only residue substitutions "
                          "are labelled, as before)")
+    ap.add_argument("--tree-tips", choices=("linked", "all"), default="linked",
+                    help="'linked' (default): prune the tree to the tips that link to an "
+                         "antigen on one of the charts. 'all': keep every leaf of the "
+                         "source tree, so clade proportions match the report's PDF tree; "
+                         "unlinked tips carry a sequence-derived clade and no AA sequence")
     args = ap.parse_args()
 
     # clade/continent palettes are read from each chart's own report styles (v3); the
@@ -866,8 +943,17 @@ def main():
     del_cols = frozenset() if args.no_indels else reconstruct_indels(troot, args.del_min_frac)
 
     aa_table = {}   # E2: norm -> reconstructed AA sequence (shared, for C1 colour-by-AA)
-    pruned = prune_tree(troot, keep_norms, norm_clade, primary, norm_pt,
-                        aa_table=aa_table, del_cols=del_cols)
+    if args.tree_tips == "all":
+        unlinked_clade, n_unlinked = unlinked_clade_fn(stats.get("rules") or [], args.subtype,
+                                                       norm_clade, stats)
+        pruned = prune_tree(troot, tree_norms, norm_clade, primary, norm_pt,
+                            aa_table=aa_table, del_cols=del_cols,
+                            linked_norms=keep_norms, unlinked_clade=unlinked_clade)
+        print(f"[tree-tips] all: {n_unlinked[0]} unlinked leaves kept, "
+              f"{n_unlinked[1]} of them with a clade colour", file=sys.stderr)
+    else:
+        pruned = prune_tree(troot, keep_norms, norm_clade, primary, norm_pt,
+                            aa_table=aa_table, del_cols=del_cols)
     if pruned is None:
         print("ERROR: no tips matched; pruned tree is empty.", file=sys.stderr)
         sys.exit(1)
@@ -877,9 +963,9 @@ def main():
     # count kept leaves
     n_kept = [0]
     def cl(n):
-        if not n["children"]:
+        if not n.get("children"):              # --tree-tips all: unlinked leaves omit it
             n_kept[0] += 1
-        for ch in n["children"]:
+        for ch in n.get("children", ()):
             cl(ch)
     cl(pruned)
     print(f"[tree] kept leaves={n_kept[0]}", file=sys.stderr)
@@ -917,6 +1003,9 @@ def main():
             "tree_file": os.path.basename(args.tree),
             "n_tree_leaves": n_total,
             "n_kept_leaves": n_kept[0],
+            # which kind of tree the page shows. Written only for 'all', so a default export
+            # stays identical to one made before --tree-tips existed; absent == "linked".
+            **({"tree_tips": "all"} if args.tree_tips == "all" else {}),
             "n_matched_norms": len(keep_norms),
             "generated": date.today().isoformat(),   # F1: page-generation date (ISO)
             # True when the source tree carried ancestral AA sequences, so branch AA
