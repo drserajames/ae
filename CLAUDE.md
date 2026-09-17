@@ -198,17 +198,29 @@ arm64 Homebrew must be installed at `/opt/homebrew` with the following packages:
 sudo mkdir -p /opt/homebrew && sudo chown -R $(whoami) /opt/homebrew
 NONINTERACTIVE=1 arch -arm64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# Install required arm64 packages
-/opt/homebrew/bin/brew install brotli libomp catch2
-
-# Install arm64-aware meson and ninja via pip for Python 3.10
-arch -arm64 /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 \
-    -m pip install --user meson==1.1.0 ninja
+# Install required arm64 packages — the same set build.sh checks (BREW_FORMULAE),
+# plus pkgconf and the Python 3.14 that ae_backend is built for
+/opt/homebrew/bin/brew install meson ninja libomp cmake brotli zlib xz catch2 cairo pkgconf python@3.14
+/opt/homebrew/bin/brew install gnu-time    # optional: build.sh uses gtime only to time the build
 ```
+
+meson must be **≥ 1.4** (Homebrew's is 1.11.1); meson 1.1.0 fails under Python 3.14. The C++
+libraries (fmt, simdjson, pybind11, range-v3, xlnt, xxHash, alglib, lexy) come from the meson
+wraps in `subprojects/` — no install. `py/ae` has no third-party Python dependencies.
+
+Then build with **`./build.sh`** (`./build.sh check` runs only the preflight). The hand-written
+Python 3.14 procedure it automates is under *Building for Python 3.14* below. Run `build.sh check`
+**outside the Claude sandbox**: inside it `brew` cannot write its cache, so every formula is
+reported missing.
 
 **Do NOT use Homebrew LLVM** (currently version 22 in arm64 Homebrew). It is too new for the vendored `lexy` subproject and causes build failures with incomplete-type errors. Apple Clang (`/usr/bin/clang++`, currently clang 21) is the correct compiler for this project.
 
-### Build procedure
+### Legacy: Python 3.10 build procedure (`build-arm64/` fallback only)
+
+> **Historical.** This is how the original `build-arm64/` (cpython-310) fallback was built, with
+> meson 1.1.0 and ninja pip-installed for the framework Python 3.10
+> (`arch -arm64 /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 -m pip install --user meson==1.1.0 ninja`).
+> It is **not** the current build — for that use `./build.sh` or the Python 3.14 procedure below.
 
 ```bash
 cd /Users/sarahjames/AC/eu/ae
@@ -311,7 +323,7 @@ ln -sfn build-py314 build
 
 ### Why the arm64 meson and ninja matter
 
-Apple Clang **inherits the architecture of its parent process**. Running clang from an x86_64 process (even on an arm64 Mac) produces x86_64 binaries silently — `file` on the output will confirm the architecture. The pip-installed `~/Library/Python/3.10/bin/ninja` is a universal binary that runs as arm64 natively, ensuring the entire toolchain spawns arm64 clang.
+Apple Clang **inherits the architecture of its parent process**. Running clang from an x86_64 process (even on an arm64 Mac) produces x86_64 binaries silently — `file` on the output will confirm the architecture. The arm64 Homebrew `ninja` (and, for the legacy 3.10 build, the pip-installed universal `~/Library/Python/3.10/bin/ninja`) runs as arm64 natively, ensuring the entire toolchain spawns arm64 clang.
 
 `/usr/local/bin/ninja` (from x86_64 Homebrew) must NOT be used — it spawns x86_64 clang.
 
@@ -653,6 +665,6 @@ bin/chart-grid-test input.ace
 - The `Layout` object supports iteration (`for coords in layout`) and indexed read/write: `layout[i]` reads a point's coords, `layout[i] = [x, y]` sets them (negative index counts from the end). Coordinates can also be set via `proj.set_coordinates(point_no, [x, y])`, and `proj.set_unmovable([i, j])` pins points so a subsequent `relax()` keeps them fixed.
 - **New C++ code**: Always use `fmt::format_to(` (not bare `format_to(`). Both `std::format_to` and `fmt::format_to` are visible in C++20 mode under Apple Clang 16 and the unqualified form is ambiguous.
 - **Homebrew LLVM 22** (at `/opt/homebrew/opt/llvm/`) is installed but **not used** — incompatible with the vendored `lexy` subproject. Apple Clang (`/usr/bin/clang++`, currently clang 21) is the correct compiler.
-- **Rebuilding**: Run meson via `arch -arm64 python3.10` and ninja via `arch -arm64 ~/Library/Python/3.10/bin/ninja`. The x86_64 `/usr/local/bin/ninja` will silently produce x86_64 binaries even on an arm64 Mac.
+- **Rebuilding**: Use `./build.sh`, which runs the arm64 Homebrew meson/ninja under `arch -arm64`. (Only the legacy `build-arm64/` 3.10 fallback uses `arch -arm64 python3.10` and `~/Library/Python/3.10/bin/ninja`.) The x86_64 `/usr/local/bin/ninja` will silently produce x86_64 binaries even on an arm64 Mac.
 - **Python 3.14** (the current Homebrew default, which `build/`→`build-py314/` targets) lacks `distutils`, so **meson 1.1.0 fails** with *"is not a valid python or it is missing distutils"*. Fix by using a newer meson (≥ ~1.4; the active build used 1.11.1), not by downgrading Python. The old 3.10 instructions that put `/Library/Frameworks/Python.framework/Versions/3.10/bin/python3` first in PATH apply only to the legacy `build-arm64/` (3.10) fallback.
 - **`brew --prefix libomp`**: libomp is keg-only — always use the formula-specific form `brew --prefix libomp` rather than bare `brew --prefix` when constructing library/include paths.
