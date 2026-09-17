@@ -107,8 +107,8 @@ window.IV = window.IV || {};
       const m = new Map();   // serum norm -> homologous antigen norm (only when different)
       const ch = IV.DATA && IV.DATA.charts[idx];
       if (ch && ch.sera && ch.antigens) for (const s of ch.sera) {
-        if (s.homologous == null || !s.norm) continue;
-        const ag = ch.antigens[s.homologous];
+        if (s.homologous0 == null || !s.norm) continue;
+        const ag = ch.antigens[s.homologous0];   // `homologous` is a list (v9 #4); use the scalar alias
         if (ag && ag.norm && ag.norm !== s.norm) m.set(s.norm, ag.norm);
       }
       State._homCache = { idx, map: m };
