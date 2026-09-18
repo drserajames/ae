@@ -43,9 +43,13 @@ namespace ae::tal
         std::size_t outside_range{0};   // dated leaves falling in no slot (only when start/end is given)
     };
 
-    // Bucket shown leaves by date. start/end are optional "YYYY-MM-DD" bounds;
-    // when empty the range is the min/max observed leaf date. week slots are
-    // 7-day intervals aligned to Monday.
+    // Bucket shown leaves by date. start/end are optional "YYYY-MM-DD" bounds
+    // (incomplete forms like "2026-10" are accepted and mean the 1st of that month).
+    // The range is HALF-OPEN, as in acmacs-base time_series::make: `start` is
+    // inclusive and `end` is EXCLUSIVE, so end "2026-10" draws the slot beginning
+    // September 2026 but not the one beginning October 2026. An empty bound falls
+    // back to the min / max observed leaf date, and the bucket containing the max
+    // date is still drawn. week slots are 7-day intervals aligned to Monday.
     TimeSeries compute_time_series(ae::tree::Tree& tree, TimeSeriesInterval interval, std::string_view start = {}, std::string_view end = {});
 
 } // namespace ae::tal

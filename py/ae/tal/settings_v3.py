@@ -505,6 +505,12 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     clades["slot_width"] = float(slot["width"])
                 if isinstance(cmd.get("width-to-height-ratio"), (int, float)):
                     clades["width_ratio"] = float(cmd["width-to-height-ratio"])
+                # Gap between the clades column and the column before it (fraction of page width).
+                # ae lays the columns out itself, so the `.tal`'s neighbouring `{"N": "gap"}`
+                # element cannot reach the renderer; `gap-ratio` on the clades command does.
+                # 0 is legal (columns flush), so test for None, not truthiness.
+                if isinstance(cmd.get("gap-ratio"), (int, float)):
+                    clades["gap_ratio"] = float(cmd["gap-ratio"])
                 # AD horizontal_line: the two faint grey lines at each clade's top/bottom.
                 # Emit only when explicitly disabled; absent => C++ default (drawn).
                 if cmd.get("horizontal-lines") is False:
@@ -533,9 +539,13 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                         style["display_name"] = pc["display_name"]
                     elif isinstance(pc.get("label"), dict) and "text" in pc["label"]:
                         style["display_name"] = pc["label"]["text"]  # label.text doubles as the display name
-                    # explicit slot (AD honours per-clade slot; set_slots only fills NoSlot)
-                    if isinstance(pc.get("slot"), (int, float)):
-                        style["slot"] = int(pc["slot"])
+                    # explicit slot (AD honours per-clade slot; set_slots only fills NoSlot).
+                    # Kept as a float: ae accepts fractional and slightly negative slots so a
+                    # bracket can be nudged towards the neighbouring column without shrinking
+                    # slot.width (which also drives level spacing and label size). AD's own
+                    # slot_no is an unsigned size_t and truncates — this is a superset.
+                    if isinstance(pc.get("slot"), (int, float)) and not isinstance(pc.get("slot"), bool):
+                        style["slot"] = float(pc["slot"])
                     # per-clade label scale + rotation (the report's `label` is an array whose
                     # first element carries rotation_degrees/scale; tolerate the dict form too)
                     lab = pc.get("label")

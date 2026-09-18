@@ -545,12 +545,14 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // then assign a horizontal slot — the explicit per-clade slot when given, else set_slots
     // (smallest clade -> slot 0 nearest the matrix, larger/parent clades bumped rightward).
     struct CladeBand { long first_v; long last_v; std::size_t size; std::string first_name; std::string last_name; };
-    struct CladePlan { std::size_t rank; std::vector<CladeBand> bands; int slot; long first_v; long last_v; std::size_t longest; double label_scale; int rotation; double offset_x; double offset_y;
+    // `slot` is a double so a `.tal` can ask for a fractional or slightly negative slot (see
+    // CladeStyle::slot); `slot_explicit` replaces the old "slot < 0 means auto" sentinel.
+    struct CladePlan { std::size_t rank; std::vector<CladeBand> bands; double slot; bool slot_explicit; long first_v; long last_v; std::size_t longest; double label_scale; int rotation; double offset_x; double offset_y;
                        // the rest is carried purely for the clade-section diagnostic below:
                        double incl; double excl;      // the tolerances actually applied
                        std::vector<CladeBand> dropped; }; // post-merge bands the exclusion tolerance removed
     std::vector<CladePlan> clade_plan;
-    int clade_max_slot = 0;
+    double clade_max_slot = 0.0;
     {
         for (const std::size_t k : visible_clades) {
             const Clade& clade = clade_sections[k];
@@ -608,7 +610,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             }
             std::size_t longest = 0;
             for (const auto& b : kept) longest = std::max(longest, b.size);
-            const int slot = style ? style->slot : -1;
+            const std::optional<double> slot = style ? style->slot : std::optional<double>{};
             // Default all-clades label scale when neither a per-clade nor an all-clades `label.scale`
             // is given (H1's report .tal sets neither for C.1.7 / D / C.1.9 — their `?scale` keys are
             // disabled). AD's real struct default is 0.7 (acmacs-tal clades.hh:36 parameters::Label
@@ -622,7 +624,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const int rot = style ? style->rotation_degrees : 90;
             const double offx = style ? style->label_offset_x : 0.002;
             const double offy = style ? style->label_offset_y : 0.0;
-            clade_plan.push_back({k, std::move(kept), slot, 0, 0, longest, lscale, rot, offx, offy, incl, excl, std::move(dropped)});
+            clade_plan.push_back({k, std::move(kept), slot.value_or(0.0), slot.has_value(), 0, 0, longest, lscale, rot, offx, offy, incl, excl, std::move(dropped)});
             clade_plan.back().first_v = clade_plan.back().bands.front().first_v;
             clade_plan.back().last_v = clade_plan.back().bands.back().last_v;
         }
@@ -633,25 +635,33 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         std::sort(refs.begin(), refs.end(), [](const CladePlan* a, const CladePlan* b) {
             return a->longest != b->longest ? a->longest < b->longest : (a->last_v - a->first_v) < (b->last_v - b->first_v);
         });
+        // Occupancy is tracked per WHOLE column: an explicit slot of 2.2 or 1.75 still shares its
+        // staircase step with the integer slot it rounds to, so an auto-placed clade must treat
+        // that column as taken. Only the drawing uses the exact (possibly fractional) value.
         std::vector<std::vector<std::pair<long, long>>> occupied;
-        const auto place = [&](CladePlan* p, int slot) {
-            if (slot >= static_cast<int>(occupied.size())) occupied.resize(slot + 1);
-            occupied[slot].emplace_back(p->first_v, p->last_v);
-            p->slot = slot;
-            clade_max_slot = std::max(clade_max_slot, slot);
+        const auto column_of = [](double slot) { return std::max(0, static_cast<int>(std::lround(slot))); };
+        const auto reserve = [&](const CladePlan* p, int column) {
+            if (column >= static_cast<int>(occupied.size())) occupied.resize(static_cast<std::size_t>(column) + 1);
+            occupied[static_cast<std::size_t>(column)].emplace_back(p->first_v, p->last_v);
         };
-        for (auto* p : refs) if (p->slot >= 0) place(p, p->slot);     // explicit slots first
+        for (auto* p : refs) {                                        // explicit slots first
+            if (!p->slot_explicit) continue;
+            reserve(p, column_of(p->slot));
+            clade_max_slot = std::max(clade_max_slot, p->slot);
+        }
         for (auto* p : refs) {
-            if (p->slot >= 0) continue;
-            int slot = 0;
-            for (;; ++slot) {
-                if (slot >= static_cast<int>(occupied.size())) { occupied.emplace_back(); break; }
+            if (p->slot_explicit) continue;
+            int column = 0;
+            for (;; ++column) {
+                if (column >= static_cast<int>(occupied.size())) { occupied.emplace_back(); break; }
                 bool clash = false;
-                for (const auto& sp : occupied[slot])
+                for (const auto& sp : occupied[static_cast<std::size_t>(column)])
                     if (p->first_v < sp.second && sp.first < p->last_v) { clash = true; break; }
                 if (!clash) break;
             }
-            place(p, slot);
+            reserve(p, column);
+            p->slot = static_cast<double>(column);
+            clade_max_slot = std::max(clade_max_slot, p->slot);
         }
     }
 
@@ -1097,6 +1107,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     const double margin_r = (params.right_margin_ratio > 0.0 ? params.right_margin_ratio : 0.03) * width;
     const double drawable_w = width - margin - margin_r;
     const double gap = 0.012 * width;
+    // The gap immediately before the clades column is separately settable (`clades.gap_ratio`),
+    // because it is half of the distance between the time-series matrix and the first clade
+    // bracket — the other half being one whole clade slot. AD spells it as an explicit `gap`
+    // element in the `.tal` program; ae positions the columns itself, so it reads a ratio.
+    const double clade_gap = params.clades_gap_ratio >= 0.0 ? params.clades_gap_ratio * width : gap;
     // The band computed above, inset from the left of the drawable area (so the root sits at
     // margin + aa_left and the tree loses that width). It was briefly ADDED to the page width
     // instead, to keep the tree at its full width; that is what made every ae tree page exactly
@@ -1126,9 +1141,13 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // past the narrow column into the dash bar (r6 #2). Match AD: derive the column width from the AD
     // slot.width (0.02*height) when no explicit slot.width is given, leaving AD's 2-slot right margin
     // for the deepest rotated label. (number_of_slots = clade_max_slot+1, so width = (clade_max_slot+3).)
+    // clade_max_slot may be fractional (an explicit `"slot": 2.2`); round the column up to whole
+    // slots so the width is unchanged for the integer case and never narrower than the deepest
+    // bracket for the fractional one.
+    const double clade_max_slot_w = std::ceil(clade_max_slot);
     const double clade_w = (params.clades && !visible_clades.empty())
-        ? (clade_slot_px > 0.0 ? static_cast<double>(clade_max_slot + 2) * clade_slot_px
-           : static_cast<double>(clade_max_slot + 3) * 0.02 * height)
+        ? (clade_slot_px > 0.0 ? (clade_max_slot_w + 2.0) * clade_slot_px
+           : (clade_max_slot_w + 3.0) * 0.02 * height)
         : 0.0;
     // AD sizes the time-series column as n_slots * slot.width (slot.width a fraction of
     // height); honour it so the column is AD's narrow width, falling back to 0.34·drawable.
@@ -1162,10 +1181,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // those anyway left ~2.25 gaps of dead paper at the panel's right edge — which on a
     // signature page is exactly the space the maps want. Subtract what is really spent.
     const double gaps_right = params.clades_before_time_series
-        ? gap * static_cast<double>((label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0) + (dash_w > 0.0))
+        ? gap * static_cast<double>((label_w > 0.0) + (ts_w > 0.0) + (dash_w > 0.0))
+              + (clade_w > 0.0 ? clade_gap : 0.0)
               + (grey_dash_w > 0.0 ? grey_gap : 0.0)
               - (hz_marker_w > 0.0 ? gap * 0.25 : 0.0)
-        : gap * static_cast<double>(n_right);
+        : gap * static_cast<double>(n_right - (clade_w > 0.0 ? 1 : 0)) + (clade_w > 0.0 ? clade_gap : 0.0);
     const double tree_w = drawable_w - aa_left - hz_w - label_w - clade_w - ts_w - dash_w - grey_dash_w - hz_marker_w - gaps_right;
 
 
@@ -1176,7 +1196,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // matrix, grey matches-chart dash, hz-section markers, then the AA dash-bar colour
         // columns nearest the maps.
         if (label_w > 0.0)     { cursor += gap; x_label0 = cursor;  cursor += label_w; }
-        if (clade_w > 0.0)     { cursor += gap; x_clade0 = cursor;  cursor += clade_w; }
+        if (clade_w > 0.0)     { cursor += clade_gap; x_clade0 = cursor;  cursor += clade_w; }
         if (ts_w > 0.0)        { cursor += gap; x_ts0 = cursor;     cursor += ts_w; }
         if (grey_dash_w > 0.0) { cursor += grey_gap; x_grey0 = cursor;   cursor += grey_dash_w; }
         // hz-section markers on the RIGHT of the time series (AD), hugging the grey-dash/matrix.
@@ -1196,7 +1216,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // AD layout-tree-only order: labels, time-series matrix, clades, then aa dash-bars.
         if (label_w > 0.0) { cursor += gap; x_label0 = cursor; cursor += label_w; }
         if (ts_w > 0.0)    { cursor += gap; x_ts0 = cursor;    cursor += ts_w; }
-        if (clade_w > 0.0) { cursor += gap; x_clade0 = cursor; cursor += clade_w; }
+        if (clade_w > 0.0) { cursor += clade_gap; x_clade0 = cursor; cursor += clade_w; }
         if (dash_w > 0.0)  { cursor += gap; x_dash0 = cursor;  cursor += dash_w; }
     }
 
@@ -1438,7 +1458,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         }
         {
             std::unordered_map<int, std::vector<std::size_t>> by_slot;
-            for (std::size_t i = 0; i < band_labels.size(); ++i) by_slot[clade_plan[band_labels[i].plan_index].slot].push_back(i);
+            for (std::size_t i = 0; i < band_labels.size(); ++i) // keyed by whole column: a 2.2 declutters against a 2
+                by_slot[static_cast<int>(std::lround(clade_plan[band_labels[i].plan_index].slot))].push_back(i);
             const double decl_gap = 0.004 * height; // gap between separated labels (~4px @1000)
             for (auto& [slot, idxs] : by_slot) {
                 if (idxs.size() < 2) continue;
@@ -1467,8 +1488,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const CladeBand& band = plan.bands[band_labels[label_index].band_index];
             const Clade& clade = clade_sections[plan.rank];
             const double cx = clades_left
-                ? clade_right_edge - slot_px * (static_cast<double>(plan.slot) + 1.0)
-                : x_clade0 + slot_px * (static_cast<double>(plan.slot) + 1.0); // AD pos_x
+                ? clade_right_edge - slot_px * (plan.slot + 1.0)
+                : x_clade0 + slot_px * (plan.slot + 1.0); // AD pos_x
             // AD clades.cc:287 label_size = slot.width * scale with NO upper clamp; the prior
             // ae cap (14) bit H1 (slot_px ~15.3) and made the labels smaller than AD (r6 item #1).
             // slot_px*label_scale <= 0.02*clades_area_h (<= ~20px) by construction, so no guard needed

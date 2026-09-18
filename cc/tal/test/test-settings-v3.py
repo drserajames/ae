@@ -165,6 +165,30 @@ def check_time_series_slot() -> dict:
     }
 
 
+def check_clade_slot_and_gap() -> dict:
+    """per-clade `slot` keeps its fraction/sign, and `gap-ratio` reaches the schema.
+
+    A fractional or slightly negative slot moves one bracket towards the matrix without
+    shrinking `slot.width` (which also sets the level pitch and the label size). AD's own
+    slot_no is an unsigned size_t and truncates, so this is a deliberate ae superset; `int()`
+    here used to throw the fraction away before the renderer ever saw it.
+    """
+    tal = {"tal": [{"N": "clades", "slot": {"width": 0.02}, "gap-ratio": 0.0,
+                    "per-clade": [{"name": "Kappa", "slot": 2.2},
+                                  {"name": "Lambda", "slot": -0.5},
+                                  {"name": "Mu", "slot": 0},
+                                  {"name": "Nu"}]}]}
+    s, _ = translate(tal)
+    styles = {st.get("name"): st for st in s.get("clade_styles", [])}
+    return {
+        "clade slot keeps its fraction": styles.get("Kappa", {}).get("slot") == 2.2,
+        "clade slot keeps its sign": styles.get("Lambda", {}).get("slot") == -0.5,
+        "clade slot 0 is not dropped": styles.get("Mu", {}).get("slot") == 0.0,
+        "absent clade slot stays absent (auto-place)": "slot" not in styles.get("Nu", {}),
+        "clades gap-ratio of 0 reaches the schema": s.get("clades", {}).get("gap_ratio") == 0.0,
+    }
+
+
 def check_eval_condition() -> dict:
     """Direct grammar checks for the if-condition evaluator (port of eval_condition)."""
     d = {"whocc": "true", "off_flag": "false", "region": "EUROPE", "blank": ""}
@@ -245,6 +269,7 @@ def main():
     checks.update(check_dash_bar_colors())
     checks.update(check_tip_names_and_edges())
     checks.update(check_time_series_slot())
+    checks.update(check_clade_slot_and_gap())
     failures = [name for name, ok in checks.items() if not ok]
     if failures:
         print("FAIL:")

@@ -164,6 +164,19 @@ the `cc/draw/` surface API."*
    `acmacs-base/time-series`. Reuses `ae::tree::Leaf::date`. Exposed as
    `ae_backend.tal.compute_time_series`. Verified by
    [`test/test-time-series.py`](test/test-time-series.py).
+   **The range is half-open `[start, end)`, and `end` is excluded exactly once** — on the slot
+   generator's loop condition, as in `acmacs-base` `time_series::make` (`cc/time-series.cc:53`,
+   `current < param.after_last`, where `current` is the slot's own start). An `end` of `"2026-10"`
+   therefore draws the slot beginning September 2026. It was briefly excluded *twice* (`end` stepped
+   back a day *and* the loop stopped early), which silently dropped the last slot of every explicit
+   range — one month at the month interval, a whole year at the year interval (a one-year range came
+   out empty), and it also made a mid-month `end` drop that month. An empty `end` still includes the
+   bucket holding the latest leaf date. `test-time-series.py` now carries the five
+   parameters→expected-series cases transcribed from AD's own
+   `acmacs-base/cc/test-time-series.cc`, so ae is pinned to AD without needing AD built. AD's two
+   *weekly* cases are excluded on purpose: AD's `detail::first()` leaves a week range's start
+   un-snapped while ae aligns to the Monday on/before `start` — same slot count, offset by up to six
+   days. That divergence is pre-existing and untouched.
 7. AA-transition labelling — `cc/tree/aa-transitions.cc` already ports a consensus method;
    reconcile with acmacs-tal's versioned algorithms when richer labelling is needed.
    **This is now the one measured gap in the hz-section path.** The report `.tal`s ask
@@ -459,8 +472,34 @@ the `cc/draw/` surface API."*
     not 4 — on a 1000pt canvas 4 dp was up to 0.05pt out (measured 0.019/0.014/0.029pt). **Result:** page
     size is AD's to the printed precision — **631.619 / 794.286 / 648.571 × 1000**, both engines, same run.
     Only the tree page is affected; the signature-page path reserves no band (`output` is empty there).
-    **Verify:** `python3 cc/tal/test/test-page-size.py` (5 checks; fails with `TAL_DRAW=` pointed at a
-    pre-fix binary, reporting 630 where 600 is expected).
+    **Verify:** `python3 cc/tal/test/test-page-size.py` (7 checks; fails with `TAL_DRAW=` pointed at a
+    pre-fix binary, reporting 630 where 600 is expected). Its last two checks pin the drawn
+    time-series slot count to the count `settings_v3._time_series_slots` sized the page for — the two
+    had drifted by one slot (12 sized, 11 drawn) while the page stayed the right width.
+
+- **Milestone: fractional / negative clade `slot`, and a settable clades column gap.** A clade
+    bracket sits at `slot.width * (slot + 1)` from the clades column's inner edge (AD
+    `acmacs-tal cc/clades.cc:269`), and the column is one inter-column gap past the time-series
+    matrix — so the matrix→bracket distance is `gap + slot.width*(slot+1)`. The only `.tal` lever on
+    it used to be `slot.width`, which also sets the pitch between clade levels *and* the label size,
+    so pulling one bracket towards the matrix shrank the whole staircase. Two levers now:
+    - **`slot` is a `std::optional<double>`** (`CladeStyle::slot`), not an `int` with `-1` meaning
+      "auto". Fractions and small negatives are honoured, so one bracket moves by a part-slot at
+      full `slot.width`. Note AD's own `slot_no` is an unsigned `named_size_t`
+      (`acmacs-tal cc/clades.hh:20`) and truncates `2.2` to `2`, so **this is a deliberate superset
+      of AD, not a parity fix** — an integer `.tal` renders identically either way. Auto-placement
+      still works in whole columns and reserves the column a fractional slot rounds to, so an
+      auto-placed clade is never pushed onto a fractional neighbour's step.
+    - **`clades.gap_ratio`** overrides the gap before the clades column (fraction of page width;
+      `0` is legal and puts the column flush against the matrix; unset keeps the shared `0.012`).
+      AD gets this from the explicit `{"N": "gap"}` element the `.tal` program puts between the two
+      columns; ae lays the columns out itself, so it reads a ratio on the `clades` command.
+    Measured at `slot.width` 0.02 on a 600×1000 page (one slot = 20pt, default gap = 7.2pt):
+    matrix→bracket 27.20pt at slot 0, **17.20pt at slot −0.5**, 37.20pt at 0.5, and **10.00pt** at
+    slot −0.5 with `gap_ratio: 0` — against 20.20 / 17.20pt from squeezing `slot.width` to
+    0.013 / 0.010, which drags the level pitch down from 20pt to 13 / 10pt with it.
+    **Verify:** `python3 cc/tal/test/test-clade-slots.py` (12 checks; 11 of them fail against a
+    pre-fix binary, which renders slot −0.5, 0 and 0.5 identically).
 
 - **Milestone: continent legend (top-right) + curated clade-label column (vs AD refs).** Two gaps
     remained on the report tree page vs `/tmp/ad-{h1,h3,bvic}.*.pdf`: no colour legend, and the clade
