@@ -2,33 +2,53 @@
 
 ## Dependencies (general description)
 
+System packages (on macOS, `./build.sh check` verifies the formulae listed in `BREW_FORMULAE` in [`build.sh`](build.sh)):
+
 - Apple Clang (macOS, currently clang 21) / clang-14+ / g++-11
 - ninja
 - meson 1.4+ (needed for the Python 3.14 build; 1.11.1 in use — meson 1.1.0 fails because Python 3.14 removed `distutils`)
 - cmake 3.18+ (to build lexy)
-- libomp
+- pkg-config (meson uses it to find the system libraries below)
+- libomp (OpenMP)
 - brotli
-- zlib
-- libbz2
-- liblzma
-- catch2
+- zlib 1.2.8+ (macOS: the SDK copy is used)
+- libbz2 (optional)
+- liblzma (xz)
+- catch2 v3 (if no system copy is found, meson falls back to the vendored `subprojects/catch2.wrap`)
+- cairo (used by `tal-draw`)
+- Python 3.14 with headers, for the `ae_backend` extension (the `.so` is ABI-locked to the minor version it was built for)
+- gnu-time (optional — `build.sh` only uses it to time the build)
+
+C++ libraries — fmt, simdjson, pybind11, range-v3, xlnt, xxHash, alglib, lexy — are
+vendored as meson wraps in [`subprojects/`](subprojects/) and fetched during `meson setup`;
+they need no separate install.
+
+The Python package `py/ae` is pure-stdlib: there are no third-party Python dependencies.
 
 ## Installing dependencies on macOS
 
 - install homebrew https://brew.sh
-- brew install meson ninja libomp cmake brotli zlib xz gnu-time catch2
+- brew install meson ninja libomp cmake brotli zlib xz catch2 cairo pkgconf python@3.14
+- optional: brew install gnu-time
 
-> **Apple Silicon:** the authoritative native-arm64 build (Python 3.14, Apple Clang) is documented in [`CLAUDE.md`](CLAUDE.md) — use it rather than `./mk`. Do **not** `brew install llvm`; Homebrew LLVM is incompatible with the vendored `lexy` subproject. Apple Clang (`/usr/bin/clang++`) is the correct compiler.
+> **Apple Silicon:** use `./build.sh` (below); the full native-arm64 toolchain background (Python 3.14, Apple Clang) is in [`CLAUDE.md`](CLAUDE.md). Do **not** use `./mk`. Do **not** `brew install llvm`; Homebrew LLVM is incompatible with the vendored `lexy` subproject. Apple Clang (`/usr/bin/clang++`) is the correct compiler.
 
 ## Installing dependencies on Ubuntu
 
-- sudo apt install g++-11 ninja-build meson cmake libbrotli-dev liblzma-dev
+> **Untested** — nobody currently builds ae on Linux; this list is derived from
+> `meson.build`, not from a verified build.
 
-- Check version of meson: meson --version
-  If version older than 0.60: pip3 install --user meson
+- sudo apt install g++-11 ninja-build cmake pkg-config python3-dev libbrotli-dev liblzma-dev zlib1g-dev libbz2-dev libcairo2-dev
+  (with g++, OpenMP comes with the compiler; with clang also install `libomp-dev`)
 
-- Check version of cmake: cmake --version
-  If version is older than 3.18: ?
+- meson must be 1.4 or newer (check with `meson --version`); distribution packages are
+  often older, in which case: `pip3 install --user 'meson>=1.4'`
+
+- cmake must be 3.18 or newer (check with `cmake --version`); if the distribution's is
+  older, install a current one with `pip3 install --user cmake`.
+
+- catch2 is left to the vendored wrap; do not install a distribution catch2 v2 package, which
+  meson would find and prefer.
 
 ## Build
 
@@ -63,5 +83,3 @@ chart-relax -n 100 input.ace output.ace     # bin/ is now on PATH
 ```
 
 Set `ACMACS_DATA=/path/to/acmacs-data` before sourcing if that repo lives elsewhere.
-`numpy` is an additional runtime dependency of the kateri move→relax flow —
-`/opt/homebrew/bin/python3 -m pip install --user --break-system-packages numpy`.

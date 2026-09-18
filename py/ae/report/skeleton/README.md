@@ -33,7 +33,7 @@ class H1_ChartModifier(ae.report.chart_modifier.ChartModifier, conference_data.C
 - `PYTHONPATH` = ae `py/` (for `ae.report`) + the report dir + **acmacs-data**
   (`semantic_clades` / `semantic_vaccines`).
 - env: `$HIDB_V5`, `$LOCDB_V2`, `$WHOCC_TABLES_DIR`; the `kateri` executable on PATH (export).
-- Python 3.10 (for `ae_backend`).
+- Python 3.14 (for `ae_backend`, built into `build/` → `build-py314/`; the legacy `build-arm64/` fallback needs 3.10).
 
 ## Commands (`./0do <cmd>`)
 
