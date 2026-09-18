@@ -16,7 +16,9 @@ sSubdirforSubtype = {"BVIC": "bvic", "BYAM": "byam", "A(H1N1)": "h1", "A(H3N2)":
 
 sRandomGen = random.SystemRandom()
 
-sMailTo = "weekly-tree@antigenic-cartography.org"
+sMailTo = os.environ.get("AE_WEEKLY_TREE_MAIL_TO", "weekly-tree@antigenic-cartography.org")
+# overridable so the failure path can be tested without sending real mail
+sMailCmd = os.environ.get("AE_WEEKLY_TREE_MAIL_CMD", "/usr/bin/mail")
 
 # ----------------------------------------------------------------------
 
@@ -29,12 +31,12 @@ def main(args: argparse.Namespace):
     outgroup = source_fas.open().readline().strip()[1:]
     try:
         best_tree_file = cmaple(working_dir=working_dir, source_tree=source_tree, source_fas=source_fas, method=method, outgroup=outgroup, num_runs=args.num_runs, slurm_nodelist=args.slurm_nodelist, slurm_exclude_nodes=args.slurm_exclude_nodes)
-        subprocess.run(["/usr/bin/mail", "-s", f"completed {sys.argv[0]} {working_dir}", sMailTo], input=f"cd {working_dir}\n{argv}\n{best_tree_file}\n", text=True)
+        subprocess.run([sMailCmd, "-s", f"completed {sys.argv[0]} {working_dir}", sMailTo], input=f"cd {working_dir}\n{argv}\n{best_tree_file}\n", text=True)
         logging.info(f"mail to {sMailTo} about completion sent")
         return 0
     except Exception as err:
         logging.error(f"", exc_info=True)
-        subprocess.run(["/usr/bin/mail", "-s", f"FAILED {sys.argv[0]} {working_dir}", sMailTo], input=f"cd {working_dir}\n{argv}\n\n{traceback.format_exc()}\n", text=True)
+        subprocess.run([sMailCmd, "-s", f"FAILED {sys.argv[0]} {working_dir}", sMailTo], input=f"cd {working_dir}\n{argv}\n\n{traceback.format_exc()}\n", text=True)
         logging.info(f"mail to {sMailTo} about FAILURE sent")
         raise
 
@@ -109,8 +111,11 @@ def cmaple(working_dir: Path, source_tree: Path, source_fas: Path, method: str, 
                     logging.info(f"cmaple run {working_dir} {future_to_runid[future]} completed")
         if failures:
             logging.error(f"cmaple {working_dir} FAILED: {failures} runs failed")
-        else:
-            logging.info("cmaple completed")
+            # Must raise: main() relies on an exception to send the FAILED mail and to exit non-zero,
+            # and `submit`'s `&&` chain relies on that exit code to stop before rotate.R. Swallowing
+            # this reported a completed run for a week where every cmaple job had died.
+            raise RuntimeError(f"cmaple {working_dir}: {failures} of {num_runs} runs failed")
+        logging.info("cmaple completed")
 
     # ----------------------------------------------------------------------
 
@@ -124,6 +129,11 @@ def cmaple(working_dir: Path, source_tree: Path, source_fas: Path, method: str, 
         submit()
         logging.info(f"cmaple elapsed: {datetime.datetime.now() - start}")
 
+        # Only advertise a tree that is actually there. cmaple_tree.txt is what the next week's
+        # `init` follows (find_previous_dir -> init_subtype -> previous.newick symlink), so one
+        # naming a file that was never produced poisons the following week's run.
+        if not tree_file.exists():
+            raise RuntimeError(f"cmaple {working_dir}: no tree produced, {tree_file} does not exist")
         output_dir.parent.joinpath("cmaple_tree.txt").open("w").write(str(tree_file))
 
     return tree_file

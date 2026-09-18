@@ -36,6 +36,13 @@ def init_subtype(subtype: str, previous_dir: Path):
             print(f">> no previous tree run report: {previous_tree}", file=sys.stderr)
             return
         previous_newick_link_target = Path(previous_tree.open().read().strip())
+        if not previous_newick_link_target.exists():
+            # A week whose cmaple runs all failed used to still write cmaple_tree.txt. Linking to the
+            # tree it names would give this week a dangling previous.newick and fail much later, in
+            # cmaple itself. Skip the subtype and say why, as for a missing report above.
+            print(f">> BROKEN previous tree run report: {previous_tree} names {previous_newick_link_target}, which does not exist"
+                  f" -- skipping {subtype} (that week's cmaple run failed)", file=sys.stderr)
+            return
         link = relative_path(previous_newick_link_target, subtype_dir)
         print(f">>> {previous_newick} -> {link}", file=sys.stderr)
         previous_newick.symlink_to(link)
@@ -89,6 +96,13 @@ def find_previous_dir():
     today = datetime.date.today()
     for date, d in dated:
         if date != today:
+            # Say so loudly rather than skipping the folder: a week can be broken for one subtype and
+            # good for the other three, and silently reaching back a further week would rebuild all
+            # four from a staler tree. init_subtype skips just the affected subtype.
+            for subtype in SUBTYPES:
+                report = d.joinpath(subtype, "cmaple_tree.txt")
+                if report.exists() and not Path(report.open().read().strip()).exists():
+                    print(f">> WARNING previous dir {d}: {subtype}/cmaple_tree.txt names a tree that does not exist", file=sys.stderr)
             return d
     dirs_s = "\n    ".join(str(d) for _, d in dated)
     raise RuntimeError(f"previous dir not found in\n    {dirs_s}")
