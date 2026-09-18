@@ -77,6 +77,8 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
     if (const auto& clades = config["clades"]; clades.is_object()) {
         params.clades = get_bool(clades["show"]);
         params.clades_slot_width = get_double(clades["slot_width"], 0.0);
+        if (!clades["gap_ratio"].is_null())
+            params.clades_gap_ratio = get_double(clades["gap_ratio"], -1.0);
         params.clades_label_scale = get_double(clades["label_scale"], 0.0);
         params.clades_width_ratio = get_double(clades["width_ratio"], 0.0);
         params.clades_horizontal_lines = get_bool(clades["horizontal_lines"], true);
@@ -120,7 +122,9 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                     .color = get_string(entry["color"]),
                     .display_name = get_string(entry["display_name"]),
                     .hide = get_bool(entry["hide"]),
-                    .slot = entry["slot"].is_null() ? -1 : static_cast<int>(get_double(entry["slot"], -1.0)),
+                    // Fractional and negative slots are meaningful (see CladeStyle::slot); only an
+                    // ABSENT `slot` means "auto-place", so the value is never truncated or clamped.
+                    .slot = entry["slot"].is_null() ? std::optional<double>{} : std::optional<double>{get_double(entry["slot"], 0.0)},
                     .label_scale = get_double(entry["label_scale"], 0.0),
                     .rotation_degrees = static_cast<int>(get_double(entry["rotation_degrees"], 90.0)),
                     .section_inclusion_tolerance = get_double(entry["section_inclusion_tolerance"], 0.0),

@@ -45,7 +45,15 @@ namespace ae::tal
         std::string color{};
         std::string display_name{};
         bool hide{false}; // suppress this clade's bar + label from the clades column / legend (acmacs-tal per-clade show:false)
-        int slot{-1};                          // explicit horizontal slot (AD per-clade slot); -1 = compute via set_slots
+        // Explicit horizontal slot (AD per-clade slot); unset = compute via set_slots.
+        // A double, not an int: the bracket is drawn at slot_width*(slot+1) from the clade
+        // column's inner edge, so a fractional slot (0.5) moves the whole staircase step by a
+        // half-pitch, and a negative one (> -1) pulls a bracket back towards the neighbouring
+        // column, WITHOUT having to shrink `slot.width` (which also sets the level spacing and
+        // the label size). AD's own slot_no is an unsigned named_size_t and truncates 2.2 to 2,
+        // so this is a deliberate superset of AD, not a parity fix. `std::optional` rather than
+        // a -1 sentinel, because -1 is now a usable value.
+        std::optional<double> slot{};
         double label_scale{0.0};               // label size = clades slot.width * this scale; 0 = column default
         int rotation_degrees{90};              // label rotation (90 = clockwise / top-to-bottom, 0 = horizontal)
         double section_inclusion_tolerance{0.0}; // merge sections whose gap (leaf indices) <= this (AD make_sections)
@@ -218,6 +226,14 @@ namespace ae::tal
         std::map<char, std::string> color_by_pos_colors{}; // aa char -> colour for color_by_pos; empty = colour by frequency
         bool clades{false};          // draw the clade-sections column
         double clades_slot_width{0.0};   // clade column slot width as a fraction of height (AD clades slot.width); 0 = derived
+        // The inter-column gap immediately BEFORE the clades column, as a fraction of page width;
+        // < 0 = the shared default (0.012). In the tree-only column order (labels, time-series,
+        // clades, dash bars) that is the matrix -> clades gap; on a signature page, where the
+        // clades column precedes the matrix, it is the labels -> clades gap. AD gets this knob
+        // from the explicit `{"N": "gap"}` element the `.tal` program puts between the two
+        // columns; ae lays the columns out itself, so it is exposed here instead. 0 is legal
+        // (columns flush) — hence the negative "unset".
+        double clades_gap_ratio{-1.0};
         double clades_label_scale{0.0};  // default per-clade label scale (AD all-clades label.scale); 0 = 1.0
         double clades_width_ratio{0.0};  // clade column width as a fraction of height (AD clades width-to-height-ratio); 0 = derived
         bool clades_horizontal_lines{true}; // draw the two faint grey lines at each clade's top & bottom (AD horizontal_line); false = brackets only
