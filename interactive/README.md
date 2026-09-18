@@ -200,6 +200,16 @@ Stage-2 data (E2), for the colour-by-AA and stress/error overlays:
 > adds its titer/logged matrices). All-centres files scale with the number of charts.
 
 ## Known limitations / next steps
+- **⚠️ Map orientation is wrong — the viewer is not ready to be shown.** The map panel
+  draws every map **mirrored vertically** against the report's own map figures: `js/map.js`
+  projects with `SY = ymax - y` (and `js/grid.js` / `js/lines.js` repeat that flip), while
+  the report's renderer maps chart y straight to device y, which increases downward.
+  Measured against a report clade-map PDF: the per-clade centroids of its drawn glyphs
+  correlate with the exporter's coordinates at **r = +0.9998 (x) and +0.9999 (y)** in
+  device space (9 clades, 871 glyphs), i.e. the report applies no flip. The exported
+  coordinates are right; only the drawing is wrong. This predates the full-tree mode and
+  affects both `--tree-tips` settings, so **don't use these pages to read a map, or to show
+  the full tree, until it is fixed.**
 - **Pruned context.** By default only linked tips are kept. `--tree-tips all` keeps the
   whole tree (above), but unlinked tips carry no AA sequence, so colour-by-AA greys
   them. On-demand or deduplicated sequences would be the follow-up. Unlinked tips also
