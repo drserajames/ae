@@ -204,9 +204,8 @@ Regenerate locally by rendering `<report>/sp/<prefix>.…sp.pdf` (AD) next to th
 
 ## Build note
 
-`ae_backend` + `tal-draw` are built for Python 3.14 at `build-py314/` (`build/` → it). A
-py3.10 fallback lives at `build-arm64/`. The engine also runs under arm64 py3.10
-(`arch -arm64 …/3.10/python3` with `PYTHONPATH=build-arm64`); note that **iterating tree
+`ae_backend` + `tal-draw` are built for Python 3.14 at `build-py314/` (`build/` → it). The
+py3.10 `build-arm64/` fallback was retired on 18 Sep 2026; note that **iterating tree
 leaves in Python traps under the 3.14 build's libc++ hardening** on a non-UTF-8 leaf name —
 the orchestration avoids this by reading draw-order names from `tal-draw`'s `.names` output
 rather than iterating the tree in Python.
