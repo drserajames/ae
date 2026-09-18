@@ -57,6 +57,19 @@ MODULE_ORDER = [
 ]
 
 
+def fill_template(tpl: str, values: dict[str, str]) -> str:
+    """Substitute each placeholder token in the TEMPLATE exactly once, in a single pass.
+
+    Chained str.replace() rescans text already inserted: the modules' own comments quote
+    the /*__DATA__*/ token, so replacing modules first and data second pasted a second
+    (commented-out) copy of the whole bundle into the page, doubling its size. A single
+    regex pass never looks inside a substituted value, whatever it contains."""
+    for token in values:
+        if tpl.count(token) != 1:
+            raise SystemExit(f"ERROR: template must contain {token} exactly once, found {tpl.count(token)}")
+    return re.sub("|".join(re.escape(t) for t in values), lambda m: values[m.group(0)], tpl)
+
+
 def build_modules(js_dir: Path) -> str:
     """Concatenate the viewer modules in MODULE_ORDER into one classic script."""
     parts = []
@@ -934,13 +947,8 @@ def main():
                       .replace(">", "\\u003e")
                       .replace("&", "\\u0026"))
     tpl = open(args.template).read()
-    for placeholder in ("/*__DATA__*/", "/*__MODULES__*/"):
-        if placeholder not in tpl:
-            print(f"ERROR: template missing {placeholder} placeholder", file=sys.stderr)
-            sys.exit(1)
     modules = build_modules(Path(args.template).with_name("js"))
-    # inline modules first (module source never contains the data token), then data
-    html = tpl.replace("/*__MODULES__*/", modules).replace("/*__DATA__*/", payload)
+    html = fill_template(tpl, {"/*__DATA__*/": payload, "/*__MODULES__*/": modules})
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     open(args.out, "w").write(html)
     print(f"[out] wrote {args.out}  ({len(html)//1024} KB)", file=sys.stderr)

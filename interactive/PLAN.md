@@ -7,7 +7,7 @@ antigenic map(s) by strain. User review raised **6 issues + 9 features**. Resear
 (2 Explore agents + `ae_backend` probes) confirmed all are feasible from `ae_backend`
 data and pinned the algorithms/colour sources. Decisions: **phased, 2 stages**;
 all-centres = **grid of small multiples**. Dataset stays **H3N2 HI, `2026-0223-ssm`**.
-Env: arm64 / Py-3.10 via `run.sh`. Outputs → the report folder, never the repo.
+Env: arm64 / current `build/` (Py 3.14) via `run.sh`. Outputs → the report folder, never the repo.
 
 ## Parallelization model (how to split across agents)
 

@@ -62,8 +62,11 @@
   }
   // Serum shape mirrors its homologous antigen's passage (sera carry no passage of
   // their own): cell→square, egg→uglyEgg (#5), reassortant→uglyEgg rotated 0.5 (#12).
+  // `homologous` is a LIST (v9 #4); indexing antigens with it coerces the array to a
+  // "5,6" string key, so every serum with 2+ homologs lost its shape and colour. Use the
+  // scalar alias, which the exporter passage-matches (egg serum -> egg antigen).
   function homAg(chart, s) {
-    const h = s.homologous;
+    const h = s.homologous0;
     return (h != null && chart.antigens[h]) ? chart.antigens[h] : null;
   }
   function serumShape(chart, s) {
