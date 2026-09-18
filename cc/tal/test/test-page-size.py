@@ -39,6 +39,7 @@ ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT / "py"))
 
 from ae.tal import settings_v3  # noqa: E402
+from ae.tal.settings_v3 import _time_series_slots  # noqa: E402
 
 failures: list[str] = []
 
@@ -104,6 +105,34 @@ def media_box(pdf: Path) -> tuple[float, float]:
     return x1 - x0, y1 - y0
 
 
+def count_time_series_slots(pdf: Path) -> int:
+    """Slots tal-draw actually DREW, from the matrix's vertical separators.
+
+    The separators are the only group of >=3 vertical segments sharing one exact height (they
+    span the whole tree band); clade brackets and the tree itself are taller/shorter one-offs.
+    n slots = n separators - 1.
+    """
+    from collections import Counter
+    segs = []
+    for st in re.finditer(rb"stream\r?\n", pdf.read_bytes()):
+        chunk = pdf.read_bytes()[st.end():pdf.read_bytes().find(b"endstream", st.end())]
+        try:
+            text = zlib.decompress(chunk).decode("latin1")
+        except zlib.error:
+            continue
+        num = r"(-?\d+\.?\d*)"
+        for x0, y0, x1, y1 in re.findall(rf"{num} {num} m\s+{num} {num} l", text, re.S):
+            x0, y0, x1, y1 = float(x0), float(y0), float(x1), float(y1)
+            if abs(x1 - x0) < 0.05 and abs(y1 - y0) > 0.5:
+                segs.append((x0, round(abs(y1 - y0), 1)))
+    heights = Counter(h for _, h in segs)
+    candidates = [h for h, n in heights.items() if n >= 3]
+    if not candidates:
+        raise AssertionError(f"no separator group in {pdf}")
+    sep_h = max(candidates, key=lambda h: heights[h])
+    return len({x for x, h in segs if h == sep_h}) - 1
+
+
 tal_draw = os.environ.get("TAL_DRAW") or str(ROOT / "build" / "tal-draw")
 if not os.access(tal_draw, os.X_OK):
     print(f"  SKIP tal-draw page size — {tal_draw} not built")
@@ -135,6 +164,29 @@ else:
             check(abs(w - SIZE * RATIO) < 0.01 and abs(h - SIZE) < 0.01,
                   f"page is image_size*ratio with {tag} "
                   f"(expected {SIZE * RATIO:.1f}x{SIZE}, got {w:.1f}x{h:.1f})")
+
+        # ----------------------------------------------------------------------
+        # 3. tal-draw must DRAW the same number of slots settings_v3 sized the page for
+        # ----------------------------------------------------------------------
+        # The two live in different languages — `_time_series_slots()` in settings_v3.py sizes
+        # the column, `compute_time_series()` in C++ fills it — and they drifted: the Python
+        # counted AD's 12 months of [2024-01, 2025-01) while the C++ applied the exclusive `end`
+        # a second time and drew 11, so every report tree lost its most recent month while the
+        # page stayed the right width. Pin them to each other.
+        want_slots = _time_series_slots({"start": "2024-01", "end": "2025-01"}, [])
+        check(want_slots == 12, f"settings_v3 sizes [2024-01, 2025-01) at 12 monthly slots (got {want_slots})")
+        drawn = dict(base)
+        drawn["time_series"] = {"show": True, "interval": "month", "start": "2024-01", "end": "2025-01",
+                                "slot_width": 0.01}
+        sfile = tmp / "drawn-slots.json"
+        sfile.write_text(json.dumps(drawn))
+        pdf = tmp / "drawn-slots.pdf"
+        subprocess.run([tal_draw, f"--settings={sfile}", str(HERE / "tree-clades.json"), str(pdf)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        got_slots = count_time_series_slots(pdf)
+        check(got_slots == want_slots,
+              f"tal-draw draws the slot count settings_v3 sized for "
+              f"(sized {want_slots}, drew {got_slots})")
 
 print("FAIL: " + "; ".join(failures) if failures else "OK: page geometry matches AD's formula")
 sys.exit(1 if failures else 0)
