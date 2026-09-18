@@ -410,23 +410,18 @@ void ae::tree::Tree::remove(const std::vector<node_index_t>& nodes)
                     std::remove_if(std::begin(inode->children), std::end(inode->children),
                                    [&nodes, child_empty](auto child_id) { return std::find(std::begin(nodes), std::end(nodes), child_id) != std::end(nodes) || child_empty(child_id); }),
                     std::end(inode->children));
-                if (!single_child_inodes.empty()) {
-                    // fmt::print(">>>> single_child_inodes {}\n", single_child_inodes[0]->node_id_);
-                    decltype(single_child_inodes)::iterator single_child_inode;
-                    if (const auto child = std::find_if(std::begin(inode->children), std::end(inode->children),
-                                                        [&single_child_inodes, &single_child_inode](const auto child_id) {
-                                                            single_child_inode = std::find_if(std::begin(single_child_inodes), std::end(single_child_inodes),
-                                                                                              [child_id](const Inode* sci) { return child_id == sci->node_id_; });
-                                                            return single_child_inode != std::end(single_child_inodes);
-                                                        });
-                        child != std::end(inode->children)) {
-                        // one of the single_child_inodes is emong inode->children
-                        // fmt::print(">>> child of {} is a single child inode {}\n", inode->node_id_, single_child_inode->node_id_);
-                        // add to edge of single_child_inode->children[0] edge of single_child_inode
+                // Collapse EVERY child of this inode that is a pending single-child inode, not just the
+                // first one. With two or more sibling groups each reduced to a single member, the earlier
+                // single `find_if` fixed only the first and left the others as permanent "(X:e)" nodes;
+                // cmaple 1.0.0 segfaults reading such a tree and raxml rejects it.
+                for (auto& child_id : inode->children) {
+                    if (const auto single_child_inode = std::find_if(std::begin(single_child_inodes), std::end(single_child_inodes),
+                                                                     [child_id](const Inode* sci) { return child_id == sci->node_id_; });
+                        single_child_inode != std::end(single_child_inodes)) {
+                        // carry the collapsed inode's edge down onto its only child, then splice that child
+                        // into its place, so root-to-tip distances are unchanged
                         node((*single_child_inode)->children[0]).visit([parent_edge = (*single_child_inode)->edge](auto* node) { node->edge += parent_edge; });
-                        // replace single_child_inode in the children of this with single_child_inode->children[0]
-                        *child = (*single_child_inode)->children[0];
-                        // remove fixed single_child_inode from the list
+                        child_id = (*single_child_inode)->children[0];
                         single_child_inodes.erase(single_child_inode);
                     }
                 }
@@ -435,6 +430,21 @@ void ae::tree::Tree::remove(const std::vector<node_index_t>& nodes)
             },
             [](Leaf*) {});
     }
+
+    // The post-order visit gives the root no parent, so a root left with a single child is never
+    // reached by the loop above. Adopt that child's own children, carrying its edge down, so the tree
+    // has no one-child node anywhere. A root whose only child is a leaf is left alone -- collapsing it
+    // would leave the tree with no inode at all. In practice this runs at most once: a child with a
+    // single child of its own is already in `single_child_inodes` and was spliced above, so the root's
+    // remaining child always has two or more children here.
+    while (root().children.size() == 1 && !is_leaf(root().children[0])) {
+        Inode& only_child = inode(root().children[0]);
+        for (const auto grandchild_id : only_child.children)
+            node(grandchild_id).visit([parent_edge = only_child.edge](auto* node) { node->edge += parent_edge; });
+        root().children = std::move(only_child.children);
+        only_child.children.clear();
+    }
+
     calculate_cumulative(true);
 
 } // ae::tree::Tree::remove

@@ -244,6 +244,9 @@ namespace ae::tree
 
         // unlink passed nodes
         // if a parent inode has no children afterwards, unlink it too
+        // an inode (including the root) left with exactly one child is collapsed: the child takes its
+        // place and inherits its edge, so no "(X:e)" node survives -- cmaple and raxml reject those.
+        // leaf set and root-to-tip distances are unchanged.
         void remove(const std::vector<node_index_t>& nodes);
         void remove_leaves_isolated_before(std::string_view date, const std::vector<std::string>& important);
 
