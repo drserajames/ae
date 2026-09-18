@@ -175,6 +175,9 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
             params.hz_sections.push_back(HzSection{.id = get_string(entry["id"]), .first = get_string(entry["first"]), .last = get_string(entry["last"]),
                                                    .label = get_string(entry["label"]), .prefix = get_string(entry["prefix"]),
                                                    .shown = get_bool(entry["show"], true)});
+            // AD copy_if_not_null (acmacs-tal cc/settings.cc:981): absent stays nullopt, "" is a value.
+            if (const auto& aa = entry["aa_transitions"]; !aa.is_null())
+                params.hz_sections.back().aa_transitions = std::string{aa.to<std::string_view>()};
         }
     }
     params.hz_section_labels = get_bool(config["hz_section_labels"]);

@@ -1,0 +1,18 @@
+{"_": "tree-clades.json plus imported inode aa-transition labels, for the curated hz-sections dump test in test-draw-tree.sh. Same leaves A-E and invented clades X/Y; residues J and O are NOT amino-acid codes, so nothing here is WHO data. The labels only exist so every section has a NON-EMPTY computed transitions list, which is what makes a curated value distinguishable from it.",
+ "  version": "phylogenetic-tree-v3",
+ "tree": {
+  "t": [
+   {"l": 1, "A": ["J1O"], "t": [
+     {"l": 1, "n": "A", "d": "2020-01-15", "L": ["X"]},
+     {"l": 1, "n": "B", "d": "2020-02-20", "L": ["X"]}
+   ]},
+   {"l": 1, "A": ["J2O"], "t": [
+     {"l": 1, "n": "C", "d": "2020-03-10", "L": ["Y"]},
+     {"l": 1, "A": ["J3O"], "t": [
+       {"l": 1, "n": "D", "d": "2021-01-05", "L": ["Y"]},
+       {"l": 1, "n": "E", "d": "2021-02-12", "L": ["X"]}
+     ]}
+   ]}
+  ]
+ }
+}

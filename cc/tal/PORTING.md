@@ -910,9 +910,30 @@ to re-derive that claim; it prints a warning and is off by default.
 > (`py/ae/tal/section_maps.py`) concatenates it unconditionally. The two engines were therefore
 > never reporting the same quantity, which is the real explanation of the "differs in both
 > directions" observation that opened this work. **Read the per-inode numbers, not the
-> per-section ones.** Whether ae should grow a separate curated field is a design question;
-> Sarah deferred it on 15 Sep 2026 — decide it separately, do not fold it into hidden-handling
-> or aa-transition work.
+> per-section ones.**
+>
+> **Curated field ported — branch `hz-curated-aa-transitions`, 16 Sep 2026** (Sarah decided the
+> question she had deferred on 15 Sep: port AD's behaviour). The paragraph above describes ae
+> *before* that branch. Now an `hz-sections` entry's `aa_transitions` is carried as
+> `HzSection::aa_transitions` (`std::optional`: absent key → `nullopt`, `""` → a value, exactly
+> AD's `copy_if_not_null`), passed through by `settings_v3` only when the `.tal` entry has the
+> key, merged onto the resolved section by id, and printed by the hz-sections dump in place of
+> the computed list — AD `HzSection::aa_transitions_format` (`cc/hz-sections.cc:12`), with the
+> column width taken over the curated-or-computed values (`:206`). `"All transitions"` stays
+> the computed list, and **nothing drawn changes** (Feb h3 tree PDF: identical apart from
+> cairo's `/CreationDate`). So a dump pasted back into a `.tal` echoes curated values unchanged
+> instead of overwriting them with the cumulative list. Tests: `cc/tal/test/test-draw-tree.sh`
+> check 5 (curated `""`, curated non-empty, no key → computed; fails with the dump line reverted)
+> and `test/test-clade-hz-sections.py` [7] (schema pass-through). Measured on the Feb 2026 h3
+> report tree: all 14 curated values print verbatim (7 of them non-empty), the one section with
+> no key prints `main`'s computed string, `All transitions` unchanged on all 15 lines.
+>
+> **Reach.** The merge — and so the curated value — only runs when the settings carry
+> id-bearing `hz_sections`, i.e. when the `.tal`'s program RUNS `hz-sections`. The Feb 2026
+> report trees do (`"hz"` is in their `tal` program); the 2026-0921 production
+> `h3`/`h1`/`bvic.after-2021.tal` do not (the block sits in an uncalled `hz` program), and the
+> signature page passes id-less sections, so neither of those dumps is merged. The section
+> title path (`section_maps.py` `section_title`) was already parity and is untouched.
 
 ### Reported from the DRAWING path, not `compute_hz_sections`
 

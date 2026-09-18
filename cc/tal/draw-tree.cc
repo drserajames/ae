@@ -675,6 +675,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     struct HzSectionResolved
     {
         std::string id, prefix, label, first_name, last_name, aa_transitions;
+        std::optional<std::string> curated_aa_transitions; // AD label_aa_transitions; dump text only
         long first_v{0}, last_v{0};
         bool shown{true}, intersect{false};
         std::size_t size{0};
@@ -766,6 +767,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             found->shown = curated.shown;
             if (!curated.label.empty())
                 found->label = curated.label;
+            found->curated_aa_transitions = curated.aa_transitions; // AD update_from_parameters: assigned, not copy-if-set
             if (found->last_v >= found->first_v)
                 found->size = static_cast<std::size_t>(found->last_v - found->first_v + 1);
         }
@@ -945,13 +947,20 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
 
         // AD HzSections::report: a `[ … ]` block in the `.tal`'s own `hz` "sections" array shape,
         // column-aligned, so it can be pasted straight back into a `.tal`.
-        std::size_t w_id{0}, w_first{0}, w_last{0}, w_label{0}, w_subs{0};
+        // AD HzSection::aa_transitions_format (cc/hz-sections.cc:12): the "aa_transitions" column
+        // prints the curated value when the settings carried one — "" included — else the computed
+        // list, so a dump pasted back into a `.tal` echoes curated values unchanged. "All
+        // transitions" is always the computed list.
+        const auto aa_transitions_format = [](const HzSectionResolved& section) -> const std::string& {
+            return section.curated_aa_transitions ? *section.curated_aa_transitions : section.aa_transitions;
+        };
+        std::size_t w_id{0}, w_first{0}, w_last{0}, w_label{0}, w_label_aa{0};
         for (const HzSectionResolved& section : sections) {
             w_id = std::max(w_id, section.id.size());
             w_first = std::max(w_first, section.first_name.size());
             w_last = std::max(w_last, section.last_name.size());
             w_label = std::max(w_label, section.label.size());
-            w_subs = std::max(w_subs, section.aa_transitions.size());
+            w_label_aa = std::max(w_label_aa, aa_transitions_format(section).size()); // AD hz-sections.cc:206
         }
         const bool any_intersect = std::any_of(std::begin(sections), std::end(sections), [](const HzSectionResolved& section) { return section.intersect; });
         fmt::format_to(hz_app, ">>> HZ sections ({})\n[\n", sections.size());
@@ -960,7 +969,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                            fmt::format("{},", section.shown), fmt::format("\"{}\",", section.id), w_id + 3, section.prefix, section.first_v, section.last_v, section.size,
                            section.intersect ? "\"INTRSCT\":1, " : (any_intersect ? "             " : ""), fmt::format("\"{}\",", section.first_name), w_first + 3,
                            fmt::format("\"{}\",", section.last_name), w_last + 3, fmt::format("\"{}\",", section.label), w_label + 3,
-                           fmt::format("\"{}\",", section.aa_transitions), w_subs + 3, section.aa_transitions);
+                           fmt::format("\"{}\",", aa_transitions_format(section)), w_label_aa + 3, section.aa_transitions);
         fmt::format_to(hz_app, "]\n\n");
 
         // …and to <output>.taleg, which RUNNING-THE-REPORT.md §10.5 documents reading instead of

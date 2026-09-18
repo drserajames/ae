@@ -721,11 +721,17 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                 # the SHOWN sections in id order by HzSections::set_prefix (cc/hz-sections.cc:136),
                 # so a `.tal` carrying stale letters (or letters that count hidden sections) cannot
                 # push a wrong letter onto the marker column. `L` is therefore dropped on input.
-                schema["hz_sections"] = [
-                    {"id": str(s.get("id", "")), "first": s.get("first", ""), "last": s.get("last", ""),
-                     "label": s.get("label", ""), "show": bool(s.get("show", True))}
-                    for s in cmd.get("sections", []) if isinstance(s, dict)
-                ]
+                #
+                # The curated `aa_transitions` (AD `label_aa_transitions`, read with
+                # copy_if_not_null) goes through ONLY when the entry has the key: absent and `""`
+                # mean different things — computed list vs. hand-blanked — so never default it.
+                def _hz_entry(s: dict) -> dict:
+                    entry = {"id": str(s.get("id", "")), "first": s.get("first", ""), "last": s.get("last", ""),
+                             "label": s.get("label", ""), "show": bool(s.get("show", True))}
+                    if isinstance(s.get("aa_transitions"), str):
+                        entry["aa_transitions"] = s["aa_transitions"]
+                    return entry
+                schema["hz_sections"] = [_hz_entry(s) for s in cmd.get("sections", []) if isinstance(s, dict)]
             elif name == "dash-bar-aa-at":
                 if "pos" in cmd:
                     bar = {"pos": int(cmd["pos"])}

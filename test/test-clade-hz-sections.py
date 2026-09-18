@@ -29,7 +29,10 @@
 #   6. the `.tal` reader reproduces acmacs-tal's settings semantics: `all-clades` first,
 #      each `per-clade` entry inheriting those defaults, a repeated name merging rather
 #      than duplicating, `"?…"` entries skipped, `show` accepted as a bool or an array
-#      (`any_shown()`), and a `clades` block NOT reached by the program ignored.
+#      (`any_shown()`), and a `clades` block NOT reached by the program ignored;
+#   7. an `hz-sections` entry's curated `aa_transitions` reaches the tal-draw schema only when
+#      the key is present — `""` passes through as `""`, an absent key stays absent (AD reads
+#      it with copy_if_not_null; defaulting it would erase the absent/blank distinction).
 #
 # Run (from the ae worktree root):
 #   PYTHONPATH="$PWD/build:$PWD/py" python3 test/test-clade-hz-sections.py
@@ -40,7 +43,7 @@ import tempfile
 from pathlib import Path
 
 import ae_backend
-from ae.tal.settings_v3 import parse_clade_section_parameters
+from ae.tal.settings_v3 import parse_clade_section_parameters, translate
 
 FAILURES: list[str] = []
 
@@ -214,6 +217,19 @@ no_clades.write_text(json.dumps({"tal": [{"N": "canvas"}]}))
 check_eq(parse_clade_section_parameters(no_clades),
          ({"inclusion_tolerance": 10, "exclusion_tolerance": 5, "shown": True}, {}),
          "a .tal with no clades block yields plain defaults and no per-clade entries")
+
+# ---------- 7: curated aa_transitions pass-through ----------
+print("\n[7] hz-sections curated aa_transitions -> schema")
+
+schema, _ = translate({"tal": ["hz"], "hz": [{"N": "hz-sections", "sections": [
+    {"id": "ALPHA-0", "first": "V1", "last": "V2", "aa_transitions": ""},
+    {"id": "ALPHA-1", "first": "V3", "last": "V4", "aa_transitions": "J1O"},
+    {"id": "BETA-0", "first": "V5", "last": "V6"},
+]}]})
+by_id = {entry["id"]: entry for entry in schema["hz_sections"]}
+check_eq(by_id["ALPHA-0"].get("aa_transitions"), "", "a curated blank aa_transitions passes through as \"\"")
+check_eq(by_id["ALPHA-1"].get("aa_transitions"), "J1O", "a curated non-empty aa_transitions passes through verbatim")
+check("aa_transitions" not in by_id["BETA-0"], "an entry without aa_transitions gets no key (not a defaulted \"\")")
 
 # ======================================================================
 

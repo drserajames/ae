@@ -4,11 +4,12 @@
   "_2": "Y-1 is NOT a computed section -- clade Y is one contiguous run -- so it must be ADDED, which is how a hand-split clade survives.",
   "_3": "Y-0's curated last is D, which is its parent inode's FIRST child, so AD steps back one leaf to C (vertical 2).",
   "_4": "X-0 is curated hidden: it must still be REPORTED, and must take no section letter.",
+  "_5": "Curated aa_transitions (AD label_aa_transitions -> aa_transitions_format): Y-0 is hand-blanked to \"\", Y-1 carries an invented non-empty value, X-0 has NO key. Run on tree-clades-aa.json, where every computed list is non-empty, the dump must print \"\" and \"O9J\" verbatim and X-0's computed list.",
   "image_size": 600,
   "clades": { "show": true },
   "hz_sections": [
-    { "id": "Y-0", "first": "C", "last": "D", "label": "curated-Y0", "show": true },
-    { "id": "Y-1", "first": "E", "last": "E", "label": "curated-Y1", "show": true },
+    { "id": "Y-0", "first": "C", "last": "D", "label": "curated-Y0", "show": true, "aa_transitions": "" },
+    { "id": "Y-1", "first": "E", "last": "E", "label": "curated-Y1", "show": true, "aa_transitions": "O9J" },
     { "id": "X-0", "first": "A", "last": "B", "label": "curated-X0", "show": false }
   ]
 }

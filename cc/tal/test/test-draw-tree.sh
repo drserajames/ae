@@ -55,10 +55,11 @@ check "tree-clades.json (--labels-overlap)" "$tmp/overlap.pdf"
 check "tree-clades.json (hz-sections)" "$tmp/hz.pdf"
 
 # curated hz-sections merged into the computed set (AD HzSections::update_from_parameters,
-# acmacs-tal cc/hz-sections.cc:44). Synthetic tree only: leaves A-E, invented clades X/Y.
-# Guards four separable behaviours, each with its own message so a revert says which one broke.
+# acmacs-tal cc/hz-sections.cc:44). Synthetic tree only: leaves A-E, invented clades X/Y, and
+# (tree-clades-aa.json) invented J/O inode transitions so every computed list is non-empty.
+# Guards five separable behaviours, each with its own message so a revert says which one broke.
 rep="$tmp/hz-curated.txt"
-"$bin" --settings="$here/draw-settings-hz-curated.json" --clades-report "$here/tree-clades.json" "$tmp/hz-curated.pdf" > /dev/null 2> "$rep"
+"$bin" --settings="$here/draw-settings-hz-curated.json" --clades-report "$here/tree-clades-aa.json" "$tmp/hz-curated.pdf" > /dev/null 2> "$rep"
 hz_line() { grep "\"id\": \"$1\"," "$rep" | head -1; }
 
 # 1. a curated id that is NOT a computed section must ADD one (clade Y is a single contiguous
@@ -84,7 +85,20 @@ hz_line "X-0" | grep -q '"L": " "' || {
 #    the settings (AD never reads "L" back).
 hz_line "Y-0" | grep -q '"L": "A"' || { echo "FAIL: first shown section is not lettered A: $(hz_line Y-0)"; exit 1; }
 hz_line "Y-1" | grep -q '"L": "B"' || { echo "FAIL: second shown section is not lettered B: $(hz_line Y-1)"; exit 1; }
-echo "  tree-clades.json (curated hz-sections): merged, stepped back, hidden unlettered"
+
+# 5. the curated `aa_transitions` is what the dump's "aa_transitions" column prints — AD
+#    HzSection::aa_transitions_format (cc/hz-sections.cc:12): curated when the settings carry the
+#    key, "" included, else the computed list. "All transitions" stays computed. Without this a
+#    dump pasted back into a `.tal` overwrites hand-curated values with the cumulative list.
+hz_line "Y-0" | grep -q '"aa_transitions": "",' || {
+    echo "FAIL: curated blank aa_transitions not printed as \"\": $(hz_line Y-0)"; exit 1; }
+hz_line "Y-1" | grep -q '"aa_transitions": "O9J",' || {
+    echo "FAIL: curated non-empty aa_transitions not printed verbatim: $(hz_line Y-1)"; exit 1; }
+hz_line "X-0" | grep -q '"aa_transitions": "J1O",' || {
+    echo "FAIL: section without a curated aa_transitions does not print the computed list: $(hz_line X-0)"; exit 1; }
+hz_line "Y-1" | grep -q '"All transitions": "J2O J3O"' || {
+    echo "FAIL: \"All transitions\" is no longer the computed list: $(hz_line Y-1)"; exit 1; }
+echo "  tree-clades-aa.json (curated hz-sections): merged, stepped back, hidden unlettered, curated aa_transitions"
 
 # dash-bar-aa-at (per-leaf aa-at-position dash column) on the aa-sequence tree
 "$bin" --labels --dash-bar=3 "$here/tree-aa.json" "$tmp/dash.pdf" 400 >/dev/null
