@@ -1930,11 +1930,15 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         const std::unordered_set<std::string> matched(params.matches_chart_seq_ids.begin(), params.matches_chart_seq_ids.end());
         const double col_x = x_grey0 + grey_dash_w * 0.5;
         const double dlen = grey_dash_w * 0.7;
-        // AD draws this bar at its own absolute 0.5, NOT at a fraction of the row pitch: measured
-        // 0.5 (dash length 4.82) on 2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf. ae's row-pitch
-        // formula bottomed out on its 0.15 floor and, once composed, rendered at 0.0827 — a sixth of
-        // AD's, which is why the bar read as a hairline instead of a solid column.
-        const double dlw = 0.5 * devw;
+        // DELIBERATE DIVERGENCE FROM AD — Sarah's call, 19 Sep 2026. AD draws this bar at its own
+        // absolute 0.5 (measured: width 0.5, dash length 4.82, on
+        // 2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf), and a `0.5 * devw` here reproduced that
+        // exactly. She looked at it beside AD and asked for this one bar to stay THIN — the row-pitch
+        // width it has always had — while every other stroke on the page takes AD's absolute value.
+        // So this is the one width that intentionally does NOT get `devw`: it keeps scaling with the
+        // composition, which is what makes it fine (0.0827 on the composed sig page vs AD's 0.5).
+        // Do not "restore AD parity" here without asking her.
+        const double dlw = std::clamp(vstep * 0.6, 0.15, 2.5);
         for (const auto& node : layout.leaves) {
             if (matched.count(node.name)) {
                 const double y = dev_y(node.y);

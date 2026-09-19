@@ -1420,10 +1420,19 @@ comparable:
 | clade arm + matrix rule (horizontal) | 0.5 | 0.2757 | **0.5** |
 | matches-chart grey bar ("sequences matched to maps") | 0.5 | 0.0827 | **0.5** |
 
-The grey bar had a second, independent cause: ae sized it from the row pitch
-(`clamp(vstep*0.6, 0.15, 2.5)`), which bottomed out on its 0.15 floor and then composed to 0.0827 —
-a sixth of AD's. AD gives that bar its own absolute 0.5. The hz-section marker bracket (AD
-`conf/tal.json` `line_width` 1.0) is in the same class and moved with them.
+The hz-section marker bracket (AD `conf/tal.json` `line_width` 1.0) is in the same class and moved
+with them.
+
+**The matches-chart grey bar is a deliberate exception — Sarah's call, 19 Sep 2026.** AD draws it at
+its own absolute 0.5 (measured: width 0.5, dash length 4.82) and `0.5 * devw` reproduced that
+exactly; she looked at the result beside AD and asked for this one bar to stay **thin**, keeping the
+row-pitch width it has always had (`clamp(vstep*0.6, 0.15, 2.5)`, which bottoms out on its 0.15
+floor and composes to 0.0827 on a sig page). So it is the one width that intentionally does NOT take
+`devw`. Do not "restore AD parity" there without asking her.
+
+| | AD | ae |
+|---|--:|--:|
+| matches-chart grey bar | 0.5 | **0.0827** (intentional) |
 
 **Blast radius, checked rather than argued.** `cc/draw/cairo-surface.cc` compiles into four targets
 (`ae_backend`, `tal-draw`, `geo-draw`, `map-draw` — object census), so the change there is
