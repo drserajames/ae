@@ -93,7 +93,7 @@ ae/
 ├── subprojects/         Vendored dependencies (alglib, fmt, lexy, pybind11, etc.)
 ├── build/               Symlink → build-py314/ (native arm64, Python 3.14, current default)
 ├── build-py314/         Native arm64 build for Python 3.14 (cpython-314) — current default
-├── build-arm64/         Native arm64 build for Python 3.10 (cpython-310) — fallback
+├── build-arm64/         RETIRED 18 Sep 2026 — stale cpython-310 build, not a fallback
 ├── build-x86_64/        Original x86_64 pre-migration build (preserved as fallback)
 ├── doc/                 Format documentation (ace-format.js, merge-types.org, etc.)
 ├── test/                Test charts (chart1.ace)
@@ -163,8 +163,11 @@ dependencies at `/opt/homebrew`. No Rosetta 2 needed. Import it with the default
 > **Python version history.** Homebrew bumped its default `python3` to **3.14** (Jun 2026).
 > CPython extensions are ABI-locked per minor version, so the older 3.10 `.so` would not
 > import under 3.14. The build was retargeted to 3.14 on **18 Jun 2026**. The previous
-> **`build-arm64/`** (`cpython-310`, native arm64) is preserved as a **Python 3.10 fallback**
-> — use `PYTHONPATH=…/ae/build-arm64` with a 3.10 interpreter if ever needed. The only change
+> **`build-arm64/`** (`cpython-310`, native arm64) was kept as a Python 3.10 fallback until
+> **18 Sep 2026, when Sarah retired it** (decision, not oversight). **Nothing should point at
+> `build-arm64/`**: it is a June binary, and while it stayed wired up, `interactive/run.sh`
+> quietly produced three months of viewer pages from it, missing the Sep `virus/passage`
+> fixes (PR #81). Target `build/` and let it follow `build-py314/`. The only change
 > required to retarget was a newer **meson (≥ ~1.4; built with 1.11.1)** — meson 1.1.0 relies
 > on the `distutils` that Python 3.14 removed. pybind11 2.10.0 and all other vendored deps
 > compiled against 3.14 unchanged.
@@ -215,9 +218,10 @@ reported missing.
 
 **Do NOT use Homebrew LLVM** (currently version 22 in arm64 Homebrew). It is too new for the vendored `lexy` subproject and causes build failures with incomplete-type errors. Apple Clang (`/usr/bin/clang++`, currently clang 21) is the correct compiler for this project.
 
-### Legacy: Python 3.10 build procedure (`build-arm64/` fallback only)
+### Historical: how the Python 3.10 build was made (retired 18 Sep 2026 — do not rebuild)
 
-> **Historical.** This is how the original `build-arm64/` (cpython-310) fallback was built, with
+> **Historical, and no longer a supported path** — the 3.10 fallback was retired on 18 Sep
+> 2026. Kept only to explain how `build-arm64/` came to exist. This is how it was built, with
 > meson 1.1.0 and ninja pip-installed for the framework Python 3.10
 > (`arch -arm64 /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 -m pip install --user meson==1.1.0 ninja`).
 > It is **not** the current build — for that use `./build.sh` or the Python 3.14 procedure below.
@@ -303,7 +307,7 @@ arch -arm64 /opt/homebrew/bin/meson setup build-py314 \
     --native-file ~/AC/eu/ae-py314-native.ini -Doptimization=3 -Ddebug=true
 arch -arm64 /opt/homebrew/bin/ninja -C build-py314
 
-# Make it the default once verified (keeps build-arm64 as the 3.10 fallback)
+# Make it the default once verified
 ln -sfn build-py314 build
 ```
 
@@ -340,7 +344,7 @@ exporting **`CMAKE_POLICY_VERSION_MINIMUM=3.5`** in the environment before runni
 
 ```bash
 file build/ae_backend.cpython-314-darwin.so
-# → Mach-O 64-bit bundle arm64   (build-arm64/ still has the cpython-310 fallback)
+# → Mach-O 64-bit bundle arm64
 
 python3 -c "import sys; sys.path.insert(0, 'build'); import ae_backend, platform; print(platform.machine())"
 # → arm64
@@ -421,7 +425,7 @@ Also a genuine upstream **lexy** typo (`_colum_nr` in `input_location.hpp`) that
 ### libc++ hardening differs between builds — `build-py314` traps on UB that `build-arm64` ignores
 
 `build-py314/` (3.14) is configured with **`-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST`**;
-`build-arm64/` (3.10) is **not**. FAST hardening adds bounds/iterator checks that, on failure, call
+the retired `build-arm64/` (3.10) was **not**. FAST hardening adds bounds/iterator checks that, on failure, call
 `__builtin_trap()` → **SIGTRAP (exit 133)**, with no Python traceback (faulthandler does not catch
 SIGTRAP — register it explicitly: `faulthandler.register(signal.SIGTRAP)`). This means a *latent*
 out-of-bounds/UB bug can run cleanly under the 3.10 build but hard-crash under the 3.14 build, and
@@ -658,13 +662,13 @@ bin/chart-grid-test input.ace
 - **Never use bare `git stash`** — the stash stack is **shared across worktrees**, and the porting workflow expects you to be in one. Use a WIP commit instead.
 - **Rasterised ink ratios are not ink.** Counting pixels of one exact colour is non-linear in stroke width: a 0.94px stroke antialiases to no exact-`#E0E0E0` pixel and scores ~0, while widening it to 4.2px makes it score in full — that artefact, not the drawing, produced the "74% of AD's ink" and "141%" numbers. Measure geometry instead: [`tools/compare-sigpage-ink.py`](tools/compare-sigpage-ink.py) (stroke widths from the PDF content streams, reported against the expected cell-width ratio, so **"0% off" means correct, not identical**) or [`tools/sigpage-grey-coverage.py`](tools/sigpage-grey-coverage.py) (coverage with the map grid masked structurally). For renderer milestones use [`tools/p2-fidelity/`](tools/p2-fidelity/README.md).
 - **No third-party runtime deps in `py/ae`** — it is pure-stdlib. `py/ae/adjust.py` `_kabsch_align` (the kateri move→relax alignment in `adjust_from_kateri`) previously needed `numpy` for one 2×2 SVD; that was replaced with a closed-form pure-Python 2D orthogonal-Procrustes solution (`_nearest_orthogonal_2x2`, verified to reproduce the numpy result to machine precision), so **numpy is no longer required** — nothing to `pip install`, and it survives Python minor-version bumps. (Historically the fix was `pip install --user --break-system-packages numpy`; that is obsolete.)
-- `build/` is a **symlink** to `build-py314/` (the Python 3.14 build; `build-arm64/` is the 3.10 fallback). Repoint with `ln -sfn build-py314 build`. To remove it: `rm build` (not `rm -rf build`, which would delete the build directory contents).
+- `build/` is a **symlink** to `build-py314/` (the Python 3.14 build; the `build-arm64/` 3.10 fallback was retired 18 Sep 2026). Repoint with `ln -sfn build-py314 build`. To remove it: `rm build` (not `rm -rf build`, which would delete the build directory contents).
 - `.ace` files are usually XZ-compressed; opening with a text editor or `cat` will show binary garbage. Use `xz -d -c file.ace` to inspect raw JSON.
 - Titer `"*"` = missing; `"<N"` = below detection; `">N"` = above threshold. Do not treat these as numbers.
 - Column bases (`colbases`) are `log2(max_titer_per_serum)` and are fundamental to stress calculations — they are not stored in projections by default, only in forced-column-bases overrides.
 - The `Layout` object supports iteration (`for coords in layout`) and indexed read/write: `layout[i]` reads a point's coords, `layout[i] = [x, y]` sets them (negative index counts from the end). Coordinates can also be set via `proj.set_coordinates(point_no, [x, y])`, and `proj.set_unmovable([i, j])` pins points so a subsequent `relax()` keeps them fixed.
 - **New C++ code**: Always use `fmt::format_to(` (not bare `format_to(`). Both `std::format_to` and `fmt::format_to` are visible in C++20 mode under Apple Clang 16 and the unqualified form is ambiguous.
 - **Homebrew LLVM 22** (at `/opt/homebrew/opt/llvm/`) is installed but **not used** — incompatible with the vendored `lexy` subproject. Apple Clang (`/usr/bin/clang++`, currently clang 21) is the correct compiler.
-- **Rebuilding**: Use `./build.sh`, which runs the arm64 Homebrew meson/ninja under `arch -arm64`. (Only the legacy `build-arm64/` 3.10 fallback uses `arch -arm64 python3.10` and `~/Library/Python/3.10/bin/ninja`.) The x86_64 `/usr/local/bin/ninja` will silently produce x86_64 binaries even on an arm64 Mac.
-- **Python 3.14** (the current Homebrew default, which `build/`→`build-py314/` targets) lacks `distutils`, so **meson 1.1.0 fails** with *"is not a valid python or it is missing distutils"*. Fix by using a newer meson (≥ ~1.4; the active build used 1.11.1), not by downgrading Python. The old 3.10 instructions that put `/Library/Frameworks/Python.framework/Versions/3.10/bin/python3` first in PATH apply only to the legacy `build-arm64/` (3.10) fallback.
+- **Rebuilding**: Use `./build.sh`, which runs the arm64 Homebrew meson/ninja under `arch -arm64`. The x86_64 `/usr/local/bin/ninja` will silently produce x86_64 binaries even on an arm64 Mac.
+- **Python 3.14** (the current Homebrew default, which `build/`→`build-py314/` targets) lacks `distutils`, so **meson 1.1.0 fails** with *"is not a valid python or it is missing distutils"*. Fix by using a newer meson (≥ ~1.4; the active build used 1.11.1), not by downgrading Python. The old 3.10 instructions that put `/Library/Frameworks/Python.framework/Versions/3.10/bin/python3` first in PATH belong to the retired `build-arm64/` build and should not be followed.
 - **`brew --prefix libomp`**: libomp is keg-only — always use the formula-specific form `brew --prefix libomp` rather than bare `brew --prefix` when constructing library/include paths.

@@ -16,7 +16,7 @@ set -e
 here="$(cd "$(dirname "$0")" && pwd)"
 geo_draw="${1:-}"
 if [ -z "$geo_draw" ]; then
-    for cand in "$here/../../../build/geo-draw" "$here/../../../build-arm64/geo-draw" "$(command -v geo-draw 2>/dev/null)"; do
+    for cand in "$here/../../../build/geo-draw" "$(command -v geo-draw 2>/dev/null)"; do
         if [ -x "$cand" ]; then geo_draw="$cand"; break; fi
     done
 fi
