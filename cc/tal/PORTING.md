@@ -1395,6 +1395,48 @@ Test: [`test-hz-clade-lines.py`](test/test-hz-clade-lines.py) (synthetic `tree-h
 8 leaves, invented clades P/Q) — 23 assertions, 16 of which fail against `main` at `b508d26`.
 
 
+## Signature-page line weights — the composition scale (fixed 19 Sep 2026)
+
+AD's line widths are **absolute points at final page scale** (acmacs-tal `Pixels` through
+`context::convert`). A standalone `tal-draw` PDF is drawn 1:1 so they land as written, but the
+signature page composes the tree into a sub-rectangle (`export_tree_into` → the borrowed-context
+`CairoPdf`) and cairo then multiplies every stroke width by that rectangle's scale. Nothing
+compensated, so every constant stroke on a sig page came out at **0.5513×** AD's while the
+geometry was the right size — the page was right and only the ink was thin.
+
+`CairoPdf::stroke_scale()` now reports the device-units-per-user-unit of the surface (1.0 for an
+owned surface), and `render_tree_core` divides AD's **constant** widths by it (`devw`). Widths
+derived from the geometry are deliberately left alone — `tree_line_width` is half the row pitch and
+is *meant* to shrink with the tree.
+
+Measured, `2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf` (AD) vs the same page rebuilt here. The
+matrix is the same physical size on both (AD 109.11pt, ae 112.47pt), so the widths are directly
+comparable:
+
+| stroke | AD | ae before | ae now |
+|---|--:|--:|--:|
+| time-series vertical slot separator | 0.5 | 0.2757 | **0.5** |
+| clade bracket spine (vertical) | 1.0 | 0.5513 | **1.0** |
+| clade arm + matrix rule (horizontal) | 0.5 | 0.2757 | **0.5** |
+| matches-chart grey bar ("sequences matched to maps") | 0.5 | 0.0827 | **0.5** |
+
+The grey bar had a second, independent cause: ae sized it from the row pitch
+(`clamp(vstep*0.6, 0.15, 2.5)`), which bottomed out on its 0.15 floor and then composed to 0.0827 —
+a sixth of AD's. AD gives that bar its own absolute 0.5. The hz-section marker bracket (AD
+`conf/tal.json` `line_width` 1.0) is in the same class and moved with them.
+
+**Blast radius, checked rather than argued.** `cc/draw/cairo-surface.cc` compiles into four targets
+(`ae_backend`, `tal-draw`, `geo-draw`, `map-draw` — object census), so the change there is
+deliberately inert: one new member, set only in the borrowed-context constructor, and exactly one
+reader (`cc/tal/draw-tree.cc`). Verified on output, not by reading:
+
+* **Standalone report tree** (`tal-draw`, scale 1.0 → `devw` 1.0): byte-for-byte the same rules and
+  separators before and after — 73 grey rules all 0.5, 37 separators identical.
+* **Section maps on the sig page**, drawn by `map-draw` through the *same* borrowed `CairoPdf`:
+  pixel-identical. A diff mask of the whole page shows changed pixels stopping exactly at the
+  hz-marker column; the aa dash-bar colour columns and every map are untouched.
+
+
 ## 6. Conf / format docs to mine next
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-conf.org` — the settings DSL reference.
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-processing.org` — processing stages.

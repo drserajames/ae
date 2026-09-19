@@ -1311,6 +1311,19 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     std::unique_ptr<ae::draw::CairoPdf> pdf_holder = make_surface(width, height);
     ae::draw::CairoPdf& pdf = *pdf_holder;
     pdf.background(WHITE);
+    // AD's line widths are ABSOLUTE points at final page scale (acmacs-tal `Pixels` through
+    // context::convert). A standalone tal-draw PDF is drawn 1:1, so they land as written — but the
+    // signature page composes this tree into a sub-rectangle (export_tree_into -> the borrowed-context
+    // CairoPdf), and cairo then multiplies every stroke width by that rectangle's scale. Measured on
+    // 2026-0223-ssm h1-cdc: the composed tree's geometry is the SAME physical size as AD's (matrix
+    // 112.47pt vs AD 109.11pt) while every constant stroke came out at 0.5513x AD's — the slot
+    // separators 0.2757 vs 0.5, the clade spine 0.5513 vs 1.0, the clade arms 0.2757 vs 0.5. So the
+    // page was right and only the ink was thin (Sarah, 19 Sep).
+    // `devw` converts an absolute AD width into this surface's user space; it is exactly 1.0 for a
+    // standalone render, so report trees are untouched. Apply it ONLY to AD's constant widths —
+    // NEVER to a width derived from the geometry (tree_line_width is half the row pitch and is
+    // supposed to shrink with the tree).
+    const double devw = pdf.stroke_scale() > 0.0 ? 1.0 / pdf.stroke_scale() : 1.0;
 
     // --- title (top-left, near the very top; acmacs-tal Title draws at offset [5,5]) ---
     if (!params.title.empty()) {
@@ -1598,8 +1611,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     // arm: arrow → the matrix's NEAR edge (right edge when the clades column is on the
                     // right, left edge when it is on the left). Never the far edge: that is the matrix crossing.
                     const double arm_end = ts_w > 0.0 ? (clades_left ? x_ts0 : (x_ts0 + ts_w)) : line_to;
-                    pdf.line(arm_end, y0, cx, y0, GREY, 0.5);
-                    pdf.line(arm_end, y1, cx, y1, GREY, 0.5);
+                    pdf.line(arm_end, y0, cx, y0, GREY, 0.5 * devw);
+                    pdf.line(arm_end, y1, cx, y1, GREY, 0.5 * devw);
                     // AD Clades::add_separators_to_time_series (cc/clades.cc:206-212), gated by
                     // time_series_top_separator / _bottom_separator (both default true, clades.hh:81)
                     // — here the same clades_horizontal_lines toggle. warn_if_present = true, as AD
@@ -1624,7 +1637,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 // the hz-section marker's line_width 1.0. Raised 0.4 → 1.0 (clade brackets were
                 // too thin — known r6 residual).
                 if (y1 - head_len > y0 + head_len)
-                    pdf.line(cx, y0 + head_len, cx, y1 - head_len, BLACK, 1.0);
+                    pdf.line(cx, y0 + head_len, cx, y1 - head_len, BLACK, 1.0 * devw);
                 pdf.filled_triangle(cx, y0, cx - ahw, y0 + head_len, cx + ahw, y0 + head_len, BLACK); // top head (apex up at y0)
                 pdf.filled_triangle(cx, y1, cx - ahw, y1 - head_len, cx + ahw, y1 - head_len, BLACK); // bottom head (apex down at y1)
             }
@@ -1705,10 +1718,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // separators so the verticals stay on top (see the z-order note above).
         for (const auto& [leaf_below, rule] : matrix_rules) {
             const double y = row_top(static_cast<double>(leaf_below));
-            pdf.line(x_ts0, y, x_ts0 + ts_w, y, rule.color, rule.width);
+            pdf.line(x_ts0, y, x_ts0 + ts_w, y, rule.color, rule.width * devw);
         }
         for (std::size_t i = 0; i <= n_slots; ++i) // vertical separators (AD SlotSeparator default = BLACK, 0.5px)
-            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, BLACK, 0.5);
+            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, BLACK, 0.5 * devw);
         const double dash_w = std::clamp(vstep * 0.5, 0.15, 2.5); // thin marks (AD line_width 0.1) -> more white space
         for (const auto& node : layout.leaves) {
             const Leaf& leaf = tree.leaf(node_index_t{node.node});
@@ -1917,7 +1930,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         const std::unordered_set<std::string> matched(params.matches_chart_seq_ids.begin(), params.matches_chart_seq_ids.end());
         const double col_x = x_grey0 + grey_dash_w * 0.5;
         const double dlen = grey_dash_w * 0.7;
-        const double dlw = std::clamp(vstep * 0.6, 0.15, 2.5);
+        // AD draws this bar at its own absolute 0.5, NOT at a fraction of the row pitch: measured
+        // 0.5 (dash length 4.82) on 2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf. ae's row-pitch
+        // formula bottomed out on its 0.15 floor and, once composed, rendered at 0.0827 — a sixth of
+        // AD's, which is why the bar read as a hairline instead of a solid column.
+        const double dlw = 0.5 * devw;
         for (const auto& node : layout.leaves) {
             if (matched.count(node.name)) {
                 const double y = dev_y(node.y);
@@ -1945,7 +1962,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         const double strip_w = 0.005 * marker_treeH;        // AD width_to_height_ratio (marker viewport height)
         const double x_table = x_ts0 + ts_w;                // dash-table right edge = arm LEFT end
         const double x_spine = x_hzmark0 + strip_w;         // marker strip right edge = spine / arm RIGHT end
-        const double marker_lw = 1.0;                       // AD hz-section-marker line_width
+        const double marker_lw = 1.0 * devw;                // AD hz-section-marker line_width (absolute)
         const double label_fs  = 2.5 * strip_w;             // AD label_size × strip width (≈0.0125·treeH)
         for (const auto& [id, first_name, last_name, prefix, shown] : hz_drawn) {
             if (!shown)

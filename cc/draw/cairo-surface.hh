@@ -65,6 +65,14 @@ namespace ae::draw
         void filled_triangle(double x0, double y0, double x1, double y1, double x2, double y2, Color fill); // arbitrary filled triangle
         // Axis-aligned rectangle with its top-left corner at (x, y). Transparent fill = outline only.
         void rectangle(double x, double y, double width, double height, Color outline, double outline_width, Color fill);
+        // The device-space size of one user-space unit on THIS surface. 1.0 for an owned surface;
+        // for the borrowed-context (sub-rectangle) constructor it is the dst/logical ratio, i.e. the
+        // factor cairo applies to every stroke width drawn here. A caller that wants a stroke of an
+        // ABSOLUTE device width — AD's line widths are absolute points at final page scale — divides
+        // by this. Geometry-derived widths (a fraction of the row pitch, say) must NOT: those are
+        // meant to shrink with the drawing.
+        double stroke_scale() const { return stroke_scale_; }
+
         void line(double x1, double y1, double x2, double y2, Color color, double width);
         // Draw a multi-subpath path in the "negative-move" convention: [first, last) is a flat
         // double array (stride 2 = {x, y}); a pair with x < 0 starts a new subpath (move-to at
@@ -108,6 +116,7 @@ namespace ae::draw
       private:
         _cairo_surface* surface_{nullptr};
         _cairo* context_{nullptr};
+        double stroke_scale_{1.0}; // device units per user unit (see stroke_scale())
         std::string png_filename_{}; // non-empty => PNG backend; written on destruction
         bool borrowed_{false};       // true => context_ is caller-owned (sub-rect draw); dtor only restores, never destroys
     };
