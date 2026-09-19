@@ -1,0 +1,15 @@
+{
+  "_": "tal-draw config for the matrix horizontal-rule registry test (tree-hz-clade-lines.json).",
+  "_1": "Clades sit to the RIGHT of the matrix (clades_before_time_series false = AD layout-tree-only), which is the report-tree layout where a clade rule and an hz separator overlap across the whole matrix.",
+  "_2": "Clade P covers L3..L5 (verticals 2..4) -> rules above vertical 2 and above vertical 5; clade Q covers L7 (vertical 6) -> rules above vertical 6 and above vertical 7.",
+  "_3": "H1 is deliberately clear of every clade boundary (rules above verticals 0 and 1). H2 matches clade P exactly, H3 matches clade Q exactly, and H4 both abuts H3 (its top rule is H3's bottom rule) and ends on the LAST leaf, whose bottom rule AD cannot register (Node::last_next_leaf is null there).",
+  "image_size": 800,
+  "clades": { "show": true, "report": false },
+  "time_series": { "show": true, "interval": "year" },
+  "hz_sections": [
+    { "first": "L1", "last": "L1", "label": "clear-of-clades" },
+    { "first": "L3", "last": "L5", "label": "on-clade-P" },
+    { "first": "L7", "last": "L7", "label": "on-clade-Q" },
+    { "first": "L8", "last": "L8", "label": "last-leaf" }
+  ]
+}

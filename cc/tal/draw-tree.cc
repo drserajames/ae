@@ -6,6 +6,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -828,17 +829,19 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // list it is that list verbatim, prefixes and all, exactly as before this merge existed.
     struct HzDrawn
     {
-        std::string first_name, last_name, prefix;
+        // `id` carries AD's warn_if_present rule into the matrix-rule registry (an auto-split id
+        // like "C.1-1" expects to share a line with its clade); it is not drawn.
+        std::string id, first_name, last_name, prefix;
         bool shown{true};
     };
     std::vector<HzDrawn> hz_drawn;
     if (hz_curated_by_id) {
         for (const HzSectionResolved& section : hz_set)
-            hz_drawn.push_back(HzDrawn{.first_name = section.first_name, .last_name = section.last_name, .prefix = section.prefix, .shown = section.shown});
+            hz_drawn.push_back(HzDrawn{.id = section.id, .first_name = section.first_name, .last_name = section.last_name, .prefix = section.prefix, .shown = section.shown});
     }
     else {
         for (const HzSection& section : params.hz_sections)
-            hz_drawn.push_back(HzDrawn{.first_name = section.first, .last_name = section.last, .prefix = section.prefix, .shown = section.shown});
+            hz_drawn.push_back(HzDrawn{.id = section.id, .first_name = section.first, .last_name = section.last, .prefix = section.prefix, .shown = section.shown});
     }
 
     // --- clade-section diagnostic: AD Clades::report_clades + HzSections::report/detect_intersect ---
@@ -1280,6 +1283,14 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     const double hstep = tree_w / max_cum;
     const auto dev_x = [&](double cumulative) { return margin + aa_left + hz_w + cumulative * hstep; };
     const auto dev_y = [&](double vertical_offset) { return vmargin + top_reserve + (vertical_offset - 0.5) * vstep; };
+    // TOP EDGE of the row of `layout.leaves[leaf_index]` = AD LayoutElement::pos_y_above
+    // (acmacs-tal cc/layout.cc:253, vertical_step * (cumulative_vertical_offset - vertical_offset/2)).
+    // The +1 is the index→offset conversion: layout.cc assigns the FIRST leaf y = 1
+    // (`height += default_vertical_offset` BEFORE the push_back), so leaves[i].y == i + 1 while
+    // every clade/hz section carries 0-based leaf INDICES (cc/tal/clades.cc's `vertical` counter
+    // starts at 0). Feeding an index straight to dev_y — as the clades block did — puts the line
+    // a whole row too high. `leaf_index == leaves.size()` is the bottom edge of the last row.
+    const auto row_top = [&](double leaf_index) { return dev_y(leaf_index + 1.0 - 0.5); };
 
     const double line_width = std::clamp(vstep * 0.5, 0.2, 3.0);
     // AD draws tree branches at vertical_step()*0.5 with NO lower floor, so a branch is always
@@ -1315,9 +1326,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         pdf.text(margin + aa_left, std::max(title_y, 1.0), params.title, title_fs, BLACK, /*center=*/false);
     }
 
-    // hz-section separators are no longer drawn here: AD draws the faint grey top/bottom rules
-    // per *clade* (from the matrix start to the bracket arrow), rendered with the clades column
-    // below — so a separate hz-section separator would duplicate / over-draw them.
+    // No horizontal rules are drawn here. Every rule that crosses the time-series matrix — whether
+    // a clade's or an hz section's — goes through `matrix_rules` below and is emitted once, in the
+    // time-series block, so the two producers cannot over-draw each other. (The comment that used
+    // to sit here claimed hz separators were not drawn at all; they were, at the bottom of the
+    // time-series block, on top of the clade rules.)
 
     // --- tree: leaf tip segments (coloured) + optional labels ---
     // Leaf labels share the fixed column at x_label0, so collisions are purely vertical:
@@ -1397,6 +1410,45 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         }
     }
 
+    // --- the time-series matrix's horizontal rules, in ONE registry (port of acmacs-tal
+    //     TimeSeries::add_horizontal_line_above, cc/time-series.cc:138) ---
+    //
+    // AD keeps every rule that crosses the matrix in a single `horizontal_lines_` collection keyed
+    // by THE NODE THE RULE SITS ABOVE, and a second registration for the same node adds nothing —
+    // it only warns. Two producers call it:
+    //   * Clades::add_separators_to_time_series  (cc/clades.cc:200)   — GREY 0.5 (clades.hh:79)
+    //   * HzSections::add_separators_to_time_series (cc/hz-sections.cc:168) — GREY 1.0 (hz-sections.hh:60)
+    // so where an hz-section boundary lands on a leaf that already carries a clade rule, AD draws
+    // ONE line, with the clade's parameters. ae had no registry and drew both, which is only
+    // invisible while the report trees never run their `hz` sub-program.
+    //
+    // REGISTRATION ORDER — clades first. Not from ae's draw order (which proves nothing) but from
+    // AD's preparation stages: Layout::prepare (cc/layout.cc:67) runs stages 1→3 over every
+    // element, Clades::prepare (cc/clades.cc:26) registers on its FIRST call (`if (!prepared_)`,
+    // i.e. stage 1) while HzSections::prepare (cc/hz-sections.cc:23) is guarded by
+    // `stage == 2`. So the clade line always wins a shared boundary regardless of the elements'
+    // order in the layout. The two blocks below register in that same order.
+    //
+    // The key is the INDEX of the leaf below the rule, which is how AD addresses both ends of a
+    // section: the top rule is registered above `section.first`, the bottom rule above
+    // `section.last->last_next_leaf` — the leaf AFTER the section. Two consequences ae did not
+    // have: a section's bottom rule and the next section's top rule are ONE rule, and the last
+    // leaf in the tree has no `last_next_leaf`, so the bottom-most section registers no rule
+    // (`leaf_below == leaves.size()` is rejected below).
+    struct MatrixRule { Color color{GREY}; double width{0.5}; };
+    std::map<long, MatrixRule> matrix_rules;
+    const auto n_leaves = static_cast<long>(layout.leaves.size());
+    const auto register_matrix_rule = [&matrix_rules, n_leaves](long leaf_below, Color color, double width, bool warn_if_present, std::string_view producer) {
+        if (leaf_below < 0 || leaf_below >= n_leaves)
+            return; // AD: no node to key on (past the last leaf) -> no line at all
+        const auto [it, inserted] = matrix_rules.try_emplace(leaf_below, MatrixRule{.color = color, .width = width});
+        // AD_WARNING fires only when the DISCARDED line differs from the kept one, and only when
+        // the caller asked for it — HzSections suppresses it for auto-split ids like "C.1-1", where
+        // a coincident line is expected rather than a mistake (cc/hz-sections.cc:172).
+        if (!inserted && warn_if_present && (it->second.color != color || it->second.width != width))
+            fmt::print(stderr, ">>> WARNING: matrix horizontal line above leaf {} already added with different parameters ({} discarded)\n", leaf_below, producer);
+    };
+
     // --- clades column (port of acmacs-tal Clades::draw): each shown clade's bands are vertical
     //     double-arrow brackets at slot.width*(slot+1) from the matrix edge (slot 0 nearest the
     //     matrix, deeper clades stepping right), with horizontal arms to the matrix side and a
@@ -1421,7 +1473,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // @1000. Match it: half-width 0.00144*height, length 4*half.
         const double ahw = std::clamp(0.00144 * height, 0.9, 2.0);  // arrowhead half-width (= AD arrow_width/2)
         const double ahl = ahw * 4.0;                              // arrowhead length (AD 2.0 ratio on full width)
-        const double line_to = ts_w > 0.0 ? x_ts0 : x_clade0;    // grey lines start at the matrix (AD horizontal_line)
+        // Fallback arm end for a tree with NO time-series column: there is no matrix to run to,
+        // and no registry entry either, so the arm simply spans the clades column. With a matrix
+        // the arm stops at the column edge instead and the matrix part is a registered rule.
+        const double line_to = ts_w > 0.0 ? x_ts0 : x_clade0;
         // When the clades column sits LEFT of the matrix (AD sig page), slot 0 (shallow) hugs the
         // matrix edge and deeper clades step toward the tree (left); arms still run right to the
         // matrix and the name label sits to the LEFT of the bracket.
@@ -1448,7 +1503,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         for (std::size_t i = 0; i < band_labels.size(); ++i) {
             const auto& pl = clade_plan[band_labels[i].plan_index];
             const CladeBand& bd = pl.bands[band_labels[i].band_index];
-            label_cy[i] = dev_y(static_cast<double>(bd.first_v + bd.last_v) / 2.0) + pl.offset_y * height;
+            // Centre of the band's true vertical extent: midway between the top edge of its first
+            // row and the bottom edge of its last. (Was dev_y(mean index), a whole row too high —
+            // the same index-vs-offset slip as the arms; see `row_top`.)
+            label_cy[i] = (row_top(static_cast<double>(bd.first_v)) + row_top(static_cast<double>(bd.last_v) + 1.0)) / 2.0 + pl.offset_y * height;
             const double fs = std::max(slot_px * pl.label_scale, 2.5);
             const std::string nm = clade_display_for(clade_sections[pl.rank].name);
             const double tw = pdf.text_size(nm, fs).first;
@@ -1507,18 +1565,40 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 // below its centre) — see acmacs-tal layout.cc:253-268 / clades.cc:271-272. ae drew
                 // centre-to-centre (dev_y(first)..dev_y(last)), one whole vertical_step too short
                 // (missing half a row at each end), so short clades like C.1.7 read as a stub arrow
-                // (r7 item #2). Extend by half a row-step at each end to reach the row edges = AD.
-                const double y0 = dev_y(static_cast<double>(ext_first)) - 0.5 * vstep;
-                const double y1 = dev_y(static_cast<double>(ext_last)) + 0.5 * vstep;
-                // two faint GREY horizontal lines at the clade's top & bottom, from the matrix
-                // start across to the bracket arrow (AD horizontal_line, terminates at pos_x).
+                // (r7 item #2). `row_top` reaches the row edges = AD.
+                // pos_y_above(first) / pos_y_below(last) via `row_top`, which carries the 0-based
+                // leaf index → 1-based vertical offset conversion the old `dev_y(ext_first)` left
+                // out. Measured on cc/tal/test/tree-hz-clade-lines.json (800pt, 8 leaves, 95pt
+                // rows): clade P = L3..L5, whose rows span y 210..495, was bracketed at 115..400 —
+                // exactly one row high, on L2..L4. Every clade bracket, arm and label in every ae
+                // tree was off by that row, and it is why a "coincident" hz boundary never
+                // coincided: the hz side (which uses leaves[i].y, already 1-based) was right.
+                const double y0 = row_top(static_cast<double>(ext_first));
+                const double y1 = row_top(static_cast<double>(ext_last) + 1.0);
+                // AD splits these two rules in a way ae had merged into one line:
+                //   * Clades::draw (cc/clades.cc:281-283) draws an arm from the bracket arrow to the
+                //     MATRIX-FACING EDGE OF THE CLADES VIEWPORT — `left/right` are pos_x and
+                //     viewport.left()/right(), so the arm never reaches into the matrix;
+                //   * the part that crosses the matrix is registered on the time-series instead, and
+                //     is emitted once, below.
+                // ae drew a single line from the matrix's near edge all the way to the arrow, which
+                // both over-drew the hz separator and painted a rule across the inter-column gap
+                // that AD leaves blank.
                 // P1: AD (clades.hh:79, parameters.hh:14) draws the two horizontal clade arms as
                 // GREY 0.5px (Line default width 0.5). Same px→pt scale as the hz-section marker
                 // (which uses line_width 1.0 directly and matched AD @600dpi), so 0.5 → 0.5.
                 // Gated by main's clades_horizontal_lines toggle (PR #29).
                 if (params.clades_horizontal_lines) {
-                    pdf.line(line_to, y0, cx, y0, GREY, 0.5);
-                    pdf.line(line_to, y1, cx, y1, GREY, 0.5);
+                    // arm: arrow → the clades column edge that faces the matrix (AD pos_x → viewport edge)
+                    const double arm_end = ts_w > 0.0 ? (clades_left ? clade_right_edge : x_clade0) : line_to;
+                    pdf.line(arm_end, y0, cx, y0, GREY, 0.5);
+                    pdf.line(arm_end, y1, cx, y1, GREY, 0.5);
+                    // AD Clades::add_separators_to_time_series (cc/clades.cc:206-212), gated by
+                    // time_series_top_separator / _bottom_separator (both default true, clades.hh:81)
+                    // — here the same clades_horizontal_lines toggle. warn_if_present = true, as AD
+                    // passes for both ends.
+                    register_matrix_rule(ext_first, GREY, 0.5, true, "clade");
+                    register_matrix_rule(ext_last + 1, GREY, 0.5, true, "clade");
                 }
                 // vertical double-arrow spine with FILLED triangular heads (AD double_arrow).
                 // The spine runs only between the two arrowhead BASES, so the tips are pure
@@ -1592,19 +1672,33 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // The outer guard stays on params.hz_sections: a `.tal` that never runs an `hz-sections`
         // command draws no separators at all, exactly as before.
         if (!params.hz_sections.empty()) {
-            std::unordered_map<std::string, double> name_y;
-            name_y.reserve(layout.leaves.size());
-            for (const auto& ln : layout.leaves)
-                name_y.emplace(ln.name, ln.y);
-            const double hz_x1 = x_ts0 + ts_w;
-            for (const auto& [first_name, last_name, prefix, shown] : hz_drawn) {
+            std::unordered_map<std::string, long> name_index;
+            name_index.reserve(layout.leaves.size());
+            for (std::size_t i = 0; i < layout.leaves.size(); ++i)
+                name_index.emplace(layout.leaves[i].name, static_cast<long>(i));
+            for (const auto& [id, first_name, last_name, prefix, shown] : hz_drawn) {
                 if (!shown)
                     continue;
-                if (const auto it = name_y.find(first_name); it != name_y.end())
-                    pdf.line(x_ts0, dev_y(it->second - 0.5), hz_x1, dev_y(it->second - 0.5), GREY, 0.4);
-                if (const auto it = name_y.find(last_name); it != name_y.end())
-                    pdf.line(x_ts0, dev_y(it->second + 0.5), hz_x1, dev_y(it->second + 0.5), GREY, 0.4);
+                // AD HzSections::add_separators_to_time_series (cc/hz-sections.cc:172): suppress the
+                // "already added" warning for an auto-split id like "C.1-1", where a line shared with
+                // the clade the split came from is expected. An entry with no id warns, as AD's
+                // `id.size() < 3` does.
+                const bool warn_if_present = id.size() < 3 || id[id.size() - 2] != '-';
+                if (const auto it = name_index.find(first_name); it != name_index.end())
+                    register_matrix_rule(it->second, GREY, 0.4, warn_if_present, "hz-section");
+                // ...and the bottom rule above `section.last->last_next_leaf` — the leaf AFTER the
+                // section, so it collapses into the next section's top rule, and does not exist at
+                // all when the section ends on the tree's last leaf.
+                if (const auto it = name_index.find(last_name); it != name_index.end())
+                    register_matrix_rule(it->second + 1, GREY, 0.4, warn_if_present, "hz-section");
             }
+        }
+        // AD TimeSeries::draw_horizontal_lines (cc/time-series.cc:282): one pass over the registry,
+        // each rule spanning the time-series viewport only. Emitted BEFORE the vertical slot
+        // separators so the verticals stay on top (see the z-order note above).
+        for (const auto& [leaf_below, rule] : matrix_rules) {
+            const double y = row_top(static_cast<double>(leaf_below));
+            pdf.line(x_ts0, y, x_ts0 + ts_w, y, rule.color, rule.width);
         }
         for (std::size_t i = 0; i <= n_slots; ++i) // vertical separators (AD SlotSeparator default = BLACK, 0.5px)
             pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, BLACK, 0.5);
@@ -1846,7 +1940,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         const double x_spine = x_hzmark0 + strip_w;         // marker strip right edge = spine / arm RIGHT end
         const double marker_lw = 1.0;                       // AD hz-section-marker line_width
         const double label_fs  = 2.5 * strip_w;             // AD label_size × strip width (≈0.0125·treeH)
-        for (const auto& [first_name, last_name, prefix, shown] : hz_drawn) {
+        for (const auto& [id, first_name, last_name, prefix, shown] : hz_drawn) {
             if (!shown)
                 continue;
             const auto itf = name_y.find(first_name), itl = name_y.find(last_name);

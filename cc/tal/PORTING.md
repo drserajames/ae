@@ -1295,6 +1295,74 @@ stderr and in the `.taleg` **after** the clade report, both rows' full shape, an
 `show: false` label is reported but absent from the rendered PDF.
 
 
+## One registry for the matrix's horizontal rules — ported 2026-09-19
+
+AD keeps every horizontal rule that crosses the time-series matrix in **one collection keyed by
+the node the rule sits above**, and a second registration for the same node adds nothing
+([`time-series.cc:138`](../../../AD/sources/acmacs-tal/cc/time-series.cc)
+`TimeSeries::add_horizontal_line_above` — `std::find_if` on the node, `emplace_back` only when not
+found; otherwise an `AD_WARNING` and nothing drawn). Two producers call it:
+`Clades::add_separators_to_time_series` (`clades.cc:200`, GREY 0.5 per `clades.hh:79`) and
+`HzSections::add_separators_to_time_series` (`hz-sections.cc:168`, GREY 1.0 per `hz-sections.hh:60`).
+ae had no registry and drew both, at different widths and different x-extents.
+
+**Registration order: clades first, and not because of draw order.** `Layout::prepare`
+(`layout.cc:67`) runs preparation stages 1→3 over every element; `Clades::prepare` (`clades.cc:26`)
+registers on its first call (`if (!prepared_)` — stage 1) while `HzSections::prepare`
+(`hz-sections.cc:23`) is guarded by `stage == 2`. So the clade line wins a shared boundary whatever
+order the two elements sit in the layout, and the hz line is discarded. The warning is suppressed
+for auto-split ids like `C.1-1` (`hz-sections.cc:172`), where a shared line is expected.
+
+Three AD behaviours came with it that ae did not have:
+
+* **A clade's arm does not cross the matrix.** `Clades::draw` (`clades.cc:281-283`) runs it from
+  the bracket arrow only as far as the matrix-facing edge of the *clades viewport*; the part that
+  crosses the matrix is the registered rule. ae drew one line from the matrix's near edge all the
+  way to the arrow, which both over-drew the hz separator and painted across the inter-column gap
+  AD leaves blank.
+* **A bottom rule is registered above `section.last->last_next_leaf`** — the leaf *after* the
+  section. So a section's bottom rule and the next section's top rule are one rule, and a section
+  ending on the tree's last leaf registers none (`last_next_leaf` is null there, `tree.hh:114`).
+* **Clades register matrix separators in *both* layouts.** Nothing in `add_separators_to_time_series`
+  looks at where the clades column sits, so a signature page gets them too. ae's sig pages
+  previously had none, because its single clade line ran *away* from the matrix in that layout.
+
+### The one-row offset this exposed
+
+`dev_y` takes a 1-based vertical offset (`layout.cc` assigns the first leaf `y = 1`), but every
+clade and hz section carries **0-based leaf indices** (`clades.cc`'s `vertical` counter starts at
+0). The clades block fed the index straight to `dev_y`, so every clade bracket, arm and label in
+every ae tree was drawn **one row too high**; the hz block used `leaves[i].y` and was right. That
+is why a "coincident" boundary never coincided. Measured on
+`cc/tal/test/tree-hz-clade-lines.json` (800pt, 8 leaves, 95pt rows): clade P = L3..L5, whose rows
+span y 210..495, was bracketed at 115..400 — exactly one row, on L2..L4. Now `row_top(i)` does the
+conversion in one place = AD `LayoutElement::pos_y_above` (`layout.cc:253`).
+
+*(Residual, not changed: AD's `pos_y_below` on the tree's **last** leaf returns that leaf's
+centre, not its row bottom (`layout.cc:261-267`); ae's clade arm keeps the row bottom there.)*
+
+### Measured — h1-cdc from `2026-0921-ssm`, both sides re-derived in one session
+
+Tree panel only, rendered *from* the live round into a scratch dir (inputs sha256-identical before
+and after: `tree/h1.asr.after-2021.tjz`, `tree/h1.after-2021.tal`, `h1-cdc/styled.ace`), counting
+stroked vectors in the content stream — a 0.4pt rule under a 0.5pt one is invisible to any raster.
+
+| layout | rules crossing the matrix | distinct y | redundant | clade arms in the column |
+|---|--:|--:|--:|--:|
+| report-tree (clades right, hz on) — before | 44 (26×0.5 + 18×0.4) | 35 | **9** | 0 |
+| report-tree — after | 19 (all 0.5) | 19 | **0** | 26 |
+| signature page (clades left) — before | 18 (all 0.4) | 15 | **3** | 26 |
+| signature page — after | 19 (all 0.5) | 19 | **0** | 26 |
+
+The report-tree 44→19 is the defect: 9 rules were literally drawn twice at one y, and the other 16
+removed are clade rules AD never paints across the matrix at all — they are the 26 arms that now
+appear in the clades column instead. The signature page gains 4 rules and changes width 0.4→0.5,
+which is AD's behaviour above, not a regression; it is the one visible change to existing output.
+
+Test: [`test-hz-clade-lines.py`](test/test-hz-clade-lines.py) (synthetic `tree-hz-clade-lines.json`,
+8 leaves, invented clades P/Q) — 23 assertions, 16 of which fail against `main` at `b508d26`.
+
+
 ## 6. Conf / format docs to mine next
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-conf.org` — the settings DSL reference.
 - `~/AC/eu/AD/sources/acmacs-tal/doc/tal-processing.org` — processing stages.
