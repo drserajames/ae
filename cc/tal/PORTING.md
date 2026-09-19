@@ -201,6 +201,13 @@ the `cc/draw/` surface API."*
    vertical connector under each inode; optional leaf-name labels. Reuses `compute_layout`
    (Phase A) and the `ae::draw::CairoPdf` surface from subsystem #1. Cairo is linked **only**
    into the `tal-draw` executable (like `chart-draw`), never into libae/ae_backend.
+   *(No longer true, 19 Sep 2026: `cc/tal/draw-tree.cc` and `cc/tal/sig-page.cc` are in
+   `meson.build`'s `sources_py` (:113-141), so they compile into **`ae_backend`** as well as into
+   `tal-draw` — that is how the native signature page draws its tree. They are NOT in
+   `sources_tal`, so they are **not** in `libae` (object census: `draw-tree.cc.o` appears in
+   `ae_backend….so.p` and `tal-draw.p`, zero times in `libae.dylib.p`). Practical consequence:
+   a change here needs `ninja` with **no target**, and A/B-ing a signature page by swapping the
+   `tal-draw` binary alone measures nothing — the sig page never runs it.)*
    **Verify:** `sh cc/tal/test/test-draw-tree.sh` → `OK: tal-draw renders valid PDFs`
    (a 20-leaf tree was also rasterised and eyeballed — correct topology, branch-length
    scaling, labels).
@@ -1293,6 +1300,150 @@ there, nothing at the default path); `mrca_labels_report: false` (dump gone, cla
 Tests: `cc/tal/test/test-draw-tree.sh` (synthetic `tree-clades.json`) asserts the block appears on
 stderr and in the `.taleg` **after** the clade report, both rows' full shape, and that the
 `show: false` label is reported but absent from the rendered PDF.
+
+
+## One registry for the matrix's horizontal rules — ported 2026-09-19
+
+AD keeps every horizontal rule that crosses the time-series matrix in **one collection keyed by
+the node the rule sits above**, and a second registration for the same node adds nothing
+([`time-series.cc:138`](../../../AD/sources/acmacs-tal/cc/time-series.cc)
+`TimeSeries::add_horizontal_line_above` — `std::find_if` on the node, `emplace_back` only when not
+found; otherwise an `AD_WARNING` and nothing drawn). Two producers call it:
+`Clades::add_separators_to_time_series` (`clades.cc:200`, GREY 0.5 per `clades.hh:79`) and
+`HzSections::add_separators_to_time_series` (`hz-sections.cc:168`, GREY 1.0 per `hz-sections.hh:60`).
+ae had no registry and drew both, at different widths and different x-extents.
+
+**Registration order: clades first, and not because of draw order.** `Layout::prepare`
+(`layout.cc:67`) runs preparation stages 1→3 over every element; `Clades::prepare` (`clades.cc:26`)
+registers on its first call (`if (!prepared_)` — stage 1) while `HzSections::prepare`
+(`hz-sections.cc:23`) is guarded by `stage == 2`. So the clade line wins a shared boundary whatever
+order the two elements sit in the layout, and the hz line is discarded. The warning is suppressed
+for auto-split ids like `C.1-1` (`hz-sections.cc:172`), where a shared line is expected.
+
+Three AD behaviours came with it that ae did not have:
+
+* **A clade's arm reaches the matrix but does not cross it.** `Clades::draw` (`clades.cc:281-283`)
+  runs it from the bracket arrow to the matrix-facing edge of the *clades viewport*; the part that
+  crosses the matrix is the registered rule. ae drew one line from the matrix's near edge all the
+  way to the arrow, which in the clades-right layout painted it straight across the matrix,
+  over-drawing the hz separator there.
+  **The arm must still MEET the matrix.** Measured on AD's own output,
+  `2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf`: every clade arm ends at x=311.59 and the matrix
+  rule runs 311.59..420.70 — exactly the span of that page's 24 slot separators. AD's clades
+  viewport abuts the matrix, so the two segments join seamlessly. ae lays its columns out with an
+  inter-column gap AD does not have, so a first cut that stopped the arm at the *clades column
+  edge* left a 9.5pt white break with no counterpart in AD (caught by Sarah, 19 Sep). The arm ends
+  at the matrix's NEAR edge: `x_ts0` with the clades column left, `x_ts0 + ts_w` with it right.
+* **A bottom rule is registered above `section.last->last_next_leaf`** — the leaf *after* the
+  section. So a section's bottom rule and the next section's top rule are one rule, and a section
+  ending on the tree's last leaf registers none (`last_next_leaf` is null there, `tree.hh:114`).
+* **Clades register matrix separators in *both* layouts.** Nothing in `add_separators_to_time_series`
+  looks at where the clades column sits, so a signature page gets them too. ae's sig pages
+  previously had none, because its single clade line ran *away* from the matrix in that layout.
+
+### The one-row offset this exposed
+
+`dev_y` takes a 1-based vertical offset (`layout.cc` assigns the first leaf `y = 1`), but every
+clade and hz section carries **0-based leaf indices** (`clades.cc`'s `vertical` counter starts at
+0). The clades block fed the index straight to `dev_y`, so every clade bracket, arm and label in
+every ae tree was drawn **one row too high**; the hz block used `leaves[i].y` and was right. That
+is why a "coincident" boundary never coincided. Measured on
+`cc/tal/test/tree-hz-clade-lines.json` (800pt, 8 leaves, 95pt rows): clade P = L3..L5, whose rows
+span y 210..495, was bracketed at 115..400 — exactly one row, on L2..L4. Now `row_top(i)` does the
+conversion in one place = AD `LayoutElement::pos_y_above` (`layout.cc:253`).
+
+*(Residual, not changed: AD's `pos_y_below` on the tree's **last** leaf returns that leaf's
+centre, not its row bottom (`layout.cc:261-267`); ae's clade arm keeps the row bottom there.)*
+
+### Measured — h1-cdc from `2026-0921-ssm`, both sides re-derived in one session
+
+Tree panel only, rendered *from* the live round into a scratch dir (inputs sha256-identical before
+and after: `tree/h1.asr.after-2021.tjz`, `tree/h1.after-2021.tal`, `h1-cdc/styled.ace`), counting
+stroked vectors in the content stream — a 0.4pt rule under a 0.5pt one is invisible to any raster.
+
+| layout | rules crossing the matrix | distinct y | redundant | clade arms in the column |
+|---|--:|--:|--:|--:|
+| report-tree (clades right, hz on) — before | 44 (26×0.5 + 18×0.4) | 35 | **9** | 0 |
+| report-tree — after | 19 (all 0.5) | 19 | **0** | 26 |
+| signature page (clades left) — before | 18 (all 0.4) | 15 | **3** | 26 |
+| signature page — after | 19 (all 0.5) | 19 | **0** | 26 |
+
+The report-tree 44→19 is the defect: 9 rules were literally drawn twice at one y, and the other 16
+removed are clade rules AD never paints across the matrix at all — they are the 26 arms that now
+appear in the clades column instead. The signature page gains 4 rules and changes width 0.4→0.5,
+which is AD's behaviour above, not a regression; it is the one visible change to existing output.
+
+### Against AD's own rendered page, not just AD's source
+
+`2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf` (AD `tal`, Feb 2026) vs the same page built by
+`make_section_signature_page` on this branch. Grey `#BEBEBE` horizontals, from the content streams:
+
+| | AD | ae (this branch) |
+|---|--:|--:|
+| grey rules on the page | **73** | **73** |
+| clade arms | **40** | **40** |
+| arms ending exactly on the matrix's near edge | 40 (all at x=311.59) | 40 (all at x=294.86) |
+| rules crossing the matrix | **33** | **33** |
+| width — arms and matrix rules alike | 0.5 | 0.5 (0.2757 on the page: the tree composes at 0.5515) |
+
+Uniform width is the point of the second half: on `main` the arms were 0.5 and the matrix rules
+0.4, so the arm read **thicker than the line it joins** — AD draws both at 0.5. ae's remaining
+difference is one extra arm-length family (7 vs AD's 6), which is the fractional `"slot": 2.2` on
+clade D that PR #84 made expressible — a deliberate ae superset, not this work.
+
+Test: [`test-hz-clade-lines.py`](test/test-hz-clade-lines.py) (synthetic `tree-hz-clade-lines.json`,
+8 leaves, invented clades P/Q) — 23 assertions, 16 of which fail against `main` at `b508d26`.
+
+
+## Signature-page line weights — the composition scale (fixed 19 Sep 2026)
+
+AD's line widths are **absolute points at final page scale** (acmacs-tal `Pixels` through
+`context::convert`). A standalone `tal-draw` PDF is drawn 1:1 so they land as written, but the
+signature page composes the tree into a sub-rectangle (`export_tree_into` → the borrowed-context
+`CairoPdf`) and cairo then multiplies every stroke width by that rectangle's scale. Nothing
+compensated, so every constant stroke on a sig page came out at **0.5513×** AD's while the
+geometry was the right size — the page was right and only the ink was thin.
+
+`CairoPdf::stroke_scale()` now reports the device-units-per-user-unit of the surface (1.0 for an
+owned surface), and `render_tree_core` divides AD's **constant** widths by it (`devw`). Widths
+derived from the geometry are deliberately left alone — `tree_line_width` is half the row pitch and
+is *meant* to shrink with the tree.
+
+Measured, `2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf` (AD) vs the same page rebuilt here. The
+matrix is the same physical size on both (AD 109.11pt, ae 112.47pt), so the widths are directly
+comparable:
+
+| stroke | AD | ae before | ae now |
+|---|--:|--:|--:|
+| time-series vertical slot separator | 0.5 | 0.2757 | **0.5** |
+| clade bracket spine (vertical) | 1.0 | 0.5513 | **1.0** |
+| clade arm + matrix rule (horizontal) | 0.5 | 0.2757 | **0.5** |
+| matches-chart grey bar ("sequences matched to maps") | 0.5 | 0.0827 | **0.5** |
+
+The hz-section marker bracket (AD `conf/tal.json` `line_width` 1.0) is in the same class and moved
+with them.
+
+**The matches-chart grey bar is a deliberate exception — Sarah's call, 19 Sep 2026.** AD draws it at
+its own absolute 0.5 (measured: width 0.5, dash length 4.82) and `0.5 * devw` reproduced that
+exactly; she looked at the result beside AD and asked for this one bar to stay **thin**, keeping the
+row-pitch width it has always had (`clamp(vstep*0.6, 0.15, 2.5)`, which bottoms out on its 0.15
+floor and composes to 0.0827 on a sig page). So it is the one width that intentionally does NOT take
+`devw`. Do not "restore AD parity" there without asking her.
+
+| | AD | ae |
+|---|--:|--:|
+| matches-chart grey bar | 0.5 | **0.0827** (intentional) |
+
+**Blast radius, checked rather than argued.** `cc/draw/cairo-surface.cc` compiles into four targets
+(`ae_backend`, `tal-draw`, `geo-draw`, `map-draw` — object census), so the change there is
+deliberately inert: one new member, set only in the borrowed-context constructor, and exactly one
+reader (`cc/tal/draw-tree.cc`). Verified on output, not by reading:
+
+* **Standalone report tree** (`tal-draw`, scale 1.0 → `devw` 1.0): byte-for-byte the same rules and
+  separators before and after — 73 grey rules all 0.5, 37 separators identical.
+* **Section maps on the sig page**, drawn by `map-draw` through the *same* borrowed `CairoPdf`:
+  pixel-identical. A diff mask of the whole page shows changed pixels stopping exactly at the
+  hz-marker column; the aa dash-bar colour columns and every map are untouched.
 
 
 ## 6. Conf / format docs to mine next

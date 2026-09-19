@@ -1,3 +1,4 @@
+#include <cmath>
 #include <algorithm>
 #include <numbers>
 #include <string>
@@ -52,8 +53,12 @@ namespace ae::draw
         context_ = context;
         cairo_save(context_);
         cairo_translate(context_, dst_x, dst_y);
-        if (logical_w > 0.0 && logical_h > 0.0)
+        if (logical_w > 0.0 && logical_h > 0.0) {
             cairo_scale(context_, dst_w / logical_w, dst_h / logical_h);
+            // Uniform in practice (export_tree_into picks min(dst_w/w, dst_h/h) and sizes the rect
+            // from it); if it ever were not, the geometric mean is the honest single number.
+            stroke_scale_ = std::sqrt((dst_w / logical_w) * (dst_h / logical_h));
+        }
         cairo_rectangle(context_, 0.0, 0.0, logical_w, logical_h);
         cairo_clip(context_);
         cairo_new_path(context_);
