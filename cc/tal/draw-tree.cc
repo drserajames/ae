@@ -1704,13 +1704,22 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 // the clade the split came from is expected. An entry with no id warns, as AD's
                 // `id.size() < 3` does.
                 const bool warn_if_present = id.size() < 3 || id[id.size() - 2] != '-';
+                // GREY 1.0 = AD HzSections::Parameters::line (acmacs-tal cc/hz-sections.hh:60), and
+                // deliberately HEAVIER than the clade rule's 0.5: in AD the hz separator is the
+                // prominent line. ae drew 0.4, which was both 2.5x too thin and, being under the
+                // clade's 0.5, inverted the relationship. Verified on AD's own output rather than its
+                // header — 2026-0223 and the current rounds cannot show it (their sections are
+                // clade-derived, so every boundary is clade-claimed and the hz width never renders),
+                // but 2022-0221-ssm/sp/h1pdm.cdc.sp.pdf runs its `hz` sub-program and carries both
+                // families: 16 clade rules at 0.5 and 4 hz separators at 1.0, at 20 distinct y with
+                // none doubled — which also demonstrates this registry from AD's output.
                 if (const auto it = name_index.find(first_name); it != name_index.end())
-                    register_matrix_rule(it->second, GREY, 0.4, warn_if_present, "hz-section");
+                    register_matrix_rule(it->second, GREY, 1.0, warn_if_present, "hz-section");
                 // ...and the bottom rule above `section.last->last_next_leaf` — the leaf AFTER the
                 // section, so it collapses into the next section's top rule, and does not exist at
                 // all when the section ends on the tree's last leaf.
                 if (const auto it = name_index.find(last_name); it != name_index.end())
-                    register_matrix_rule(it->second + 1, GREY, 0.4, warn_if_present, "hz-section");
+                    register_matrix_rule(it->second + 1, GREY, 1.0, warn_if_present, "hz-section");
             }
         }
         // AD TimeSeries::draw_horizontal_lines (cc/time-series.cc:282): one pass over the registry,
