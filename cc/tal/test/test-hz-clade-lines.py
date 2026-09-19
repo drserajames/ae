@@ -50,7 +50,7 @@ ROOT = HERE.parents[2]
 
 GREY = (0.745, 0.745, 0.745)
 BLACK = (0.0, 0.0, 0.0)
-CLADE_W, HZ_W = 0.5, 0.4      # draw-tree.cc: clade rule 0.5, hz separator 0.4
+CLADE_W, HZ_W = 0.5, 1.0      # AD clades.hh:79 GREY 0.5; AD hz-sections.hh:60 GREY 1.0
 
 failures: list[str] = []
 

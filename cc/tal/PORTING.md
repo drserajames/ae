@@ -1373,6 +1373,18 @@ removed are clade rules AD never paints across the matrix at all — they are th
 appear in the clades column instead. The signature page gains 4 rules and changes width 0.4→0.5,
 which is AD's behaviour above, not a regression; it is the one visible change to existing output.
 
+### The hz separator is GREY 1.0, and heavier than the clade rule
+
+ae drew 0.4. AD's `HzSections::Parameters::line` default is GREY **1.0** (`hz-sections.hh:60`) —
+deliberately heavier than the clade rule's 0.5, so the section boundary is the prominent line. At
+0.4 ae was both 2.5× too thin and, being under 0.5, had the relationship inverted.
+
+Confirmed on AD's **rendered output**, not just its header. No current round can show it: their
+sections are clade-derived, so every boundary is clade-claimed and the hz width never renders.
+`2022-0221-ssm/sp/h1pdm.cdc.sp.pdf` does run its `hz` sub-program and carries both families —
+**16 clade rules at 0.5 and 4 hz separators at 1.0, at 20 distinct y with none doubled**, which
+incidentally demonstrates this registry from AD's own output rather than from its source.
+
 ### Against AD's own rendered page, not just AD's source
 
 `2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf` (AD `tal`, Feb 2026) vs the same page built by
