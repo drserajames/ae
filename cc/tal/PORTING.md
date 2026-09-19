@@ -201,6 +201,13 @@ the `cc/draw/` surface API."*
    vertical connector under each inode; optional leaf-name labels. Reuses `compute_layout`
    (Phase A) and the `ae::draw::CairoPdf` surface from subsystem #1. Cairo is linked **only**
    into the `tal-draw` executable (like `chart-draw`), never into libae/ae_backend.
+   *(No longer true, 19 Sep 2026: `cc/tal/draw-tree.cc` and `cc/tal/sig-page.cc` are in
+   `meson.build`'s `sources_py` (:113-141), so they compile into **`ae_backend`** as well as into
+   `tal-draw` — that is how the native signature page draws its tree. They are NOT in
+   `sources_tal`, so they are **not** in `libae` (object census: `draw-tree.cc.o` appears in
+   `ae_backend….so.p` and `tal-draw.p`, zero times in `libae.dylib.p`). Practical consequence:
+   a change here needs `ninja` with **no target**, and A/B-ing a signature page by swapping the
+   `tal-draw` binary alone measures nothing — the sig page never runs it.)*
    **Verify:** `sh cc/tal/test/test-draw-tree.sh` → `OK: tal-draw renders valid PDFs`
    (a 20-leaf tree was also rasterised and eyeballed — correct topology, branch-length
    scaling, labels).
@@ -1315,11 +1322,18 @@ for auto-split ids like `C.1-1` (`hz-sections.cc:172`), where a shared line is e
 
 Three AD behaviours came with it that ae did not have:
 
-* **A clade's arm does not cross the matrix.** `Clades::draw` (`clades.cc:281-283`) runs it from
-  the bracket arrow only as far as the matrix-facing edge of the *clades viewport*; the part that
+* **A clade's arm reaches the matrix but does not cross it.** `Clades::draw` (`clades.cc:281-283`)
+  runs it from the bracket arrow to the matrix-facing edge of the *clades viewport*; the part that
   crosses the matrix is the registered rule. ae drew one line from the matrix's near edge all the
-  way to the arrow, which both over-drew the hz separator and painted across the inter-column gap
-  AD leaves blank.
+  way to the arrow, which in the clades-right layout painted it straight across the matrix,
+  over-drawing the hz separator there.
+  **The arm must still MEET the matrix.** Measured on AD's own output,
+  `2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf`: every clade arm ends at x=311.59 and the matrix
+  rule runs 311.59..420.70 — exactly the span of that page's 24 slot separators. AD's clades
+  viewport abuts the matrix, so the two segments join seamlessly. ae lays its columns out with an
+  inter-column gap AD does not have, so a first cut that stopped the arm at the *clades column
+  edge* left a 9.5pt white break with no counterpart in AD (caught by Sarah, 19 Sep). The arm ends
+  at the matrix's NEAR edge: `x_ts0` with the clades column left, `x_ts0 + ts_w` with it right.
 * **A bottom rule is registered above `section.last->last_next_leaf`** — the leaf *after* the
   section. So a section's bottom rule and the next section's top rule are one rule, and a section
   ending on the tree's last leaf registers none (`last_next_leaf` is null there, `tree.hh:114`).
@@ -1358,6 +1372,24 @@ The report-tree 44→19 is the defect: 9 rules were literally drawn twice at one
 removed are clade rules AD never paints across the matrix at all — they are the 26 arms that now
 appear in the clades column instead. The signature page gains 4 rules and changes width 0.4→0.5,
 which is AD's behaviour above, not a regression; it is the one visible change to existing output.
+
+### Against AD's own rendered page, not just AD's source
+
+`2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf` (AD `tal`, Feb 2026) vs the same page built by
+`make_section_signature_page` on this branch. Grey `#BEBEBE` horizontals, from the content streams:
+
+| | AD | ae (this branch) |
+|---|--:|--:|
+| grey rules on the page | **73** | **73** |
+| clade arms | **40** | **40** |
+| arms ending exactly on the matrix's near edge | 40 (all at x=311.59) | 40 (all at x=294.86) |
+| rules crossing the matrix | **33** | **33** |
+| width — arms and matrix rules alike | 0.5 | 0.5 (0.2757 on the page: the tree composes at 0.5515) |
+
+Uniform width is the point of the second half: on `main` the arms were 0.5 and the matrix rules
+0.4, so the arm read **thicker than the line it joins** — AD draws both at 0.5. ae's remaining
+difference is one extra arm-length family (7 vs AD's 6), which is the fractional `"slot": 2.2` on
+clade D that PR #84 made expressible — a deliberate ae superset, not this work.
 
 Test: [`test-hz-clade-lines.py`](test/test-hz-clade-lines.py) (synthetic `tree-hz-clade-lines.json`,
 8 leaves, invented clades P/Q) — 23 assertions, 16 of which fail against `main` at `b508d26`.

@@ -1576,21 +1576,28 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 const double y0 = row_top(static_cast<double>(ext_first));
                 const double y1 = row_top(static_cast<double>(ext_last) + 1.0);
                 // AD splits these two rules in a way ae had merged into one line:
-                //   * Clades::draw (cc/clades.cc:281-283) draws an arm from the bracket arrow to the
-                //     MATRIX-FACING EDGE OF THE CLADES VIEWPORT — `left/right` are pos_x and
-                //     viewport.left()/right(), so the arm never reaches into the matrix;
+                //   * Clades::draw (cc/clades.cc:281-283) draws an arm from the bracket arrow out to
+                //     the matrix-facing edge of the clades viewport — it never reaches INTO the matrix;
                 //   * the part that crosses the matrix is registered on the time-series instead, and
                 //     is emitted once, below.
-                // ae drew a single line from the matrix's near edge all the way to the arrow, which
-                // both over-drew the hz separator and painted a rule across the inter-column gap
-                // that AD leaves blank.
+                // ae drew a single line from the matrix's NEAR edge all the way to the arrow, which in
+                // the clades-right layout painted it straight across the matrix, over-drawing the hz
+                // separator there.
+                // The arm still has to MEET the matrix, though. Measured on AD's own output —
+                // 2026-0223-ssm/sp/h1-cdc.asr.after-2021.sp.pdf: the clade arms all end at x=311.59 and
+                // the matrix rule runs 311.59..420.70 (= the 24 slot separators' span), so AD's clades
+                // viewport ABUTS the matrix and the two segments join seamlessly. ae lays its columns
+                // out with an inter-column gap AD does not have, so stopping the arm at the clades
+                // column edge left an 8.4pt white break that AD has no trace of (Sarah, 19 Sep). Run the
+                // arm to the matrix's NEAR edge instead: same join as AD, still not across the matrix.
                 // P1: AD (clades.hh:79, parameters.hh:14) draws the two horizontal clade arms as
                 // GREY 0.5px (Line default width 0.5). Same px→pt scale as the hz-section marker
                 // (which uses line_width 1.0 directly and matched AD @600dpi), so 0.5 → 0.5.
                 // Gated by main's clades_horizontal_lines toggle (PR #29).
                 if (params.clades_horizontal_lines) {
-                    // arm: arrow → the clades column edge that faces the matrix (AD pos_x → viewport edge)
-                    const double arm_end = ts_w > 0.0 ? (clades_left ? clade_right_edge : x_clade0) : line_to;
+                    // arm: arrow → the matrix's NEAR edge (right edge when the clades column is on the
+                    // right, left edge when it is on the left). Never the far edge: that is the matrix crossing.
+                    const double arm_end = ts_w > 0.0 ? (clades_left ? x_ts0 : (x_ts0 + ts_w)) : line_to;
                     pdf.line(arm_end, y0, cx, y0, GREY, 0.5);
                     pdf.line(arm_end, y1, cx, y1, GREY, 0.5);
                     // AD Clades::add_separators_to_time_series (cc/clades.cc:206-212), gated by
