@@ -205,8 +205,13 @@ class State:
         self.defines = parse_defines(args.D)
         self.lock = threading.Lock()
         self.data = None
-        # persistent PDF target written on Save (default: alongside the .tal as <stem>.pdf)
-        self.pdf_out = Path(args.pdf) if args.pdf else (Path(args.tal).parent / (Path(args.tal).stem + ".pdf"))
+        # Persistent PDF target written on Save. The default is derived from the TREE, not the
+        # .tal: tal-draw's callers name the output <tree-stem>.pdf (the round's
+        # scripts/repro/build-trees-headless.sh renders h1.asr.after-2021.tjz -> h1.asr.after-2021.pdf),
+        # and in every WHO CC round the .tal stem differs from the tree stem for h1 and h3 --
+        # h1.after-2021.tal draws h1.asr.after-2021.tjz. Taking the .tal stem wrote a PDF the report
+        # does not use, so Save looked like it did nothing.
+        self.pdf_out = Path(args.pdf) if args.pdf else (Path(args.tal).parent / (Path(args.tree).with_suffix(".pdf").name))
 
     def rerender(self):
         with self.lock:
@@ -303,7 +308,7 @@ def main():
     ap.add_argument("--tree", required=True, help="tree file (.tjz / .newick / .json) to render")
     ap.add_argument("--out", help="output dir for pdf/png/sidecar (default: temp dir, kept)")
     ap.add_argument("--image-size", type=int, default=0, help="page height in device units (default: from .tal/1000)")
-    ap.add_argument("--pdf", help="persistent PDF written on Save (default: <tal-dir>/<tal-stem>.pdf)")
+    ap.add_argument("--pdf", help="persistent PDF written on Save (default: <tal-dir>/<tree-stem>.pdf)")
     ap.add_argument("-D", action="append", default=[], help="settings define: name or name=value")
     ap.add_argument("--dpi", type=int, default=150, help="backdrop rasterisation DPI (default 150)")
     ap.add_argument("--port", type=int, default=8753)

@@ -150,6 +150,12 @@ python3 server.py --tal <path/to/x.tal> --tree <path/to/x.tjz> [--out DIR] \
 - `--tree` is the matching tree (e.g. `…/tree/h3.asr.after-2021.tjz`).
 - Outputs (pdf / png / sidecar / schema) go to `--out` (a temp dir by default) — **never** into
   the repo. Server binds `127.0.0.1` only.
+- `--pdf` is the **persistent** PDF that Save re-renders into — the one the report consumes.
+  It defaults to `<tal-dir>/<tree-stem>.pdf`, i.e. the name `tal-draw`'s callers give the tree's
+  output (`h1.asr.after-2021.tjz` → `h1.asr.after-2021.pdf`), **not** the `.tal`'s stem: in a WHO
+  CC round the two differ for h1 and h3 (`h1.after-2021.tal` draws `h1.asr.after-2021.tjz`), and
+  taking the `.tal` stem wrote a PDF nothing reads, so Save appeared to do nothing. The startup
+  banner prints `Save writes the PDF to: …` — check it matches the PDF you are looking at.
 
 A browser opens on the printed URL. Drag labels, hit **Save & re-render**, repeat.
 
