@@ -3183,12 +3183,13 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // Chosen by sweeping 0.00 / 0.10 / 0.15 / 0.22 / 0.30 on the round's h1 and comparing the
         // renders side by side: 0 has the leader touching the glyphs, 0.30 is the old distance,
         // 0.15 (1.43pt at the labels' 9.5pt) reads as pointing at the label without meeting it.
-        // Swept on the round's h1 and chosen from the renders (Sarah, 20 Sep 2026): 0.15 (1.24pt
-        // from the glyphs) read as too close, and what she wanted back was the distance the old
-        // ae leaders had — 4.08pt, though those reached a CORNER of the padded box rather than the
-        // text. 0.45 puts the drawn end 3.72pt from the letters, the nearest match on a clean
-        // mid-right run-in. (0.35 -> 2.89pt and 0.25 -> 2.07pt were the other candidates.)
-        const double leader_gap = 0.45;         // fraction of the label's font size
+        // Swept on the round's h1 and chosen from the renders (Sarah, 20 Sep 2026). The earlier
+        // sweeps that landed on 0.45 were run against the UNDER-MEASURED box of the commit before
+        // this one, which is why they read so far out: with the box now matching the glyphs, the
+        // same leader sits a good 5pt closer on the worst-measured labels, and the whole scale
+        // shifts down. 0.12 puts the drawn end 0.99pt from the letters — close, without touching.
+        // (0.05 -> 0.41pt, 0.20 -> 1.64pt, 0.30 -> 2.47pt were the other candidates.)
+        const double leader_gap = 0.12;         // fraction of the label's font size
         for (const auto& p : done) {
             // Leader from the branch midpoint (p.nx,p.ny) to the attach point (p.cx,p.cy), stopped a
             // short way short of it so it reads as pointing AT the label rather than touching it.
