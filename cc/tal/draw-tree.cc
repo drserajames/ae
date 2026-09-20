@@ -2273,22 +2273,44 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // --- candidate search + conflict-minimising local search (finds a near-branch,
             // crossing-free layout when one exists, as AD's hand layout proves it does) ---
             const double PI = 3.14159265358979323846;
-            // Where the leader meets the label. It used to be unconditionally the MID-HEIGHT of the
-            // RIGHT edge, which is correct only while the branch is cleanly to the right of the box: as
-            // soon as the branch is level with the box, or inside its horizontal span, the leader has
-            // to cross the glyphs to reach that far edge — measured on the hand-placed layouts, five
-            // labels had up to 9.2pt of leader ruled straight through their own text.
+            // Where the leader meets the label. AD is the standard, and AD picks one of THREE points
+            // by where the branch sits relative to the box — `acmacs-tal/cc/draw-aa-transitions.cc:823-836`,
+            // the `else if (tether.show)` branch, which is the one every report tree goes through:
             //
-            // Meet the box on the side FACING the branch, at the branch's own height clamped into the
-            // box. The clamp is what makes it safe: with the branch above the box the leader ends on
-            // the top edge and so never descends into it; below, it ends on the bottom edge and never
-            // rises into it; level, it runs horizontally into the side. It also degrades smoothly — a
-            // branch only just above the box still gets a nearly mid-height attach rather than jumping
-            // to the corner — and it keeps the leader on the RIGHT-hand side of the label in every
-            // case except a label placed entirely to the left of its own branch.
+            //   branch level with the box (box.top <= ay <= box.bottom)
+            //        -> the side edge FACING the branch, at the box's MID-HEIGHT
+            //   box entirely BELOW the branch   -> the centre of the box's TOP edge
+            //   box entirely ABOVE the branch   -> the centre of the box's BOTTOM edge
+            //
+            // Measured on AD's own renders of `2026-0825-tc2` (its `tree/*.asr.after-2021.pdf` were
+            // drawn by AD's `tal`, binary dated 18 Jul 2026): of the 119 single-line aa-labels across
+            // h1+h3+bvic, 118 sit within 0.15pt of one of those three points — top-centre 89,
+            // side-mid 17, bottom-centre 12 — and the x evidence agrees independently (assuming each
+            // label's case and back-solving the name width gives 5.702 pt/char, sd 0.004, across all
+            // three trees). So AD's COMMONEST attach is the top-centre, not a side edge.
+            //
+            // Do not "simplify" this to the unconditional mid-height-of-the-right-edge at
+            // `draw-aa-transitions.cc:219`. That line is real, and it IS in the code AD runs — but it
+            // belongs to AD's `auto_placed` branch, whose own comment calls it "ae-style" because it
+            // was back-ported FROM here, and a report tree's aa-labels are hand-placed from the
+            // `.tal`'s `per-node` offsets, so AD takes the `else if (tether.show)` branch for them
+            // whatever is compiled. tc2's h1 was rendered 21 Aug 2026, well after that path shipped in
+            // AD's `libtal.1.dylib` (19 Jul 23:03, one minute after the source edit), and its labels
+            // still come out three-case — which is the evidence that the report path is this one.
+            // Using `:219` here moves ae AWAY from every reference render in hand.
+            //
+            // The rule is also safe by construction, which the mid-right one is not: in each case the
+            // leader ends on the face of the box the branch is on, so it stops at the boundary instead
+            // of being ruled through the label's own glyphs to reach the far edge.
             const auto attach_pt = [](double ax, double ay, double x0, double y0, double x1, double y1, double& cx, double& cy) {
-                cx = (ax >= x0) ? x1 : x0;
-                cy = std::clamp(ay, y0, y1);
+                if (ay >= y0 && ay <= y1) {             // branch level with the box: side edge facing it
+                    cx = (x0 >= ax) ? x0 : x1;          // (AD: box.left() >= at_edge_line.x() ? left : right)
+                    cy = (y0 + y1) * 0.5;               // ...at mid-height
+                }
+                else {                                  // box clean above or below: the near horizontal edge
+                    cx = (x0 + x1) * 0.5;               // ...at its centre
+                    cy = (y1 < ay) ? y1 : y0;           // box above the branch -> bottom edge; below -> top
+                }
             };
             const auto segs_cross = [](double ax, double ay, double bx, double by, double cx, double cy, double dx, double dy) {
                 const auto o = [](double px, double py, double qx, double qy, double rx, double ry) { const double v = (qy - py) * (rx - qx) - (qx - px) * (ry - qy); return v < 0.0 ? -1 : (v > 0.0 ? 1 : 0); };
@@ -2395,7 +2417,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             for (std::size_t i = 0; i < anchors.size(); ++i) {
                 const double fs = anchors[i].fs, lineh = fs * 1.18, th = anchors[i].nlines * lineh, tw = anchors[i].tw;
                 if (anchors[i].pinned) {
-                    // one fixed candidate at the authored offset; mid-right attach (same as the auto attach).
+                    // one fixed candidate at the authored offset, taking the same AD attach rule as
+                    // the auto-placed ones (attach_pt) — a hand-dragged box gets the leader AD would
+                    // have given it, which is the whole point of matching the reference renders.
                     const double x0 = anchors[i].nx + anchors[i].off_x * (anchors[i].off_rel_h ? height : width), y0 = anchors[i].ny + anchors[i].off_y * height;
                     double cx, cy; attach_pt(anchors[i].mid_x, anchors[i].ny, x0, y0, x0 + tw, y0 + th, cx, cy);
                     cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, 0.0, 0});
@@ -2405,8 +2429,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 // Sample the LEADER itself (polar around the anchor), not the box centre: the leader's
                 // length and angle ARE the constraints, so generating them directly means every
                 // candidate satisfies #3/#4 by construction instead of being talked into it by a
-                // penalty. The attach point is the mid-height of the box's right edge (attach_pt), so
-                // fixing (angle, length) fixes the box: right edge at ax - L·cosθ, centre at ay ± L·sinθ.
+                // penalty. (angle, length) here only POSITIONS the box — it is sampled as if the
+                // leader ended at the box's right edge, mid-height. The point actually drawn is
+                // whichever of AD's three attach points `attach_pt` returns for the finished box, and
+                // that is what `emit_at` below costs; this is a sampler, not the model.
                 //   down == true  -> attach BELOW the anchor (device +y is DOWN) -> box sits lower-left
                 //                    of the branch, so the leader runs up-and-right: a NE-SW line (#3).
                 //   down == false -> the NW-SE mirror; generated too (a tight tree may have no room
@@ -3150,8 +3176,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // stacked text: one substitution per line, each vertically CENTRED in its row so the
             // glyphs fill the collision box (pdf.text anchors the glyph top at y; a cap is ~0.72*fs
             // tall, so top = row-centre - 0.36*fs). This makes the box match the rendered text, so
-            // the mid-right attach (p.cx,p.cy = box centre) meets the text mid-height, and overlap
-            // tests are computed where the text actually is.
+            // the attach point (p.cx,p.cy) lands on the edge of the GLYPHS rather than of a box that
+            // is taller than they are, and overlap tests are computed where the text actually is.
             const double lineh = p.fs * 1.18;
             const auto toks = split_ws(p.text);
             for (std::size_t i = 0; i < toks.size(); ++i)
