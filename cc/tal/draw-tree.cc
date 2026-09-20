@@ -2160,8 +2160,16 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             double mid_x = nx; // tether target = the MIDDLE of the node's horizontal edge (AD)
             { node_index_t self{*node}; if (*self != root) { const auto pp = pos.find(*tree.parent(self)); if (pp != pos.end()) mid_x = 0.5 * (dev_x(pp->second.first) + nx); } }
             const auto toks = split_ws(label.text);
+            // Measure with the face and the metric the label is actually DRAWN with: monospace
+            // (`pdf.text(..., monospace=true)` below) and the pen advance. `text_size` selects
+            // sans-serif and returns the ink extent, so it under-measured every label by an amount
+            // that depended on its characters — a median 0.36pt on this round's h1 but 5.26pt for a
+            // label whose glyphs are all narrow ones. `tw` is the collision box AND the leader's attach
+            // edge, so that error both under-counted overlaps and let the leader land inside the
+            // text: the worst-measured label was the one that looked best, because its leader was
+            // effectively 5pt closer than every other label's.
             double tw = 0.0;
-            for (const auto& t : toks) tw = std::max(tw, pdf.text_size(t, fs).first);
+            for (const auto& t : toks) tw = std::max(tw, pdf.text_size_monospace(t, fs).first);
             Anchor anchor{nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color, label.pinned, label.first, label.last, label.offset_rel_height, label.node_id, lno,
                           edge_leaf(*node, true), edge_leaf(*node, false)};
             (label.show ? anchors : hidden).push_back(std::move(anchor));
@@ -2273,22 +2281,53 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // --- candidate search + conflict-minimising local search (finds a near-branch,
             // crossing-free layout when one exists, as AD's hand layout proves it does) ---
             const double PI = 3.14159265358979323846;
-            // Where the leader meets the label. It used to be unconditionally the MID-HEIGHT of the
-            // RIGHT edge, which is correct only while the branch is cleanly to the right of the box: as
-            // soon as the branch is level with the box, or inside its horizontal span, the leader has
-            // to cross the glyphs to reach that far edge — measured on the hand-placed layouts, five
-            // labels had up to 9.2pt of leader ruled straight through their own text.
+            // Where the leader meets the label: the MID-HEIGHT of the RIGHT edge of the TEXT. Sarah's
+            // call, 20 Sep 2026, after seeing the alternatives rendered — she prefers one consistent
+            // attach to the branch-dependent one.
             //
-            // Meet the box on the side FACING the branch, at the branch's own height clamped into the
-            // box. The clamp is what makes it safe: with the branch above the box the leader ends on
-            // the top edge and so never descends into it; below, it ends on the bottom edge and never
-            // rises into it; level, it runs horizontally into the side. It also degrades smoothly — a
-            // branch only just above the box still gets a nearly mid-height attach rather than jumping
-            // to the corner — and it keeps the leader on the RIGHT-hand side of the label in every
-            // case except a label placed entirely to the left of its own branch.
-            const auto attach_pt = [](double ax, double ay, double x0, double y0, double x1, double y1, double& cx, double& cy) {
-                cx = (ax >= x0) ? x1 : x0;
-                cy = std::clamp(ay, y0, y1);
+            // With ONE exception, which is not a hedge: it applies where the rule is geometrically
+            // impossible. If the branch is level with or inside the box's own horizontal span, the
+            // right edge lies on the far side of the letters and the leader can only get there by
+            // being ruled across them. Measured on the round: **118 of 121 labels sit wholly left of
+            // their branch**, so the plain rule covers them; the 3 that do not are exactly the 3 that
+            // were drawing a leader through their own glyphs, by up to 7.65pt. Those take the near
+            // horizontal edge instead. A hand-placed label can always be nudged out of the exception.
+            //
+            // The box passed in is the COLLISION box, which is taller than the glyphs: a line owns a
+            // row of `lineh = 1.18 * fs` with its glyphs (a cap is ~0.72 * fs) centred in it, so the
+            // box edge sits `0.23 * fs` clear of the ink top and bottom. That padding does not bite
+            // HERE, and the two edges this rule uses are the two it cannot reach: the padding is
+            // vertically symmetric, so the box's mid-height IS the ink's, and `x0..x1` is already the
+            // text width, so `x1` IS the end of the glyphs. (It would bite on a top or bottom edge,
+            // which is why the branch-dependent rule this replaced had to subtract it.) The padding
+            // stays as it is — it is load-bearing in the overlap tests and the placement search.
+            //
+            // The visible gap between the leader and the letters is NOT set here: the leader is drawn
+            // short of this point by `leader_gap` at the draw site, so the placement search keeps
+            // costing the true attach point while the reader sees a small gap.
+            //
+            // For the record, since it is a deliberate divergence: this is NOT what AD draws for a
+            // report tree. AD picks one of three points by where the branch sits
+            // (`acmacs-tal/cc/draw-aa-transitions.cc:823-836`), and measured on AD's own 2026-0825-tc2
+            // renders its commonest attach is the box's TOP-CENTRE (89 of 119 single-line labels;
+            // side-mid 17, bottom-centre 12). ae drew that for two commits and it was rejected on
+            // looks. `:219` — AD's `auto_placed` path, back-ported from ae — is the unconditional
+            // mid-right this now matches, so the two engines agree there and nowhere else.
+            const auto attach_pt = [](double ax, double ay, double fs, double x0, double y0, double x1, double y1, double& cx, double& cy) {
+                if (ax > x1) {                          // the ordinary case: box wholly LEFT of the branch
+                    cx = x1;                            // the end of the glyphs
+                    cy = (y0 + y1) * 0.5;               // ...at their mid-height
+                    return;
+                }
+                // The branch is level with, or inside, the box's horizontal span, so the right edge
+                // cannot be reached without ruling the leader across the label's own letters. Meet the
+                // near HORIZONTAL edge of the ink at its centre instead — AD's own answer to the same
+                // situation (`draw-aa-transitions.cc:823-836`). The row padding DOES bite on these two
+                // edges, unlike the mid-right above where it cancels, so subtract it here.
+                const double ink = fs * 0.23;
+                cx = (x0 + x1) * 0.5;
+                cy = (y1 < ay) ? y1 - ink                // box wholly ABOVE the branch -> its bottom edge
+                               : y0 + ink;               // otherwise -> its top edge
             };
             const auto segs_cross = [](double ax, double ay, double bx, double by, double cx, double cy, double dx, double dy) {
                 const auto o = [](double px, double py, double qx, double qy, double rx, double ry) { const double v = (qy - py) * (rx - qx) - (qx - px) * (ry - qy); return v < 0.0 ? -1 : (v > 0.0 ? 1 : 0); };
@@ -2395,9 +2434,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             for (std::size_t i = 0; i < anchors.size(); ++i) {
                 const double fs = anchors[i].fs, lineh = fs * 1.18, th = anchors[i].nlines * lineh, tw = anchors[i].tw;
                 if (anchors[i].pinned) {
-                    // one fixed candidate at the authored offset; mid-right attach (same as the auto attach).
+                    // one fixed candidate at the authored offset, taking the same AD attach rule as
+                    // the auto-placed ones (attach_pt) — a hand-dragged box gets the leader AD would
+                    // have given it, which is the whole point of matching the reference renders.
                     const double x0 = anchors[i].nx + anchors[i].off_x * (anchors[i].off_rel_h ? height : width), y0 = anchors[i].ny + anchors[i].off_y * height;
-                    double cx, cy; attach_pt(anchors[i].mid_x, anchors[i].ny, x0, y0, x0 + tw, y0 + th, cx, cy);
+                    double cx, cy; attach_pt(anchors[i].mid_x, anchors[i].ny, fs, x0, y0, x0 + tw, y0 + th, cx, cy);
                     cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, 0.0, 0});
                     continue;
                 }
@@ -2405,8 +2446,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 // Sample the LEADER itself (polar around the anchor), not the box centre: the leader's
                 // length and angle ARE the constraints, so generating them directly means every
                 // candidate satisfies #3/#4 by construction instead of being talked into it by a
-                // penalty. The attach point is the mid-height of the box's right edge (attach_pt), so
-                // fixing (angle, length) fixes the box: right edge at ax - L·cosθ, centre at ay ± L·sinθ.
+                // penalty. (angle, length) here only POSITIONS the box — it is sampled as if the
+                // leader ended at the box's right edge, mid-height. The point actually drawn is
+                // whichever of AD's three attach points `attach_pt` returns for the finished box, and
+                // that is what `emit_at` below costs; this is a sampler, not the model.
                 //   down == true  -> attach BELOW the anchor (device +y is DOWN) -> box sits lower-left
                 //                    of the branch, so the leader runs up-and-right: a NE-SW line (#3).
                 //   down == false -> the NW-SE mirror; generated too (a tight tree may have no room
@@ -2419,7 +2462,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     // (cx, cy) above only positioned the box. The leader actually drawn runs to the
                     // attach point on the FINISHED box, so cost that one — otherwise the search
                     // optimises a length and angle the renderer does not draw.
-                    double tx, ty; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, tx, ty);
+                    double tx, ty; attach_pt(ax, ay, fs, x0, y0, x0 + tw, y0 + th, tx, ty);
                     const double La = std::hypot(ax - tx, ay - ty);
                     const double tha = std::atan2(std::abs(ay - ty), std::max(std::abs(ax - tx), 1e-9));
                     double base = La * K_wlen;                                                       // prefer SHORT leaders (#4)
@@ -2508,7 +2551,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                         if (pick.size() >= 40) break;
                     }
                     for (const Spot& sp : pick) {
-                        double cx, cy; attach_pt(ax, ay, sp.x0, sp.y0, sp.x0 + tw, sp.y0 + th, cx, cy);
+                        double cx, cy; attach_pt(ax, ay, fs, sp.x0, sp.y0, sp.x0 + tw, sp.y0 + th, cx, cy);
                         // A sweep spot is chosen for being FREE, not for the leader it implies, so charge
                         // it the same shape cost the leader-shaped tiers pay. Without this the sweep
                         // spots come out at whatever angle the whitespace happens to sit at — measured:
@@ -2547,7 +2590,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                         const double x0 = gx0 + xs * tw * 0.35;
                         for (int k = -12; k <= 12; ++k) {
                             const double y0 = std::clamp(ay - th * 0.5 + k * th * 1.3, gy0, gy1 - th);
-                            double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);
+                            double cx, cy; attach_pt(ax, ay, fs, x0, y0, x0 + tw, y0 + th, cx, cy);
                             if (cx > ax - gapL * 0.5) continue;               // still left of the branch
                             const double theta = std::atan2(std::abs(ay - cy), std::max(ax - cx, 1e-9));
                             const double Lr = std::hypot(ax - cx, ay - cy);
@@ -2558,7 +2601,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     }
                     if (cands[i].empty()) { // not even that fits: one position, as before
                         const double x0 = gx0, y0 = std::clamp(ay - th * 0.5, gy0, gy1 - th);
-                        double cx, cy; attach_pt(ax, ay, x0, y0, x0 + tw, y0 + th, cx, cy);
+                        double cx, cy; attach_pt(ax, ay, fs, x0, y0, x0 + tw, y0 + th, cx, cy);
                         cands[i].push_back({x0, y0, x0 + tw, y0 + th, cx, cy, 1.0e5, 3});
                     }
                 }
@@ -2710,7 +2753,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                         const double fs = anchors[i].fs, th = anchors[i].nlines * fs * 1.18, tw = anchors[i].tw;
                         const double ax = anchors[i].mid_x, ay = anchors[i].ny;
                         // which of the generator's filters, if any, would have vetoed this box
-                        double tx, ty; attach_pt(ax, ay, rx, ry, rx + tw, ry + th, tx, ty);
+                        double tx, ty; attach_pt(ax, ay, fs, rx, ry, rx + tw, ry + th, tx, ty);
                         if (tx > ax - gapL) ++rejected_side;
                         if (!box_free(rx - pad, ry - pad, tw + 2.0 * pad, th + 2.0 * pad)) ++rejected_free;
                         if (box_hits_ink(rx - pad, ry - pad, rx + tw + pad, ry + th + pad)) ++rejected_ink;
@@ -3137,21 +3180,39 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             emit_diag(fmt::to_string(rep));
         }
 
+        // Chosen by sweeping 0.00 / 0.10 / 0.15 / 0.22 / 0.30 on the round's h1 and comparing the
+        // renders side by side: 0 has the leader touching the glyphs, 0.30 is the old distance,
+        // 0.15 (1.43pt at the labels' 9.5pt) reads as pointing at the label without meeting it.
+        // Swept on the round's h1 and chosen from the renders (Sarah, 20 Sep 2026). The earlier
+        // sweeps that landed on 0.45 were run against the UNDER-MEASURED box of the commit before
+        // this one, which is why they read so far out: with the box now matching the glyphs, the
+        // same leader sits a good 5pt closer on the worst-measured labels, and the whole scale
+        // shifts down. 0.12 puts the drawn end 0.99pt from the letters — close, without touching.
+        // (0.05 -> 0.41pt, 0.20 -> 1.64pt, 0.30 -> 2.47pt were the other candidates.)
+        const double leader_gap = 0.12;         // fraction of the label's font size
         for (const auto& p : done) {
-            // Leader from the branch midpoint (p.nx,p.ny) to the attach point (p.cx,p.cy) chosen above,
-            // stopped a whisker SHORT of it: the attach point sits on the box edge, and the box is only
-            // as wide as the text metrics claim, so a line drawn right up to it butts against — and on
-            // any metric under-report, touches — the end of the glyphs. Back off along the leader.
+            // Leader from the branch midpoint (p.nx,p.ny) to the attach point (p.cx,p.cy), stopped a
+            // short way short of it so it reads as pointing AT the label rather than touching it.
+            //
+            // The gap is a LOOKS decision, settled by rendering the round's h1 at several values and
+            // choosing (Sarah, 20 Sep 2026). It is applied only here, never to `p.cx,p.cy`, so the
+            // placement search goes on costing the true attach point: the gap cannot move a label.
+            //
+            // The scale matters more than the number. `leader_gap` is a fraction of the label's own
+            // font size, so it holds its visual weight when `mrca_fs` changes between subtypes or
+            // rounds; a constant in points would look tight on a big label and gaping on a small one.
+            // Capped at a fraction of the leader itself so a very short leader is shortened, not
+            // reversed.
             if (std::abs(p.cx - p.nx) > p.fs * 0.4 || std::abs(p.cy - p.ny) > p.fs * 0.4) {
                 const double lx = p.nx - p.cx, ly = p.ny - p.cy, ll = std::hypot(lx, ly);
-                const double gap = std::min(p.fs * 0.3, ll * 0.4);
+                const double gap = std::min(p.fs * leader_gap, ll * 0.4);
                 pdf.line(p.nx, p.ny, p.cx + lx / ll * gap, p.cy + ly / ll * gap, BLACK, 0.3); // AD LabelTether{BLACK, 0.3px}; thin => renders mid-grey (was light GREY 0xBEBEBE = too pale)
             }
             // stacked text: one substitution per line, each vertically CENTRED in its row so the
             // glyphs fill the collision box (pdf.text anchors the glyph top at y; a cap is ~0.72*fs
             // tall, so top = row-centre - 0.36*fs). This makes the box match the rendered text, so
-            // the mid-right attach (p.cx,p.cy = box centre) meets the text mid-height, and overlap
-            // tests are computed where the text actually is.
+            // the attach point (p.cx,p.cy) lands on the edge of the GLYPHS rather than of a box that
+            // is taller than they are, and overlap tests are computed where the text actually is.
             const double lineh = p.fs * 1.18;
             const auto toks = split_ws(p.text);
             for (std::size_t i = 0; i < toks.size(); ++i)

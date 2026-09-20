@@ -107,6 +107,13 @@ namespace ae::draw
         // `helvetica` selects the Helvetica face (matching text_font) so callers that draw with
         // text_font size their boxes/rows from the same metrics; default keeps the sans-serif face.
         std::pair<double, double> text_size(std::string_view utf8, double font_size, bool helvetica = false);
+        // Measure a string the way `text(..., monospace=true)` will DRAW it: the monospace face, and
+        // the pen ADVANCE rather than the ink extent. `text_size` answers neither -- it selects
+        // sans-serif and returns `ext.width` -- so a caller that draws monospace and sizes its box
+        // from `text_size` gets a box narrower than its own glyphs, by an amount that depends on
+        // which characters the string happens to contain (measured on a report tree's aa-labels: a
+        // median 0.36pt too narrow but up to 5.26pt for a string of narrow glyphs).
+        std::pair<double, double> text_size_monospace(std::string_view utf8, double font_size);
         // Where this particular string's INK sits about its baseline: {above, below}, both >= 0.
         // text_size's height is the em (kateri's convention), which for the usual all-caps/digit
         // strings is a good deal taller than the glyphs; a caller that has to fit text into a tight

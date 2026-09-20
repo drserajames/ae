@@ -394,6 +394,16 @@ namespace ae::draw
         return {ext.width, ext.height};
     }
 
+    std::pair<double, double> CairoPdf::text_size_monospace(std::string_view utf8, double font_size)
+    {
+        const std::string str{utf8};
+        cairo_select_font_face(context_, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(context_, font_size);
+        cairo_text_extents_t ext;
+        cairo_text_extents(context_, str.c_str(), &ext);
+        return {ext.x_advance, ext.height};   // ADVANCE: what the drawn run occupies, bearings included
+    }
+
     std::pair<double, double> CairoPdf::text_ink_height(std::string_view utf8, double font_size, bool helvetica)
     {
         const std::string str{utf8};
