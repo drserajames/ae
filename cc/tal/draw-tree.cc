@@ -2160,8 +2160,16 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             double mid_x = nx; // tether target = the MIDDLE of the node's horizontal edge (AD)
             { node_index_t self{*node}; if (*self != root) { const auto pp = pos.find(*tree.parent(self)); if (pp != pos.end()) mid_x = 0.5 * (dev_x(pp->second.first) + nx); } }
             const auto toks = split_ws(label.text);
+            // Measure with the face and the metric the label is actually DRAWN with: monospace
+            // (`pdf.text(..., monospace=true)` below) and the pen advance. `text_size` selects
+            // sans-serif and returns the ink extent, so it under-measured every label by an amount
+            // that depended on its characters — a median 0.36pt on this round's h1 but 5.26pt for a
+            // label whose glyphs are all narrow ones. `tw` is the collision box AND the leader's attach
+            // edge, so that error both under-counted overlaps and let the leader land inside the
+            // text: the worst-measured label was the one that looked best, because its leader was
+            // effectively 5pt closer than every other label's.
             double tw = 0.0;
-            for (const auto& t : toks) tw = std::max(tw, pdf.text_size(t, fs).first);
+            for (const auto& t : toks) tw = std::max(tw, pdf.text_size_monospace(t, fs).first);
             Anchor anchor{nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color, label.pinned, label.first, label.last, label.offset_rel_height, label.node_id, lno,
                           edge_leaf(*node, true), edge_leaf(*node, false)};
             (label.show ? anchors : hidden).push_back(std::move(anchor));
