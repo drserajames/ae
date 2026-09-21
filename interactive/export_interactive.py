@@ -262,17 +262,38 @@ def passage_type(ag):
     return None
 
 
+_SUBTYPE_PREFIX = re.compile(r"^([AB]\([^)]*\)|[AB])/")
+_TREE_HASH = re.compile(r"_[0-9A-Fa-f]{8}$")
+# the name ends at the first /YYYY followed by '_' or the end; everything after is passage.
+# Prefer a year with two fields before it (LOC/ISOLATE/YYYY), so a 4-digit isolate with an
+# underscore (EXAMPLECITY/1234_25/2025) isn't taken for the year; fall back to one field.
+_TREE_NAME_END = (re.compile(r"^((?:[^/]*/){2,}?\d{4})(?:_|$)"),
+                  re.compile(r"^([^/]*/\d{4})(?:_|$)"))
+
+
 def norm_tree_name(s: str) -> str:
-    """EXAMPLEB/764/2022_OR_0BADC0DE -> EXAMPLEB/764/2022 (strip passage+seq-hash, upper)."""
-    return re.sub(r"_[A-Za-z0-9]+_[0-9A-Fa-f]{6,}$", "", s).upper()
+    """Tree leaves are NAME[_PASSAGE...]_HASH with spaces in NAME written as '_':
+    EXAMPLETOWN_EXAMPLEISLES/7/2025_OR_IR_0BADC0DE -> EXAMPLETOWN EXAMPLEISLES/7/2025.  Strip the sequence
+    hash and any number of passage tokens, then normalise as norm_chart_name does.  A leaf
+    with no /YYYY keeps its whole (hash-stripped) name: there is no way to tell where the
+    passage starts, and a name left too long can only miss, never match the wrong antigen."""
+    s = _SUBTYPE_PREFIX.sub("", _TREE_HASH.sub("", s))
+    for pat in _TREE_NAME_END:
+        m = pat.match(s)
+        if m:
+            s = m.group(1)
+            break
+    return norm_chart_name(s)
 
 
 def norm_chart_name(s: str) -> str:
-    """Strip the leading subtype prefix and uppercase, so chart names match tree tips:
-    A(H3N2)/EXAMPLEC/8/2022 -> EXAMPLEC/8/2022; B/EXAMPLECITY/269/2017 -> EXAMPLECITY/269/2017.
+    """Strip the leading subtype prefix, uppercase and write '_' as a space, so chart names
+    match tree tips: A(H3N2)/EXAMPLEC/8/2022 -> EXAMPLEC/8/2022; B/EXAMPLECITY/269/2017 ->
+    EXAMPLECITY/269/2017; EXAMPLECITY/EXAMPLE_6/2026 -> EXAMPLECITY/EXAMPLE 6/2026 (tree
+    leaves write spaces as '_', so a literal '_' can't be told apart and both sides fold it).
     Handles A(...)/, B(...)/ and a bare A/ or B/; a name with no such prefix (e.g.
     BEXAMPLE/212/2019 — country starting with B, no slash) is left untouched."""
-    return re.sub(r"^([AB]\([^)]*\)|[AB])/", "", s).upper()
+    return _SUBTYPE_PREFIX.sub("", s).upper().replace("_", " ")
 
 
 def antigen_clades(ag) -> list:
