@@ -35,6 +35,14 @@ static bool parse_point(std::string_view spec, ae::geo::GeoPoint& out)
     }
 }
 
+// User text from the --data JSON, decoded. rjson-v3 hands strings back raw, and Python's json.dumps
+// writes non-ASCII as \uXXXX, so without this a location like "\u6c5f\u82cf..." is looked up
+// literally in locdb and dropped with "location not found".
+static std::string text(const rjson::v3::value& val)
+{
+    return rjson::v3::unescape(val.to<std::string_view>());
+}
+
 // Resolve a location name to a continent-coloured GeoPoint via locdb. Returns false if unknown.
 static bool resolve_location(const ae::locdb::v3::Db& db, std::string_view name, double radius, ae::geo::GeoPoint& out)
 {
@@ -185,7 +193,7 @@ static int time_series(const std::filesystem::path& data_file, const std::string
     if (!config.is_object())
         throw std::runtime_error{"geo data: top-level must be a JSON object"};
 
-    const std::string title_prefix = config["title_prefix"].is_null() ? std::string{} : std::string{config["title_prefix"].to<std::string_view>()};
+    const std::string title_prefix = config["title_prefix"].is_null() ? std::string{} : text(config["title_prefix"]);
     const auto& periods = config["periods"];
     if (!periods.is_array())
         throw std::runtime_error{"geo data: \"periods\" must be an array"};
@@ -200,13 +208,13 @@ static int time_series(const std::filesystem::path& data_file, const std::string
     const auto& parr = periods.array();
     for (size_t pi = 0; pi < parr.size(); ++pi) {
         const auto& per = parr[pi];
-        const std::string period{per["period"].to<std::string_view>()};
+        const std::string period{text(per["period"])};
         std::vector<ae::geo::GeoPoint> points;
         if (const auto& locs = per["locations"]; locs.is_array()) {
             const auto& larr = locs.array();
             for (size_t li = 0; li < larr.size(); ++li) {
                 const auto& rec = larr[li];
-                const std::string name{rec["name"].to<std::string_view>()};
+                const std::string name{text(rec["name"])};
                 const auto& pts_in = rec["points"];
                 const auto& cats = rec["categories"];
                 if (pts_in.is_array()) { // coloring mode: one dot per antigen, pre-coloured by apply-rule, packed in rings
@@ -235,7 +243,7 @@ static int time_series(const std::filesystem::path& data_file, const std::string
                     const auto& carr = cats.array();
                     for (size_t ci = 0; ci < carr.size(); ++ci) {
                         const auto& crec = carr[ci];
-                        const std::string cname{crec["name"].to<std::string_view>()};
+                        const std::string cname{text(crec["name"])};
                         const double ccount = crec["count"].is_null() ? 1.0 : crec["count"].to<double>();
                         const std::string override_spec = crec["color"].is_null() ? std::string{} : std::string{crec["color"].to<std::string_view>()};
                         if (ccount <= 0.0)
@@ -263,7 +271,7 @@ static int time_series(const std::filesystem::path& data_file, const std::string
             }
         }
         const std::string output = prefix + period + ".pdf";
-        const std::string title = !per["title"].is_null() ? std::string{per["title"].to<std::string_view>()}
+        const std::string title = !per["title"].is_null() ? text(per["title"])
                                   : (title_prefix.empty() ? period : (title_prefix + " " + period));
         ae::geo::export_geographic_pdf(std::filesystem::path{output}, image_width, points, title, cat_colors.legend());
         fmt::print("Wrote {} ({} location(s))\n", output, points.size());
