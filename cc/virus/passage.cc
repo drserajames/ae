@@ -231,7 +231,15 @@ namespace ae::virus::passage
 
             static constexpr auto value = lexy::fold_inplace<deconstructed_t>(0, [](deconstructed_t& target, const auto& val) {
                 if constexpr (std::is_same_v<decltype(val), const part_without_name_t&>) {
-                    if (!target.elements.empty()) {
+                    if (!target.elements.empty() && target.elements.back().count.empty()) {
+                        // A bare count after an uncounted element ("OR1/MDCK3": the OR/CS branch of
+                        // part takes no count) is that element's count. Repeating the name instead
+                        // gave "OROR1/MDCK3", which reparses one "OR" longer every time.
+                        target.elements.back().count = val->count;
+                        target.elements.back().subtype = val->subtype;
+                        target.elements.back().new_lab = val->new_lab;
+                    }
+                    else if (!target.elements.empty()) {
                         // A bare count repeats the previous name ("MDCK-SIAT1 2 +HCK1" = MDCK-SIAT1,
                         // MDCK-SIAT2, HCK1), which is a new passage step, so the PREVIOUS element needs
                         // the separator - exactly as the branch below does for two adjacent elements
@@ -243,7 +251,10 @@ namespace ae::virus::passage
                     // else
                     //     fmt::print("> ae::virus::passage::grammar::passages: adding part_without_name_t to an empty passage\n");
                 }
-                else {
+                else if (!(!target.elements.empty() && val.name == "OR" && val.count.empty() && target.elements.back().name == "OR" && target.elements.back().count.empty())) {
+                    // (the guard skips an uncounted "OR" straight after another: "OROR..." is one
+                    // original specimen written repeatedly - charts written before the fix above
+                    // carry over a hundred of them - and collapsing it lets rereading heal them)
                     target.elements.push_back(val);
                     if (const auto num_parts = target.elements.size(); num_parts > 1 && target.elements[num_parts - 1].name == target.elements[num_parts - 2].name)
                         target.elements[num_parts - 2].new_lab = true;

@@ -56,6 +56,11 @@ size_t passage_parsing_test(bool verbose)
         D{"passage details: original specimen", "OR"},                                                                          //
         D{"CS", "OR"},                                                                                                          //
         D{"Clinical Specimen", "OR"},                                                                                           //
+        D{"OR1/MDCK3", "OR1/MDCK3"},                                                                                            // was "OROR1/MDCK3", one OR longer per reparse
+        D{"OROROR1/MDCK3", "OR1/MDCK3"},                                                                                        // already-inflated value heals
+        D{"OROR", "OR"},                                                                                                        //
+        D{"CS1/MDCK2", "OR1/MDCK2"},                                                                                            //
+        D{"MDCK1 2/SIAT1", "MDCK1/MDCK2/SIAT1"},                                                                                // bare count after a counted name still repeats it
         D{"10 passages - embryonated chicken eggs; Passage Line 5", "10 PASSAGES - EMBRYONATED CHICKEN EGGS; PASSAGE LINE 5"}, //
         D{"embryonated hen egg", "EMBRYONATED HEN EGG"},                                                                       //
         D{"MDCK1/MK2", "MDCK1/MK2"},                                                                                           //
