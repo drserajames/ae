@@ -114,17 +114,27 @@ Each `--chart` is `LABEL=PATH`; the label names the centre in the viewer's
 
 ## How the link is made
 
-Tree tip names (`EXAMPLEB/764/2022_OR_0BADC0DE`) and chart antigen names
-(`A(H3N2)/EXAMPLEC/8/2022`) are normalised to a common `LOCATION/ID/YEAR` key
-(passage tag + sequence hash stripped from tips; subtype prefix stripped from
-antigens). The full ~70 k-leaf seqdb tree is **pruned to the induced subtree of
+Tree tip names (`EXAMPLETOWN_EXAMPLEISLES/7/2025_OR_IR_0BADC0DE`) and chart antigen names
+(`A(H3N2)/EXAMPLETOWN EXAMPLEISLES/7/2025`) are normalised to a common uppercase
+`LOCATION/ID/YEAR` key. On tips, the sequence hash and **every** passage token after the
+`/YYYY` are stripped (none, one or several: `_OR`, `_OR_IR`, `_MDCK1/SIAT1`, …); the year is
+the first `/YYYY` with two fields before it, falling back to one, so a 4-digit isolate
+(`EXAMPLECITY/1234_25/2025`) isn't mistaken for it. Both sides then drop a subtype prefix and write
+`_` as a space, since tips encode spaces as `_` and a literal `_` in a chart name
+(`EXAMPLECITY/EXAMPLE_6/2026`) can't be told apart. A tip with no `/YYYY` (a few dozen per tree) keeps
+its whole hash-stripped name, so it can fail to match but never matches the wrong antigen.
+Tests: `test/interactive_norm_names.py`. The full ~70 k-leaf seqdb tree is **pruned to the induced subtree of
 linked tips** (degree-2 nodes collapsed) so the file stays light and every visible
 tip corresponds to an assayed strain. Clades are re-derived canonically (E1, see
 below) and each tip inherits its matched antigen's clade.
 
-For the H3N2 2026-0223 report, ~1.5 k of 2.9 k antigens (one centre) and ~2.1 k
-across all centres link to a tree tip; unmatched antigens are typically
-un-sequenced isolates or reassortants.
+Before 21 Sep 2026 only tips with exactly one passage token matched, which left most
+antigens without a sequence (grey under colour-by-position). Measured on the 2026-0921
+report's `*.asr.after-2021` trees, matched norms went 8,091 → 14,223 (H1), 3,230 → 6,646
+(H3 HI) and 3,319 → 7,802 (B/Vic); for one centre's 2025+ antigens, 70 → 1,249 of 1,281
+now carry a sequence. The rest are strains that aren't tree tips (un-sequenced isolates,
+reassortants). When several tips share a norm (egg and cell isolates of one strain), the
+first tip's sequence is used.
 
 ## Exporter data (E1)
 
@@ -133,7 +143,13 @@ The exporter prepares the report-faithful data the viewer renders:
 - **Oriented coordinates.** Each chart's projection `transformation` (parsed in-process
   from `str(projection.transformation())`, which emits the 2×2 matrix as a JSON list) is
   baked into the exported antigen/serum `x`/`y`, so the map matches the report's
-  orientation.
+  orientation. Map **y points down**, as in the report's own renderer (kateri
+  `draw_on_canvas.dart` / `draw_on_pdf.dart` scale positively), so `js/map.js`, `js/grid.js`
+  and `js/lines.js` project y to screen y unflipped. Until 21 Sep 2026 they flipped it,
+  which drew every map upside down against the report. Measured after the fix on the H1
+  pages against each centre's report clade map (per-clade glyph centroids, legend
+  excluded), both the single map and the all-centres grid: r = +1.0000 in x and y for all
+  five centres. Before the fix, y was r = −1.0000.
 - **Canonical clade colours + legend.** Clades are re-derived the way `chart_modifier`
   does — `populate_from_seqdb()` then `ae.semantic.clade.attributes()` with
   `semantic_clades.semantic_attribute_data_for_subtype()` — and each antigen's primary
@@ -165,8 +181,9 @@ Stage-2 data (E2), for the colour-by-AA and stress/error overlays:
 - **Pruned context.** Only linked tips are kept. An option to retain surrounding
   tree context (or a full-tree mode with on-demand sequence loading) is a natural
   follow-up.
-- **Name matching** is string-based (~50–70 % of antigens). Matching on the
-  seqdb sequence hash that already appears in the tip name would be more robust.
+- **Name matching** is string-based. Antigens whose strain isn't a tree tip get no
+  sequence; filling them from seqdb is a possible follow-up. Matching on the seqdb
+  sequence hash that already appears in the tip name would be more robust.
 - **Sera** are not linked to the tree (antisera have no HA sequence).
 - The x-axis is genetic distance; a time-scaled view is possible (tip dates are
   exported).

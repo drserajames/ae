@@ -128,7 +128,7 @@
     const spanX = xmax - xmin || 1, spanY = ymax - ymin || 1;
     const scale = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
     const ox = (W - spanX * scale) / 2, oy = (H - spanY * scale) / 2;
-    return { project: (x, y) => [ox + (x - xmin) * scale, oy + (ymax - y) * scale], scale };
+    return { project: (x, y) => [ox + (x - xmin) * scale, oy + (y - ymin) * scale], scale };
   }
 
   // Signed error for the titer between antigen index ai and serum index si.

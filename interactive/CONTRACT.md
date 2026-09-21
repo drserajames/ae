@@ -64,7 +64,10 @@ keeps the table ~4× smaller and lets C1 read any position the user asks for.
 tree tips to chart antigens. It is the join key throughout the bundle. The leading
 subtype prefix is stripped from chart names — `A(...)/`, `B(...)/`, or a bare `A/`/`B/`
 (so `B/EXAMPLECITY/269/2017` → `EXAMPLECITY/269/2017`), while a name with no such prefix
-(`BEXAMPLE/212/2019`) is left untouched — so B/Vic names match the bare tree tips.
+(`BEXAMPLE/212/2019`) is left untouched — so B/Vic names match the bare tree tips. `_` is
+written as a space on both sides (tips encode spaces as `_`), and on tips the sequence
+hash plus every passage token after the `/YYYY` is stripped (see README *How the link is
+made*).
 
 ---
 

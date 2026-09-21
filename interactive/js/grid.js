@@ -30,7 +30,7 @@
   let lastColorBy = null;
   let _covKey = "";         // F3: last coverage key (serum) the panels were painted for
 
-  // Fit one chart's points into a PW×PH panel (its own orientation, y flipped).
+  // Fit one chart's points into a PW×PH panel (its own orientation; map y points down).
   function fitProj(chart) {
     const all = chart.antigens.filter(a => a.x != null && a.y != null)
       .concat(chart.sera.filter(s => s.x != null && s.y != null));
@@ -49,7 +49,7 @@
     const pad = PAD_BASE + maxR + 2;
     const scale = Math.min((PW - 2 * pad) / spanX, (PH - 2 * pad) / spanY);
     const ox = (PW - spanX * scale) / 2, oy = (PH - spanY * scale) / 2;
-    return { SX: x => ox + (x - xmin) * scale, SY: y => oy + (ymax - y) * scale, scale, xmin, ymax };
+    return { SX: x => ox + (x - xmin) * scale, SY: y => oy + (y - ymin) * scale, scale, xmin, ymin };
   }
 
   // Build the cell/title/svg DOM once, install selection once per svg. The chart set
@@ -85,7 +85,7 @@
       if (proj) {
         // #7: 1-AU gridlines behind the points (static — panels don't zoom)
         const g = el("g", { class: "gridLayer", "pointer-events": "none" });
-        for (const ln of IV.Map.gridLineEls(proj.SX, proj.SY, proj.scale, proj.xmin, proj.ymax, PW, PH))
+        for (const ln of IV.Map.gridLineEls(proj.SX, proj.SY, proj.scale, proj.xmin, proj.ymin, PW, PH))
           g.appendChild(ln);
         p.svg.appendChild(g);
         p.hi = IV.Map.paintChart(p.svg, p.chart, proj, { r0: R0 }).hi;
