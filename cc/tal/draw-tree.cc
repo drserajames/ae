@@ -2132,7 +2132,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                         // authored `.tal` values, because the sidecar/drag editor matches its entry by those.
                         // The two differ whenever the node has gained leaves since the `.tal` was written, and
                         // reporting the current pair is what lets a pasted block stay valid against a rebuilt tree.
-                        std::string cur_first, cur_last; };
+                        std::string cur_first, cur_last;
+                        // Each line's OWN monospace advance, in draw order (one token per line). `tw` is
+                        // their max and stays the box width the tree-ink tests and the leader attach use;
+                        // the label-vs-label tests use these, because a short line draws no ink out to `tw`.
+                        std::vector<double> lw; };
         std::vector<Anchor> anchors;
         // Curated entries carrying `"show": false` — "this transition exists, do NOT label it".
         // They resolve to a real node like any other (so the dump lists nothing stale), but they are
@@ -2168,10 +2172,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // edge, so that error both under-counted overlaps and let the leader land inside the
             // text: the worst-measured label was the one that looked best, because its leader was
             // effectively 5pt closer than every other label's.
-            double tw = 0.0;
-            for (const auto& t : toks) tw = std::max(tw, pdf.text_size_monospace(t, fs).first);
+            std::vector<double> lw;
+            for (const auto& t : toks) lw.push_back(pdf.text_size_monospace(t, fs).first);
+            const double tw = lw.empty() ? 0.0 : *std::max_element(lw.begin(), lw.end());
             Anchor anchor{nx, ny, mid_x, fs, tw, label.offset_x, label.offset_y, static_cast<int>(toks.size()), label.text, color, label.pinned, label.first, label.last, label.offset_rel_height, label.node_id, lno,
-                          edge_leaf(*node, true), edge_leaf(*node, false)};
+                          edge_leaf(*node, true), edge_leaf(*node, false), std::move(lw)};
             (label.show ? anchors : hidden).push_back(std::move(anchor));
         }
 
@@ -2657,14 +2662,80 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 }
             }
             const std::size_t n = anchors.size();
-            const double m = mrca_fs * 0.08;  // min separation between label boxes (#7)
-            const double mt = mrca_fs * 0.05; // small clearance leaders keep from other text (#1,#2) — kept tiny so dense trees stay feasible
+            // Clearance between two labels' GLYPHS (#7), and between a leader and another label's glyphs
+            // (#1,#2). It used to be applied to the label BOX with `m` on top, and the box already
+            // carries half a line of leading above and below its glyphs — so a label hung one line's
+            // leading below another (4.55pt on h1, where Sarah saw "no collision") was reported as a
+            // conflict. Going to raw glyphs with a uniform `m` is wrong the other way: measured on the
+            // unpinned report trees it stacked 15-21 pairs per tree ~0.9pt apart, where three separate
+            // labels read as one block. What separates two labels depends on direction:
+            //   STACKED (their glyphs overlap horizontally) — at least `vsep`, one line's leading: two
+            //     labels no closer than the lines inside one label;
+            //   SIDE BY SIDE (overlap vertically) — at least `m`;
+            //   DIAGONAL (neither) — at least `m` corner to corner.
+            const double m = mrca_fs * 0.08;
+            const double mt = mrca_fs * 0.05;
+            const double vsep = mrca_fs * (1.18 - 0.72);   // line pitch minus cap height: the leading between a label's own lines
+            // A label's GLYPHS: one rect per line, that line's own advance wide (Anchor::lw, the monospace
+            // advance it is drawn with) and one cap (0.72*fs) tall, centred in its 1.18*fs row — exactly
+            // where the render loop at the end of this block puts the glyphs. The Cand BOX spans every
+            // line plus the leading between them, as wide as the widest line: a two-line label's box is
+            // solid where its ink is two strips with a 0.46*fs gap, and a short line has no ink out to
+            // the box's right edge. The box stays right for tree ink and the leader attach; label-vs-
+            // label is judged on this. Measured against the h1/h3 report pages rasterised at 600 dpi
+            // (102 lines): the rect meets the cap top and the pen origin within 0.06pt and clears the
+            // real ink by a median 0.75pt below and 0.7pt right; the one glyph that escapes it is the
+            // tail of `Q`, by ~0.3pt, well inside the clearances below.
+            // `f(x0, y0, x1, y1)` runs per line; true stops the walk.
+            const auto glyphs = [&](std::size_t i, const Cand& c, auto&& f) -> bool {
+                const double fs = anchors[i].fs, lineh = fs * 1.18;
+                for (int k = 0; k < anchors[i].nlines; ++k) {
+                    const double y0 = c.y0 + (static_cast<double>(k) + 0.5) * lineh - fs * 0.36;
+                    if (f(c.x0, y0, c.x0 + anchors[i].lw[static_cast<std::size_t>(k)], y0 + fs * 0.72)) return true;
+                }
+                return false;
+            };
+            // two glyph rects closer than the clearance for their relative direction (see `vsep`)
+            const auto rects_clash = [&](double ax0, double ay0, double ax1, double ay1, double bx0, double by0, double bx1, double by1) -> bool {
+                const double gx = std::max(bx0 - ax1, ax0 - bx1), gy = std::max(by0 - ay1, ay0 - by1); // < 0: overlap in that projection
+                if (gx < 0.0 && gy < 0.0) return true;      // glyphs on glyphs
+                if (gx < 0.0) return gy < vsep;             // stacked
+                if (gy < 0.0) return gx < m;                // side by side
+                return std::hypot(gx, gy) < m;              // diagonal
+            };
+            // The ONE definition of "text over text" (glyphs closer than rects_clash allows) and "leader
+            // over text" (a leader within `mt` of another label's glyphs). The search (pconf), the
+            // residual-conflict report and the metrics line all call these, so they agree by
+            // construction. Each starts with a box test as a cheap reject — the glyphs lie inside the box.
+            const auto ink_over_ink = [&](std::size_t i, const Cand& a, std::size_t j, const Cand& b) -> bool {
+                if (!(a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - vsep < b.y1 && b.y0 - vsep < a.y1)) return false;
+                return glyphs(i, a, [&](double ax0, double ay0, double ax1, double ay1) {
+                    return glyphs(j, b, [&](double bx0, double by0, double bx1, double by1) { return rects_clash(ax0, ay0, ax1, ay1, bx0, by0, bx1, by1); });
+                });
+            };
+            // i's leader across (or grazing) j's glyphs. The segment is the COSTED one, to the attach
+            // point; the drawn leader stops `leader_gap` short of i's own label, so this can only
+            // over-report, and only right beside i's own text.
+            const auto leader_over_ink = [&](std::size_t i, const Cand& a, std::size_t j, const Cand& b) -> bool {
+                if (!seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0 - mt, b.y0 - mt, b.x1 + mt, b.y1 + mt)) return false;
+                return glyphs(j, b, [&](double x0, double y0, double x1, double y1) { return seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, x0 - mt, y0 - mt, x1 + mt, y1 + mt); });
+            };
+            // closest approach between two labels' glyphs (0 when they touch or overlap) — printed with
+            // each text/text conflict and as the metrics line's `min glyph gap`
+            const auto glyph_gap = [&](std::size_t i, const Cand& a, std::size_t j, const Cand& b) -> double {
+                double g = std::numeric_limits<double>::infinity();
+                glyphs(i, a, [&](double ax0, double ay0, double ax1, double ay1) {
+                    glyphs(j, b, [&](double bx0, double by0, double bx1, double by1) { g = std::min(g, std::max({bx0 - ax1, ax0 - bx1, by0 - ay1, ay0 - by1, 0.0})); return false; });
+                    return false;
+                });
+                return g;
+            };
             const auto pconf = [&](std::size_t i, int ci, std::size_t j, int cj) -> int {
                 const Cand& a = cands[i][ci]; const Cand& b = cands[j][cj]; int c = 0;
-                if (a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - m < b.y1 && b.y0 - m < a.y1) ++c;                          // box overlap (+ margin)
+                if (ink_over_ink(i, a, j, b)) ++c;                                                                              // glyphs on, or too near, glyphs (#2,#7)
                 if (segs_cross(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy)) ++c; // leader crossing
-                if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0 - mt, b.y0 - mt, b.x1 + mt, b.y1 + mt)) ++c;  // i's leader over (or grazing) j's text (#1,#2)
-                if (seg_box(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0 - mt, a.y0 - mt, a.x1 + mt, a.y1 + mt)) ++c;  // j's leader over (or grazing) i's text (#1,#2)
+                if (leader_over_ink(i, a, j, b)) ++c;                                                                           // i's leader over j's glyphs (#1,#2)
+                if (leader_over_ink(j, b, i, a)) ++c;                                                                           // j's leader over i's glyphs (#1,#2)
                 return c;
             };
             const auto inv = [&](std::size_t i, int ci, std::size_t j, int cj) -> int { // labels out of branch-y order? (#2)
@@ -2677,11 +2748,29 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const double leadthr = mrca_fs * 0.5; // leaders nearer than this are pushed apart (0 distance == crossing)
             const auto psoft = [&](std::size_t i, int ci, std::size_t j, int cj) -> double {
                 const Cand& a = cands[i][ci]; const Cand& b = cands[j][cj]; double pen = 0.0;
-                const double ox = std::min(a.x1, b.x1) - std::max(a.x0, b.x0) + m; // box-overlap depth (+margin)
-                const double oy = std::min(a.y1, b.y1) - std::max(a.y0, b.y0) + m;
-                if (ox > 0.0 && oy > 0.0) pen += 6.0 * (ox / mrca_fs) * (oy / mrca_fs);                                                       // penetration AREA
-                pen += 5.0 * seg_box_len(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0 - mt, b.y0 - mt, b.x1 + mt, b.y1 + mt) / mrca_fs;  // i's leader length inside j's text
-                pen += 5.0 * seg_box_len(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0 - mt, a.y0 - mt, a.x1 + mt, a.y1 + mt) / mrca_fs;  // j's leader inside i's text
+                // Penetration AREA of each line's glyphs into each of the other's, grown by the stacked
+                // (`vsep`) and side-by-side (`m`) clearances, so labels that come near the boundary
+                // rects_clash draws feel a push apart before they reach it. Per line, not per box.
+                if (a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - vsep < b.y1 && b.y0 - vsep < a.y1) {
+                    glyphs(i, a, [&](double ax0, double ay0, double ax1, double ay1) {
+                        glyphs(j, b, [&](double bx0, double by0, double bx1, double by1) {
+                            const double ox = std::min(ax1, bx1) - std::max(ax0, bx0) + m, oy = std::min(ay1, by1) - std::max(ay0, by0) + vsep;
+                            if (ox > 0.0 && oy > 0.0) pen += 6.0 * (ox / mrca_fs) * (oy / mrca_fs);
+                            return false;
+                        });
+                        return false;
+                    });
+                }
+                // leader length inside the other label's glyphs (each line grown by `mt`)
+                const auto lead_in = [&](std::size_t p, const Cand& pc, std::size_t q, const Cand& qc) {
+                    if (!seg_box(anchors[p].mid_x, anchors[p].ny, pc.cx, pc.cy, qc.x0 - mt, qc.y0 - mt, qc.x1 + mt, qc.y1 + mt)) return;
+                    glyphs(q, qc, [&](double x0, double y0, double x1, double y1) {
+                        pen += 5.0 * seg_box_len(anchors[p].mid_x, anchors[p].ny, pc.cx, pc.cy, x0 - mt, y0 - mt, x1 + mt, y1 + mt) / mrca_fs;
+                        return false;
+                    });
+                };
+                lead_in(i, a, j, b);
+                lead_in(j, b, i, a);
                 const double d = seg_seg_d(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy);
                 if (d < leadthr) pen += 4.0 * (leadthr - d) / mrca_fs;                                                                        // leaders crossing / too close
                 return pen;
@@ -2932,21 +3021,21 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 const auto med = [](std::vector<double> v) { std::sort(v.begin(), v.end()); return v.empty() ? 0.0 : v[v.size() / 2]; };
                 std::vector<double> lr, ls, sn;
                 for (std::size_t i = 0; i < n; ++i) { lr.push_back(lead(i, ref_choice[i])); ls.push_back(lead(i, saved[i])); sn.push_back(ref_snap[i]); }
-                // Break the conflict count down by kind, and re-count it with the search's extra
-                // separation margins (m between boxes, mt around text) REMOVED — that is exactly the
-                // test the metrics line applies, so a layout that is clean there and dirty here is
-                // being rejected by the margins alone, not by a real overlap.
+                // Break the conflict count down by kind: first on the label BOX grown by the clearances
+                // (m, mt) — what the search used to treat as a conflict — then on the GLYPHS grown by
+                // the same clearances, which is what pconf and the metrics line test now. A pair in the
+                // first and not the second is padding touching padding, not a clash on the page.
                 const auto totals = [&](const char* tag, double leadmed) {
                     int bb = 0, ll = 0, lt = 0, bb0 = 0, ll0 = 0, lt0 = 0;
                     for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) {
                         const Cand& a = cands[i][choice[i]]; const Cand& b = cands[j][choice[j]];
                         if (a.x0 - m < b.x1 && b.x0 - m < a.x1 && a.y0 - m < b.y1 && b.y0 - m < a.y1) ++bb;
-                        if (a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1) ++bb0;
+                        if (ink_over_ink(i, a, j, b)) ++bb0;
                         if (segs_cross(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy)) { ++ll; ++ll0; }
                         if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0 - mt, b.y0 - mt, b.x1 + mt, b.y1 + mt)) ++lt;
                         if (seg_box(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0 - mt, a.y0 - mt, a.x1 + mt, a.y1 + mt)) ++lt;
-                        if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0, b.y0, b.x1, b.y1)) ++lt0;
-                        if (seg_box(anchors[j].mid_x, anchors[j].ny, b.cx, b.cy, a.x0, a.y0, a.x1, a.y1)) ++lt0;
+                        if (leader_over_ink(i, a, j, b)) ++lt0;
+                        if (leader_over_ink(j, b, i, a)) ++lt0;
                     }
                     // and break `base` into the terms that make it up, so a layout that loses on base
                     // says WHICH preference it lost on rather than just by how much
@@ -2970,7 +3059,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                         if (c.tier == 2) ++n_t2;
                         if (c.tier == 3) ++n_t3;
                     }
-                    fmt::print(stderr, ">>> aa-label REF totals {:<12} conflicts={:<3} (box/box={} leader/leader={} leader/text={}; with NO margins: {}/{}/{}) soft={:8.1f} inversions={:<3} base={:9.0f} scoreA={:12.0f} leader med={:.1f}pt\n",
+                    fmt::print(stderr, ">>> aa-label REF totals {:<12} conflicts={:<3} (BOX+margin: box/box={} leader/leader={} leader/text={}; GLYPHS+margin: {}/{}/{}) soft={:8.1f} inversions={:<3} base={:9.0f} scoreA={:12.0f} leader med={:.1f}pt\n",
                                tag, conf_total(), bb, ll, lt, bb0, ll0, lt0, soft_total(), inv_total(), base_total(), scoreA(), leadmed);
                     fmt::print(stderr, ">>> aa-label REF  base {:<12} length={:.0f} quad={:.0f} angle={:.0f} no-leader={:.0f} above-branch={:.0f}(n={}) leader-ink={:.0f} tier2={:.0f}(n={}) tier3-residual={:.0f}(n={})\n",
                                tag, t_len, t_quad, t_ang, t_nol, t_nw, n_nw, t_ink, t_tier, n_t2, t_res, n_t3);
@@ -2984,27 +3073,42 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 const Cand& c = cands[i][choice[i]];
                 done.push_back({anchors[i].mid_x, anchors[i].ny, c.x0, c.y1, anchors[i].fs, c.x0, c.x1, c.y0, c.y1, c.cx, c.cy, anchors[i].nlines, anchors[i].text, anchors[i].color, static_cast<int>(i)});
             }
-            { int cc = 0;
+            // Residual conflicts — each one is ink a reader can see (glyphs on or crowding glyphs, a
+            // leader across glyphs, two leaders crossing), because this reports pconf, the test the
+            // search minimised.
+            // A PINNED label has exactly one candidate, its authored spot, so a conflict between two
+            // pinned labels is not the placer's to fix: say so, and name them, or the WARNING is one
+            // nobody can act on.
+            { int cc = 0, cc_pinned = 0;
+              const auto who = [&](std::size_t k) { return anchors[k].pinned ? std::string{" PINNED"} : std::string{}; };
               for (std::size_t i = 0; i < n; ++i) for (std::size_t j = i + 1; j < n; ++j) {
                   const int c = pconf(i, choice[i], j, choice[j]);
                   if (c > 0) { cc += c;
+                      const bool both_pinned = anchors[i].pinned && anchors[j].pinned;
+                      if (both_pinned) cc_pinned += c;
                       const Cand& A = cands[i][choice[i]]; const Cand& B = cands[j][choice[j]];
                       std::string kinds;
-                      if (A.x0 - m < B.x1 && B.x0 - m < A.x1 && A.y0 - m < B.y1 && B.y0 - m < A.y1) kinds += "box/box ";
+                      if (ink_over_ink(i, A, j, B)) kinds += fmt::format("text/text (glyph gap {:.2f}pt) ", glyph_gap(i, A, j, B));
                       if (segs_cross(anchors[i].mid_x, anchors[i].ny, A.cx, A.cy, anchors[j].mid_x, anchors[j].ny, B.cx, B.cy)) kinds += "leader/leader ";
-                      if (seg_box(anchors[i].mid_x, anchors[i].ny, A.cx, A.cy, B.x0 - mt, B.y0 - mt, B.x1 + mt, B.y1 + mt)) kinds += "i-leader/j-text ";
-                      if (seg_box(anchors[j].mid_x, anchors[j].ny, B.cx, B.cy, A.x0 - mt, A.y0 - mt, A.x1 + mt, A.y1 + mt)) kinds += "j-leader/i-text ";
-                      fmt::print(stderr, ">>> aa-label placement: residual conflict [{}] — '{}' anchor({:.0f},{:.0f}) box({:.0f},{:.0f} {:.0f}x{:.0f}) tier{} cands={} vs '{}' anchor({:.0f},{:.0f}) box({:.0f},{:.0f} {:.0f}x{:.0f}) tier{} cands={}\n",
-                                 kinds, anchors[i].text, anchors[i].mid_x, anchors[i].ny, A.x0, A.y0, A.x1 - A.x0, A.y1 - A.y0, A.tier, cands[i].size(),
-                                 anchors[j].text, anchors[j].mid_x, anchors[j].ny, B.x0, B.y0, B.x1 - B.x0, B.y1 - B.y0, B.tier, cands[j].size()); } }
-              if (cc > 0) fmt::print(stderr, ">>> aa-label placement: WARNING — {} residual conflict(s) (overlaps/crossings) could not be removed\n", cc); }
+                      if (leader_over_ink(i, A, j, B)) kinds += "i-leader/j-text ";
+                      if (leader_over_ink(j, B, i, A)) kinds += "j-leader/i-text ";
+                      fmt::print(stderr, ">>> aa-label placement: residual conflict [{}] — '{}'{} anchor({:.0f},{:.0f}) box({:.0f},{:.0f} {:.0f}x{:.0f}) tier{} cands={} vs '{}'{} anchor({:.0f},{:.0f}) box({:.0f},{:.0f} {:.0f}x{:.0f}) tier{} cands={}{}\n",
+                                 kinds, anchors[i].text, who(i), anchors[i].mid_x, anchors[i].ny, A.x0, A.y0, A.x1 - A.x0, A.y1 - A.y0, A.tier, cands[i].size(),
+                                 anchors[j].text, who(j), anchors[j].mid_x, anchors[j].ny, B.x0, B.y0, B.x1 - B.x0, B.y1 - B.y0, B.tier, cands[j].size(),
+                                 both_pinned ? " — both hand-pinned: move one in the label editor" : ""); } }
+              if (cc > 0)
+                  fmt::print(stderr, ">>> aa-label placement: WARNING — {} residual conflict(s) (overlaps/crossings) could not be removed; {} of them between two hand-pinned labels, which the placer cannot move\n",
+                             cc, cc_pinned); }
             // --- placement METRICS over the final layout ------------------------------------------
             // One line per render, always printed, so a change to the placer is judged on numbers
             // rather than on how the page looks at a glance. Each counter maps to one stated
             // constraint; all four counters should read 0, and the length/angle summary says how
             // close the leaders got to "short, diagonal, never horizontal".
             {
-                int ink_hits = 0, text_ovl = 0, lead_text = 0, lead_x = 0, shallow = 0, nonsw = 0, overlong = 0, t2 = 0, t3 = 0, vax_ovl = 0;
+                int ink_hits = 0, text_ovl = 0, lead_text = 0, lead_x = 0, shallow = 0, nonsw = 0, overlong = 0, t2 = 0, t3 = 0, vax_ovl = 0, npinned = 0;
+                // closest approach between two labels' GLYPHS (0 when they touch or overlap): the
+                // clearance is now a soft preference, so this says how tight it was allowed to get
+                double ink_gap = std::numeric_limits<double>::infinity();
                 std::vector<double> lens, angs, xings;
                 lens.reserve(n); angs.reserve(n); xings.reserve(n);
                 for (std::size_t i = 0; i < n; ++i) {
@@ -3022,11 +3126,13 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     if (L > len_max) ++overlong;                                             // #4 past the length ceiling
                     if (a.tier == 2) ++t2;                                                   // left the target envelope to fit
                     if (a.tier == 3) ++t3;                                                   // no leader-shaped spot at all
+                    if (anchors[i].pinned) ++npinned;                                        // hand-placed: not the search's to move
                     for (std::size_t j = 0; j < n; ++j) {
                         if (j == i) continue;
                         const Cand& b = cands[j][choice[j]];
-                        if (j > i && a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1) ++text_ovl;                    // #2 text over text
-                        if (seg_box(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, b.x0, b.y0, b.x1, b.y1)) ++lead_text;        // #2 leader over another label's text
+                        if (j > i && ink_over_ink(i, a, j, b)) ++text_ovl;                                                     // #2 text over text: glyphs too near (rects_clash)
+                        if (leader_over_ink(i, a, j, b)) ++lead_text;                                                          // #2 leader within mt of another label's glyphs
+                        if (j > i) ink_gap = std::min(ink_gap, glyph_gap(i, a, j, b));
                         if (j > i && segs_cross(anchors[i].mid_x, anchors[i].ny, a.cx, a.cy, anchors[j].mid_x, anchors[j].ny, b.cx, b.cy)) ++lead_x; // #2 leader over leader
                     }
                 }
@@ -3036,11 +3142,11 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                                    " | leader len %page: med={:.1f} max={:.1f} over-{:.0f}px={}"
                                    " | leader angle deg: min={:.0f} med={:.0f} below-22deg={} not-NE/SW={}"
                                    " | leader crosses tree cells: med={:.0f} max={:.0f}"
-                                   " | off-envelope={} band-sweep={}\n",
+                                   " | off-envelope={} band-sweep={} | pinned={} | min glyph gap={:.2f}pt\n",
                            n, ink_hits, vax_ovl, text_ovl, lead_text, lead_x,
                            100.0 * med(lens) / height, lens.empty() ? 0.0 : 100.0 * lens.back() / height, len_max, overlong,
                            angs.empty() ? 0.0 : angs.front(), med(angs), shallow, nonsw,
-                           med(xings), xings.empty() ? 0.0 : xings.back(), t2, t3);
+                           med(xings), xings.empty() ? 0.0 : xings.back(), t2, t3, npinned, std::isfinite(ink_gap) ? ink_gap : 0.0);
             }
         }
         else {
