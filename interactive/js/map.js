@@ -144,7 +144,9 @@
     const scale = b.bScale * k;
     const ox = view.tx + k * b.ox, oy = view.ty + k * b.oy;
     const SX = x => ox + (x - b.xmin) * scale;
-    const SY = y => oy + (b.ymax - y) * scale;   // flip y (data y-up -> screen y-down)
+    // map y points DOWN, as in the report's own maps (kateri draw_on_canvas/draw_on_pdf
+    // scale positively), so it goes to screen y unflipped.
+    const SY = y => oy + (y - b.ymin) * scale;
     geom = { scale, SX, SY };
   }
   function reposition() {
@@ -163,13 +165,13 @@
   // Build the gridlines for a projection (SX/SY) + AU scale into a pane W×H.
   // Uniform light lines only (#6: no darker axis lines). Reused by the single map
   // (re-projected on zoom/pan) and by the all-centres grid panels (#7).
-  function gridLineEls(SX, SY, scale, xmin, ymax, W, H) {
+  function gridLineEls(SX, SY, scale, xmin, ymin, W, H) {
     const out = [];
     if (!(scale >= 8)) return out;          // 1 AU < 8px → too dense to be useful
     const invX = px => xmin + (px - SX(xmin)) / scale;
-    const invY = py => ymax - (py - SY(ymax)) / scale;
+    const invY = py => ymin + (py - SY(ymin)) / scale;
     const gx0 = Math.ceil(invX(0)), gx1 = Math.floor(invX(W));
-    const gy0 = Math.ceil(invY(H)), gy1 = Math.floor(invY(0));
+    const gy0 = Math.ceil(invY(0)), gy1 = Math.floor(invY(H));
     if (gx1 - gx0 > 250 || gy1 - gy0 > 250) return out;   // safety cap
     for (let gx = gx0; gx <= gx1; gx++)
       out.push(el("line", { x1: SX(gx), y1: 0, x2: SX(gx), y2: H, stroke: "#ededed", "stroke-width": 1 }));
@@ -180,7 +182,7 @@
   function drawGrid() {
     if (!gridG || !geom || !base) return;
     gridG.textContent = "";
-    for (const ln of gridLineEls(geom.SX, geom.SY, geom.scale, base.xmin, base.ymax, base.W, base.H))
+    for (const ln of gridLineEls(geom.SX, geom.SY, geom.scale, base.xmin, base.ymin, base.W, base.H))
       gridG.appendChild(ln);
   }
   // #1: keep the gridLayer the bottom-most child of #mapSvg. IV.Lines inserts its
