@@ -691,6 +691,101 @@ inline to_json::json format_to_json(const rjson::v3::value& val) noexcept
     });
 }
 
+std::string rjson::v3::unescape(std::string_view source)
+{
+    if (source.find('\\') == std::string_view::npos)
+        return std::string{source};
+
+    const auto hex4 = [source](size_t at) -> std::optional<char32_t> {
+        if (at + 4 > source.size())
+            return std::nullopt;
+        char32_t cp{0};
+        for (size_t i = at; i < at + 4; ++i) {
+            const char ch = source[i];
+            cp <<= 4;
+            if (ch >= '0' && ch <= '9')
+                cp |= static_cast<char32_t>(ch - '0');
+            else if (ch >= 'a' && ch <= 'f')
+                cp |= static_cast<char32_t>(ch - 'a' + 10);
+            else if (ch >= 'A' && ch <= 'F')
+                cp |= static_cast<char32_t>(ch - 'A' + 10);
+            else
+                return std::nullopt;
+        }
+        return cp;
+    };
+
+    const auto put_utf8 = [](std::string& out, char32_t cp) {
+        if (cp < 0x80)
+            out += static_cast<char>(cp);
+        else if (cp < 0x800) {
+            out += static_cast<char>(0xC0 | (cp >> 6));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+        else if (cp < 0x10000) {
+            out += static_cast<char>(0xE0 | (cp >> 12));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+        else {
+            out += static_cast<char>(0xF0 | (cp >> 18));
+            out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+    };
+
+    std::string result;
+    result.reserve(source.size());
+    for (size_t pos = 0; pos < source.size(); ++pos) {
+        if (source[pos] != '\\' || pos + 1 == source.size()) {
+            result += source[pos];
+            continue;
+        }
+        switch (const char esc = source[++pos]; esc) {
+            case '"': result += '"'; break;
+            case '\\': result += '\\'; break;
+            case '/': result += '/'; break;
+            case 'b': result += '\b'; break;
+            case 'f': result += '\f'; break;
+            case 'n': result += '\n'; break;
+            case 'r': result += '\r'; break;
+            case 't': result += '\t'; break;
+            case 'u':
+                if (const auto cp = hex4(pos + 1); cp.has_value()) {
+                    pos += 4;
+                    if (*cp >= 0xD800 && *cp <= 0xDBFF) { // high surrogate: needs a following \uDC00-\uDFFF
+                        if (pos + 2 < source.size() && source[pos + 1] == '\\' && source[pos + 2] == 'u') {
+                            if (const auto low = hex4(pos + 3); low.has_value() && *low >= 0xDC00 && *low <= 0xDFFF) {
+                                put_utf8(result, 0x10000 + ((*cp - 0xD800) << 10) + (*low - 0xDC00));
+                                pos += 6;
+                                break;
+                            }
+                        }
+                        put_utf8(result, 0xFFFD);
+                    }
+                    else if (*cp >= 0xDC00 && *cp <= 0xDFFF) // lone low surrogate
+                        put_utf8(result, 0xFFFD);
+                    else
+                        put_utf8(result, *cp);
+                }
+                else { // malformed \u: keep as written
+                    result += '\\';
+                    result += esc;
+                }
+                break;
+            default: // not a JSON escape: keep as written
+                result += '\\';
+                result += esc;
+                break;
+        }
+    }
+    return result;
+
+} // rjson::v3::unescape
+
+// ----------------------------------------------------------------------
+
 std::string rjson::v3::format(const value& val, output outp, size_t indent) noexcept
 {
     const auto res = ::format_to_json(val);

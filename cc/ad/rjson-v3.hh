@@ -325,6 +325,12 @@ namespace rjson::v3
     value parse_string_no_keep(std::string_view data); // assume data is kept somewhere, do not copy it
     value_read parse_file(std::string_view filename);
 
+    // The parser keeps strings as raw views into the source, escapes and all: "\u6c5f" stays six
+    // characters. Call this where a string is user text (a name to look up, a label to draw) to get
+    // it decoded to UTF-8. Not done in the parser itself: object keys are views that must not
+    // dangle, and existing callers (TAL settings regexes) rely on the raw text.
+    std::string unescape(std::string_view source);
+
     enum class output { compact, compact_with_spaces, pretty, pretty1, pretty2, pretty4, pretty8 };
 
     std::string format(const value& val, output outp = output::compact_with_spaces, size_t indent = 0) noexcept;
