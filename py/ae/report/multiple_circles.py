@@ -11,10 +11,21 @@ multiple-serum-circles addenda consume:
   * ``multiple-serum-circles-names.pdf`` — the circles map with a small top-left text list of
                                           the circled sera (overlaid via pdflatex).
 
+It works for every subtype: the by-clade front style the report embeds is named per subtype
+(H3 ``clades-v10``, H1 ``clades``, B/Vic ``clades-v2``) and is given per lab as
+``LabConfig.clade_style``, or auto-detected when the chart carries exactly one
+``clades`` / ``clades-vN`` front style. Everything subtype-specific is derived from that one
+style: the per-antigen fills colouring the circles, the background references reproducing
+the map (its own ``A`` parents minus ``-vaccines*``), the viewport (its resolved ``-reset``
+frame — the frame the serum-coverage ``sc-*`` maps use, so the circle maps have the same
+zoom as those and as each other, rather than a frame fitted to each lab's circles), and its
+clade legend with counts. A clade style, or a ``-clades*`` reference, missing from the chart raises rather
+than silently rendering every serum grey.
+
 The map itself is rendered by the **native headless renderer**
 (``ae_backend.map_draw.export_styled_map`` / ``export_styled_maps``) — no kateri process, no
 socket, Linux-capable — mirroring ``ae.report.map_renderer.NativeRenderer``. The clade
-colouring is resolved natively from the chart's own ``clades-v10`` **semantic** style
+colouring is resolved natively from the chart's own clade **semantic** style
 (``c["R"]``) — no dependency on a kateri-baked legacy plot spec — so the antigen colours match
 the report's main maps exactly. Serum circles use ae's
 ``projection().serum_circles(fold)`` theoretical radius — identical to the Rmd's
@@ -29,6 +40,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -51,13 +63,17 @@ CIRCLES_STYLE = "-mc-circles"
 PLAIN_FRONT = "mc-plain"
 CIRCLES_FRONT = "mc-circles"
 
-# References reproducing the report's by-clade map. Like the report's `clades-v10` front
-# style but WITHOUT `-vaccines-v10`: the Racmacs multiple-circles figures plot the bare
-# clade-coloured map (no enlarged/labelled vaccine markers).
-BASE_REFERENCES = ["-reset", "-clades-v10", "-new-2", "-new-1"]
+VIEWPORT_STYLE = "-mc-viewport"      # viewport-only style, referenced LAST so an override wins
 
-# The semantic style whose per-antigen fills colour the circles (== the report's by-clade map).
-CLADE_LEGACY_STYLE = "clades-v10"
+# The report's by-clade front style: `clades` (H1), `clades-v2` (B/Vic), `clades-v10` (H3), ...
+CLADE_FRONT_RE = re.compile(r"^clades(-v\d+)?$")
+# Its references carrying the enlarged/labelled vaccine markers, which the Racmacs
+# multiple-circles figures do not plot: dropped from the background references.
+VACCINES_REF_RE = re.compile(r"^-vaccines")
+# Its clade-colouring background reference (`-clades`, `-clades-v10`, ...): must exist.
+CLADES_REF_RE = re.compile(r"^-clades(-v\d+)?$")
+
+GREY = "#808080"
 
 TITLE_STYLE = {"offset": [19.0, 12.0], "origin": "tl", "size": 25, "weight": "bold",
                "slant": "normal", "face": "helvetica", "color": "black", "interline": 0.2}
@@ -81,12 +97,28 @@ class SerumPick:
 
 @dataclass
 class LabConfig:
-    """Per-lab configuration for the multiple-serum-circles figures: the lab directory,
-    title, square viewport, the curated `SerumPick`s, the circle fold, and marker sizing."""
+    """Per-lab configuration for the multiple-serum-circles figures (any subtype): the lab
+    directory, title, the curated `SerumPick`s, the report's by-clade front style, an optional
+    viewport override, the legend switch, the circle fold, and marker sizing.
+
+    `clade_style` is the front style name the report embeds for this lab (``"clades"`` for H1,
+    ``"clades-v2"`` for B/Vic, ``"clades-v10"`` for H3). None auto-detects it, which only works
+    when the chart has exactly one ``clades`` / ``clades-vN`` front style; B/Vic and H3 carry
+    several versions, so for those it must be given.
+
+    `viewport` None (the default) draws in the clade style's own resolved frame (its ``-reset``
+    ``V``) — the frame the serum-coverage ``sc-*`` maps use, so all these maps share one zoom
+    (which is also the report by-clade map's). Keep it unless there is a reason not to: a
+    per-lab override breaks that. An explicit value overrides it, in
+    the ``-reset`` convention: ``[x, y, width]`` (or ``[x, y, width, height]``) where ``x, y`` is
+    the top-left ORIGIN of kateri's recentred frame (y down), NOT a map-space centre. Use
+    `viewport_from_centre` to convert a map-space centre and width."""
     labdir: str
     title: str
-    viewport: Sequence[float]          # [center_x, center_y, width] — square map viewport
     sera: list[SerumPick]
+    clade_style: Optional[str] = None
+    viewport: Optional[Sequence[float]] = None
+    legend: bool = True                # the clade style's legend (with its counter); False hides it
     fold: float = 2.0
     serum_size: float = 26.0           # selected-serum point size (tuned vs Racmacs srSize 8)
     serum_outline_width: float = 3.0
@@ -97,8 +129,82 @@ class LabConfig:
 
 # ----------------------------------------------------------------------
 
-def legacy_fills(ace_path: Path) -> dict[int, str]:
-    """antigen index -> rendered fill hex for the ``clades-v10`` style, i.e. the Rmd's ``agFill``.
+def chart_styles(chart: cv.Chart) -> dict:
+    """The chart's semantic styles ``c["R"]`` as JSON. Read this way rather than through
+    ``chart.styles()[name]``, which silently ADDS a missing style."""
+    return json.loads(chart.export())["c"].get("R", {})
+
+
+def select_clade_style(styles: dict, requested: Optional[str] = None) -> str:
+    """The by-clade front style to reproduce: `requested` if given (it must exist), else the
+    chart's single ``^clades(-v\\d+)?$`` front style. Raises naming the candidates otherwise —
+    guessing between e.g. B/Vic's ``clades-v1`` .. ``clades-v4`` would be silently wrong."""
+    candidates = sorted(name for name in styles if CLADE_FRONT_RE.match(name))
+    if requested is not None:
+        if requested not in styles:
+            raise ValueError(f"clade style {requested!r} not on the chart (clade front styles: {candidates})")
+        return requested
+    if len(candidates) != 1:
+        raise ValueError(f"cannot auto-detect the clade style: {len(candidates)} candidates {candidates}; "
+                         f"set LabConfig.clade_style")
+    return candidates[0]
+
+
+def clade_background_references(styles: dict, clade_style: str) -> list[str]:
+    """The clade front style's own ``A`` parent references, in order, minus ``-vaccines*``:
+    the bare by-clade map (``-reset``, ``-clades…``, ``-new-2``, ``-new-1`` in the report).
+    Raises if it has no ``-clades*`` reference or that reference is not on the chart.
+    Other undefined references (``-new-1`` on a chart with no previous) are kept, tolerated by
+    the renderer exactly as in the report's own map."""
+    refs = [m["R"] for m in styles[clade_style].get("A", []) if "R" in m]
+    clade_refs = [ref for ref in refs if CLADES_REF_RE.match(ref)]
+    if not clade_refs:
+        raise ValueError(f"clade style {clade_style!r} has no -clades* reference (references: {refs})")
+    if missing := [ref for ref in clade_refs if ref not in styles]:
+        raise ValueError(f"clade style {clade_style!r} references {missing}, not on the chart")
+    return [ref for ref in refs if not VACCINES_REF_RE.match(ref)]
+
+
+def resolved_viewport(styles: dict, name: str) -> Optional[list[float]]:
+    """The viewport style `name` renders with: last-writer-wins over the same traversal as the
+    native renderer's ``resolve()`` (cc/map-draw/styled-draw.cc) — the style's own ``V``, then
+    each ``{R: parent}`` reference in order, recursively. None if nothing sets one."""
+    viewport = None
+
+    def walk(style_name: str, depth: int) -> None:
+        nonlocal viewport
+        style = styles.get(style_name)
+        if style is None or depth > 32:
+            return
+        if (v := style.get("V")) is not None:
+            viewport = list(v)
+        for m in style.get("A", []):
+            if "R" in m:
+                walk(m["R"], depth + 1)
+
+    walk(name, 0)
+    return viewport
+
+
+def viewport_from_centre(chart: cv.Chart, centre_x: float, centre_y: float, width: float,
+                         height: Optional[float] = None) -> list[float]:
+    """Convert a map-space centre + width (in the projection's transformed frame, as drawn)
+    into the ``-reset`` convention `LabConfig.viewport` takes: the recentred-frame origin
+    ``[x, y, width, height]`` (styled-draw.cc §2.2), origin = world_origin + roundedSize/2 −
+    hull_centre with roundedSize = ceil(hull_extent + 1) per axis."""
+    height = width if height is None else height
+    c = json.loads(chart.export())["c"]
+    proj = c["P"][0]
+    a, b, cc, d = proj.get("t", [1, 0, 0, 1])[:4]
+    pts = [(p[0] * a + p[1] * cc, p[0] * b + p[1] * d) for p in proj["l"] if len(p) == 2]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    ox = (centre_x - width / 2) - (min(xs) + max(xs)) / 2 + math.ceil(max(xs) - min(xs) + 1) / 2
+    oy = (centre_y - height / 2) - (min(ys) + max(ys)) / 2 + math.ceil(max(ys) - min(ys) + 1) / 2
+    return [ox, oy, width, height]
+
+
+def legacy_fills(ace_path: Path, clade_style: str) -> dict[int, str]:
+    """antigen index -> rendered fill hex for `clade_style`, i.e. the Rmd's ``agFill``.
 
     Resolved natively from the chart's SEMANTIC styles (``c["R"]``) via
     ``Chart.semantic_style_to_legacy`` — the in-process reproduction of kateri's ``setFrom``.
@@ -107,7 +213,7 @@ def legacy_fills(ace_path: Path) -> dict[int, str]:
     removes that dependency. Verified byte-equal to the old ``c["p"]`` fills across the report's
     charts (0 diffs)."""
     chart = cv.Chart(str(ace_path))
-    chart.semantic_style_to_legacy(CLADE_LEGACY_STYLE)
+    chart.semantic_style_to_legacy(clade_style)
     data = json.loads(chart.export())["c"]
     p = data.get("p", {})
     idx = p.get("p", [])
@@ -117,6 +223,8 @@ def legacy_fills(ace_path: Path) -> dict[int, str]:
         if ag_no < len(idx) and idx[ag_no] < len(palette):
             if (fill := palette[idx[ag_no]].get("F")):
                 fills[ag_no] = fill
+    if not fills:
+        raise RuntimeError(f"{ace_path}: clade style {clade_style!r} resolved no antigen fills")
     return fills
 
 
@@ -150,7 +258,11 @@ def resolve_sera(chart: cv.Chart, picks: list[SerumPick], fills: dict[int, str],
         pick.serum_no = serum_no
         pick.homologous_no = homol
         pick.radius = radius
-        pick.color = fills.get(homol, "#808080")
+        if (fill := fills.get(homol)) is None:
+            print(f">> multiple_circles: WARNING serum {serum_no} {pick.match!r}: homologous antigen {homol} "
+                  f"has no clade fill — drawn {GREY}", file=sys.stderr)
+            fill = GREY
+        pick.color = fill
         serum = chart.serum(serum_no)
         pick.designation = serum.designation()
         # Racmacs sr_names = paste(srNames, srIDs, srPassage): designation already carries
@@ -162,9 +274,22 @@ def resolve_sera(chart: cv.Chart, picks: list[SerumPick], fills: dict[int, str],
     return resolved
 
 
-def build_styles(chart: cv.Chart, cfg: LabConfig, sera: list[SerumPick]) -> None:
+def build_styles(chart: cv.Chart, cfg: LabConfig, sera: list[SerumPick], *, clade_style: str,
+                 styles: dict) -> None:
     """Build the `-mc-mark` / `-mc-circles` background styles and the `mc-plain` / `mc-circles`
-    front styles on the chart, ready for the native renderer's style selection."""
+    front styles on the chart, ready for the native renderer's style selection.
+
+    The front styles reference `clade_style`'s background references (minus ``-vaccines*``)
+    then the mark (+circles) styles, and take its legend settings. `styles` is the chart's
+    ``c["R"]`` as read before any ``mc-*`` style was added (`chart_styles`). No viewport is set
+    unless `cfg.viewport` overrides the inherited ``-reset`` frame; the override goes in a
+    viewport-only style referenced LAST, because the renderer's viewport is last-writer-wins
+    across the traversal and the front style's own ``V`` is read before its parents'."""
+    base_references = clade_background_references(styles, clade_style)
+    legend_json = styles[clade_style].get("L", {})
+    if cfg.viewport is not None:
+        chart.styles()[VIEWPORT_STYLE].viewport(*cfg.viewport)
+
     # Background: restyle the selected sera (black fill, clade outline, fat outline, enlarged).
     mark = chart.styles()[MARK_STYLE]
     mark.priority = 500
@@ -188,12 +313,32 @@ def build_styles(chart: cv.Chart, cfg: LabConfig, sera: list[SerumPick]) -> None
     for name, extra in [(PLAIN_FRONT, [MARK_STYLE]), (CIRCLES_FRONT, [MARK_STYLE, CIRCLES_STYLE])]:
         style = chart.styles()[name]
         style.priority = 1000
-        for ref in BASE_REFERENCES + extra:
+        for ref in base_references + extra + ([VIEWPORT_STYLE] if cfg.viewport is not None else []):
             style.add_modifier(parent=ref)
         style.plot_title.text.text = cfg.title
         _apply_title_style(style.plot_title, TITLE_STYLE)
-        style.legend.shown = False
-        style.viewport(*cfg.viewport)
+        if cfg.legend:
+            _apply_legend(style.legend, legend_json)
+        else:
+            style.legend.shown = False
+
+
+def _apply_legend(legend, lj: dict) -> None:
+    """Copy a style's ``L`` JSON onto a SemanticLegend (the keys chart-import.cc reads)."""
+    legend.shown = not lj.get("-", False)
+    if "C" in lj:
+        legend.add_counter = lj["C"]
+    if "z" in lj:
+        legend.show_rows_with_zero_count = lj["z"]
+    if "S" in lj:
+        legend.point_size = lj["S"]
+    if (box := lj.get("B")):
+        if "o" in box:
+            legend.box.origin = box["o"]
+        if "O" in box:
+            legend.box.offset(*box["O"])
+    if unsupported := sorted(set(lj) - {"-", "C", "z", "S", "B"}):
+        print(f">> multiple_circles: WARNING legend keys {unsupported} not copied", file=sys.stderr)
 
 
 def _apply_title_style(plot_title, ts: dict) -> None:
@@ -225,7 +370,7 @@ def render_pdfs(chart: cv.Chart, style_names: Sequence[str], out_paths: Sequence
     ``(style_name, output_path)`` pair is rendered from it in one
     ``ae_backend.map_draw.export_styled_maps`` call (chart loaded once). Each style resolves
     its own on-chart ``c["R"]`` named style + ``c["p"]`` base plot-spec — including the
-    per-lab square viewport set by ``build_styles`` — exactly as kateri's ``set_style`` +
+    viewport it inherits from the clade style (or the override set by ``build_styles``) — exactly as kateri's ``set_style`` +
     ``get_pdf(square=True)`` did. The recent map-draw serum-circle fill fix means the
     theoretical circles' translucent (``#AARRGGBB``) clade-colour fills now render natively."""
     fd, tmp_name = tempfile.mkstemp(suffix=".ace", prefix="ae-mc-native-")
@@ -307,8 +452,10 @@ def overlay_names(circles_pdf: Path, out_pdf: Path, lines: list[str], *,
 
 def generate_lab(report_dir: Path, cfg: LabConfig, *, width: float = 800.0,
                  persist_chart: Optional[bool] = None) -> dict[str, Path]:
-    """Full per-lab pipeline: load styled.ace, resolve curated sera, build styles, render
-    plain + circles natively, overlay the -names list. Returns the written PDF paths.
+    """Full per-lab pipeline, for any subtype: load styled.ace, pick the clade style
+    (`cfg.clade_style` or auto-detected), resolve curated sera and their clade fills, build
+    styles (serum-coverage frame + clade legend unless overridden), render plain + circles
+    natively, overlay the -names list. Returns the written PDF paths.
 
     `persist_chart` also saves the styled-plus-`mc-*` chart these maps were drawn from, as
     `<lab>/styled-multiple-circles.ace`. Like the serum-coverage `sc-*` styles, `mc-plain` /
@@ -322,14 +469,20 @@ def generate_lab(report_dir: Path, cfg: LabConfig, *, width: float = 800.0,
         raise FileNotFoundError(f"{ace} not found")
 
     chart = cv.Chart(str(ace))
+    styles = chart_styles(chart)
+    clade_style = select_clade_style(styles, cfg.clade_style)
+    clade_background_references(styles, clade_style)   # raises now on a missing -clades* style
+    viewport = list(cfg.viewport) if cfg.viewport is not None else resolved_viewport(styles, clade_style)
+    print(f">> multiple_circles: {cfg.labdir}: clade style {clade_style!r}, viewport {viewport}"
+          f"{' (override)' if cfg.viewport is not None else ''}", file=sys.stderr)
     # The renderer draws each circle from the serum's CIn semantic attribute (the radius); set
     # it for folds 2.0/3.0 exactly as the serum-coverage path does before styling.
     semantic.serum_circle.attributes(chart)
-    fills = legacy_fills(ace)
+    fills = legacy_fills(ace, clade_style)
     sera = resolve_sera(chart, cfg.sera, fills, cfg.fold)
     if not sera:
         raise RuntimeError(f"{cfg.labdir}: no curated sera resolved")
-    build_styles(chart, cfg, sera)
+    build_styles(chart, cfg, sera, clade_style=clade_style, styles=styles)
 
     if map_renderer.persist_render_chart_selected() if persist_chart is None else persist_chart:
         map_renderer.write_render_chart(chart, lab_path / "styled-multiple-circles.ace")
