@@ -241,6 +241,7 @@ namespace ae::tal
         bool clades_horizontal_lines{true}; // draw the two faint grey lines at each clade's top & bottom (AD horizontal_line); false = brackets only
         bool clades_arrows{true};          // filled arrowheads at both ends of each clade bracket (AD double_arrow); false = a plain line over the full band
         double clades_line_width{1.0};     // clade bracket line width (AD Line default 1.0); the grey arms stay 0.5
+        double clades_band_gap{0.0};       // gap left between brackets whose bands meet: N/2 trimmed off each bracket end, in points at a 1000 pt tall page (scaled by height/1000); 0 = full band
         // AD Clades::Parameters::report (acmacs-tal clades.hh:99) — default TRUE, as in AD: print the
         // clade-section diagnostic (per-clade band count, sizes, node ranges, inter-section gaps, and the
         // hz-section dump + sibling-intersect warnings) before the slow PDF draw. The `.tal`'s clades

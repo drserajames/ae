@@ -522,6 +522,11 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     clades["arrows"] = False
                 if isinstance(cmd.get("line-width"), (int, float)) and not isinstance(cmd.get("line-width"), bool):
                     clades["line_width"] = float(cmd["line-width"])
+                # `"band-gap": N` trims N/2 off each end of every bracket, so brackets whose bands
+                # meet in one slot stop drawing as one line. N is in points at a 1000 pt tall page
+                # (C++ default 0 = full band). Emitted only when set.
+                if isinstance(cmd.get("band-gap"), (int, float)) and not isinstance(cmd.get("band-gap"), bool):
+                    clades["band_gap"] = float(cmd["band-gap"])
                 # AD Clades::Parameters::report (acmacs-tal clades.hh:99) defaults to TRUE — the
                 # clade-section diagnostic (band counts, gaps, hz dump, intersect warnings) prints
                 # on every render. Emit only when explicitly disabled; absent => C++ default (on).

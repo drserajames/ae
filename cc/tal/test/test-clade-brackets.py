@@ -21,7 +21,11 @@ What is asserted here, on tree-hz-clade-lines.json (8 synthetic leaves, invented
   * "P-one\\nP-two" renders as two words, P-two below P-one on the same left x, the pair centred
     where the one-line label sits; with no literal backslash-n on the page (the settings reader
     decodes the JSON escape — rjson keeps strings raw);
-  * the settings-v3 translator emits the two keys only when set.
+  * `"band-gap": N` -> schema clades.band_gap: N/2 (points at a 1000 pt page, so N*H/2000 on an
+    H pt page) trimmed off EACH end of every bracket, the band itself unmoved; the trim per end is
+    clamped to a quarter of the band, so a band shorter than the gap keeps a centred bracket half
+    its height instead of inverting; the label does not move; arrowheads move in with the ends;
+  * the settings-v3 translator emits the keys only when set.
 
 Synthetic data only -- invented leaf names, dates and clade tokens.
 
@@ -163,12 +167,13 @@ def baselines(pdf: Path) -> dict[str, float]:
 
 def check_translator() -> None:
     from ae.tal.settings_v3 import translate
-    on, _ = translate({"tal": [{"N": "clades", "arrows": False, "line-width": 2.5}]})
+    on, _ = translate({"tal": [{"N": "clades", "arrows": False, "line-width": 2.5, "band-gap": 2}]})
     off, _ = translate({"tal": [{"N": "clades"}]})
     check(on.get("clades", {}).get("arrows") is False, "translator: \"arrows\": false -> clades.arrows false")
     check(on.get("clades", {}).get("line_width") == 2.5, "translator: \"line-width\" -> clades.line_width")
-    check("arrows" not in off.get("clades", {}) and "line_width" not in off.get("clades", {}),
-          "translator: neither key emitted when absent (C++ defaults apply)")
+    check(on.get("clades", {}).get("band_gap") == 2.0, "translator: \"band-gap\" -> clades.band_gap")
+    check(not {"arrows", "line_width", "band_gap"} & off.get("clades", {}).keys(),
+          "translator: no key emitted when absent (C++ defaults apply)")
 
 
 def main() -> int:
@@ -191,6 +196,14 @@ def main() -> int:
         one_line_pdf = render(tal_draw, tmpdir, "one-line", {"arrows": False}, [{"name": "P", "rotation_degrees": 0}])
         one_base = baselines(one_line_pdf)
         two_base = baselines(two_line_pdf)
+        # band-gap: 20 pt at a 1000 pt page = 16 pt on this 800 pt page, 8 off each end
+        gap_pdf = render(tal_draw, tmpdir, "gap", {"arrows": False, "band_gap": 20.0}, [{"name": "P", "rotation_degrees": 0}])
+        gap_strokes, _ = paths(gap_pdf)
+        gap_base = baselines(gap_pdf)
+        huge_strokes, _ = paths(render(tal_draw, tmpdir, "huge", {"arrows": False, "band_gap": 5000.0}))
+        arrow_gap_strokes, arrow_gap_fills = paths(render(tal_draw, tmpdir, "arrow-gap", {"band_gap": 20.0}))
+        zero_pdf = render(tal_draw, tmpdir, "zero", {"band_gap": 0.0})
+        zero_same = content(zero_pdf) == content(default_pdf)
 
     top, bottom = rows(default_strokes)
     # the clades column: right of the matrix, whose right edge is its last slot separator (the
@@ -222,6 +235,28 @@ def main() -> int:
     check(bool(plain) and default_w is not None and all(abs(s[1] - 2.5 * default_w) < 1e-3 for s in plain),
           f"line_width 2.5: stroke is 2.5x the default width {default_w} (got {sorted({s[1] for s in plain})})")
 
+    # --- band-gap ----------------------------------------------------------------------------------
+    trim = 20.0 * 800 / 2000.0
+    gap = brackets(gap_strokes, x_min)
+    check(len(gap) == 2, f"band-gap: still one line per band (got {len(gap)})")
+    for name, y0, y1 in (("P", top[2], bottom[4]), ("Q", top[6], bottom[6])):
+        hit = [s for s in gap if abs(min(s[3], s[5]) - (y0 + trim)) < 0.01 and abs(max(s[3], s[5]) - (y1 - trim)) < 0.01]
+        check(len(hit) == 1, f"band-gap 20: {name}'s line is trimmed {trim:.1f} off each end, {y0 + trim:.1f}..{y1 - trim:.1f}")
+    check("P" in gap_base and "P" in one_base and abs(gap_base["P"] - one_base["P"]) < 0.01,
+          "band-gap: the label stays where it was")
+    # clamp: a gap far bigger than any band trims a quarter of each band off each end
+    huge = brackets(huge_strokes, x_min)
+    for name, y0, y1 in (("P", top[2], bottom[4]), ("Q", top[6], bottom[6])):
+        q = (y1 - y0) / 4.0
+        hit = [s for s in huge if abs(min(s[3], s[5]) - (y0 + q)) < 0.01 and abs(max(s[3], s[5]) - (y1 - q)) < 0.01]
+        check(len(hit) == 1, f"band-gap clamp: {name} keeps the middle half of its band, {y0 + q:.1f}..{y1 - q:.1f}")
+    # with arrows on, the apexes move in by the trim
+    want = [round(v, 2) for v in (top[2] + trim, bottom[4] - trim, top[6] + trim, bottom[6] - trim)]
+    heads = [f for f in arrow_gap_fills if len(f) == 3 and min(p[0] for p in f) > x_min]
+    tips = sorted(round(min(f, key=lambda p: abs(p[0] - (max(q[0] for q in f) + min(q[0] for q in f)) / 2.0))[1], 2) for f in heads)
+    check(tips == sorted(want), f"band-gap with arrows: head apexes at the trimmed ends {sorted(want)} (got {tips})")
+    check(zero_same, "band-gap 0: page content identical to the default")
+
     # --- two-line label --------------------------------------------------------------------------
     one = [w for w in two_line_words if w[4] == "P-one"]
     two = [w for w in two_line_words if w[4] == "P-two"]
@@ -245,7 +280,7 @@ def main() -> int:
         for f in failures:
             print(f"  {f}")
         return 1
-    print("OK: clade brackets — arrows off, line width, two-line labels")
+    print("OK: clade brackets — arrows off, line width, band gap, two-line labels")
     return 0
 
 
