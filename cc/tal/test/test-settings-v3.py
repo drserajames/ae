@@ -189,6 +189,20 @@ def check_clade_slot_and_gap() -> dict:
     }
 
 
+def check_clade_band_gap() -> dict:
+    """`"band-gap"` on the clades command reaches the schema as a float, and only when set
+    (absent keeps the C++ default 0 = brackets over the full band)."""
+    on, _ = translate({"tal": [{"N": "clades", "band-gap": 2}]})
+    off, _ = translate({"tal": [{"N": "clades"}]})
+    bad, _ = translate({"tal": [{"N": "clades", "band-gap": True}]})
+    return {
+        "clades band-gap reaches the schema as a float": on.get("clades", {}).get("band_gap") == 2.0
+                                                        and isinstance(on["clades"]["band_gap"], float),
+        "clades band-gap absent -> not emitted": "band_gap" not in off.get("clades", {}),
+        "clades band-gap true (not a number) -> not emitted": "band_gap" not in bad.get("clades", {}),
+    }
+
+
 def check_eval_condition() -> dict:
     """Direct grammar checks for the if-condition evaluator (port of eval_condition)."""
     d = {"whocc": "true", "off_flag": "false", "region": "EUROPE", "blank": ""}
@@ -270,6 +284,7 @@ def main():
     checks.update(check_tip_names_and_edges())
     checks.update(check_time_series_slot())
     checks.update(check_clade_slot_and_gap())
+    checks.update(check_clade_band_gap())
     failures = [name for name, ok in checks.items() if not ok]
     if failures:
         print("FAIL:")

@@ -1658,16 +1658,30 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 // the hz-section marker's line_width 1.0. Raised 0.4 → 1.0 (clade brackets were
                 // too thin — known r6 residual). The width is clades_line_width (default 1.0 = AD).
                 const double spine_w = params.clades_line_width * devw;
+                // clades "band-gap" (points at a 1000 pt tall page, default 0): trim half the gap
+                // off EACH end of the bracket, so two bands that meet in one slot no longer draw
+                // as one unbroken line. The band itself does not move — the grey arms and matrix
+                // rules above stay on the true edges y0/y1, and the trim is symmetric so the label
+                // stays centred. A band shorter than the gap would invert; the trim per end is
+                // clamped to a quarter of the band, so a bracket never shrinks below half its
+                // band's height. Applies to the arrowed bracket too (the apexes move in).
+                double b0 = y0, b1 = y1;
+                if (params.clades_band_gap > 0.0) {
+                    const double trim = std::min(params.clades_band_gap * height / 2000.0, (y1 - y0) / 4.0);
+                    b0 += trim;
+                    b1 -= trim;
+                }
                 if (params.clades_arrows) {
-                    if (y1 - head_len > y0 + head_len)
-                        pdf.line(cx, y0 + head_len, cx, y1 - head_len, BLACK, spine_w);
-                    pdf.filled_triangle(cx, y0, cx - ahw, y0 + head_len, cx + ahw, y0 + head_len, BLACK); // top head (apex up at y0)
-                    pdf.filled_triangle(cx, y1, cx - ahw, y1 - head_len, cx + ahw, y1 - head_len, BLACK); // bottom head (apex down at y1)
+                    if (b1 - head_len > b0 + head_len)
+                        pdf.line(cx, b0 + head_len, cx, b1 - head_len, BLACK, spine_w);
+                    pdf.filled_triangle(cx, b0, cx - ahw, b0 + head_len, cx + ahw, b0 + head_len, BLACK); // top head (apex up at b0)
+                    pdf.filled_triangle(cx, b1, cx - ahw, b1 - head_len, cx + ahw, b1 - head_len, BLACK); // bottom head (apex down at b1)
                 }
                 else {
                     // Feb slide style (clades "arrows": false): a plain line over the band's full
-                    // extent, however short the band — there are no heads to leave room for.
-                    pdf.line(cx, y0, cx, y1, BLACK, spine_w);
+                    // extent (less any band-gap trim), however short the band — there are no heads
+                    // to leave room for.
+                    pdf.line(cx, b0, cx, b1, BLACK, spine_w);
                 }
             }
             {
