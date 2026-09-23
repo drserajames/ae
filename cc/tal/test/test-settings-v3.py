@@ -162,6 +162,28 @@ def check_time_series_slot() -> dict:
         "slot.width passed": ts.get("slot_width") == 0.005,
         "label.scale passed": ts.get("label_scale") == 0.9,
         "label.rotation passed": ts.get("label_rotation") == "clockwise",
+        # absent "dates"/"year-separator" emit nothing, so tal-draw's defaults (both bands, 0.5) apply
+        "no dates/year_separator by default": not {"dates_top", "dates_bottom", "year_separator"} & ts.keys(),
+        **check_time_series_dates(),
+    }
+
+
+def check_time_series_dates() -> dict:
+    """time-series "dates" (bool or {"top", "bottom"}) and "year-separator" reach the schema."""
+    def ts(**cmd):
+        return translate({"tal": [{"N": "time-series", **cmd}]})[0].get("time_series", {})
+    off, on = ts(dates=False), ts(dates=True)
+    top_only = ts(dates={"top": False, "bottom": True})
+    one_key = ts(dates={"bottom": False})
+    return {
+        "dates false -> both bands off": (off.get("dates_top"), off.get("dates_bottom")) == (False, False),
+        "dates true -> both bands on": (on.get("dates_top"), on.get("dates_bottom")) == (True, True),
+        "dates {top,bottom} per band": (top_only.get("dates_top"), top_only.get("dates_bottom")) == (False, True),
+        "dates {bottom} leaves top unset": one_key.get("dates_bottom") is False and "dates_top" not in one_key,
+        "dates non-bool ignored": not {"dates_top", "dates_bottom"} & ts(dates="no").keys(),
+        "year-separator -> float": ts(**{"year-separator": 2}).get("year_separator") == 2.0
+                                   and isinstance(ts(**{"year-separator": 2}).get("year_separator"), float),
+        "year-separator bool ignored": "year_separator" not in ts(**{"year-separator": True}),
     }
 
 
