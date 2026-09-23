@@ -116,10 +116,10 @@ def test_switch():
     saved = os.environ.pop(ChartModifier.POINT_DRAW_ORDER_ENV, None)
     try:
         check(modifier.point_draw_order() == "legend", "default draw order is legend")
-        for value in ("date", "date-new-on-top", "legend"):
+        for value in ("date", "legend"):
             os.environ[ChartModifier.POINT_DRAW_ORDER_ENV] = value
             check(modifier.point_draw_order() == value, f"AE_POINT_DRAW_ORDER={value}")
-        os.environ[ChartModifier.POINT_DRAW_ORDER_ENV] = "by-date"
+        os.environ[ChartModifier.POINT_DRAW_ORDER_ENV] = "date-new-on-top"   # the variant not chosen
         try:
             modifier.point_draw_order()
             check(False, "unknown value rejected")

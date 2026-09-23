@@ -20,10 +20,9 @@ Point drawing order — `AE_POINT_DRAW_ORDER` (one knob, read per run; see `poin
   row highest in the legend is drawn on top; within a clade, chart index order. The
   `-date-order` style is neither built nor referenced, and the output is unchanged.
 - `date`: test antigens drawn by isolation date, newest on top, via the `-date-order` style
-  (`ae.semantic.date_order`). The new-compared-to antigens (`-new-1`, `-new-2`) are absorbed
-  into date order: their outlines stay, their raise is overridden.
-- `date-new-on-top`: as `date`, but `-new-2`/`-new-1` are applied after `-date-order`, so the
-  new-compared-to antigens stay raised above it.
+  (`ae.semantic.date_order`). `-new-2`/`-new-1` are applied after `-date-order`, so the
+  new-compared-to antigens (bold outlines, when a round has them on) stay raised above it
+  (Sarah, 23 Sep 2026, chosen over absorbing them into date order).
 
 In every mode greyed older-than antigens stay lowered and vaccines stay on top of everything.
 Undated test antigens stay at the bottom of the test antigens, and reference antigens and
@@ -58,7 +57,7 @@ class ChartModifier (conference_data_base.ConferenceData):
     "Base class for adding semantic styles to the chart"
 
     POINT_DRAW_ORDER_ENV = "AE_POINT_DRAW_ORDER"
-    POINT_DRAW_ORDERS = ("legend", "date", "date-new-on-top")
+    POINT_DRAW_ORDERS = ("legend", "date")
 
     def __init__(self, chart: ae_backend.chart_v3.Chart | Path | None = None, serology_provider=None):
         """Load or accept the chart to style: an `ae_backend.chart_v3.Chart`, a `Path` to an
@@ -139,15 +138,11 @@ class ChartModifier (conference_data_base.ConferenceData):
                         """Reference list for one by-clade front style: reset (zoom), clade,
                         new-2/new-1, and the vaccines style (no-label for info maps).
                         `before_vaccines` inserts extra references just before vaccines.
-                        `-date-order` goes after the clade style and before
+                        `-date-order` goes after the clade style and before new-2/new-1,
+                        so new-compared-to antigens stay raised above it, and so before
                         `before_vaccines` (the grey styles) — see `point_draw_order`."""
-                        new_refs = ["-new-2", "-new-1"]
-                        match self.point_draw_order():
-                            case "date":
-                                new_refs = new_refs + ["-date-order"]
-                            case "date-new-on-top":
-                                new_refs = ["-date-order"] + new_refs
-                        refs = [f"-reset{zoom_variant}", f"-{clade_style_name}", *new_refs, (vaccines_style_name + "-no-label") if info else vaccines_style_name]
+                        date_order = [] if self.point_draw_order() == "legend" else ["-date-order"]
+                        refs = [f"-reset{zoom_variant}", f"-{clade_style_name}", *date_order, "-new-2", "-new-1", (vaccines_style_name + "-no-label") if info else vaccines_style_name]
                         if before_vaccines:
                             refs[-1:-1] = before_vaccines
                         return refs
@@ -200,8 +195,8 @@ class ChartModifier (conference_data_base.ConferenceData):
         semantic.time_series.style_old_new(chart=self.chart, old_size=self.ts_old_size(), new_size=self.ts_new_size(), priority=self.style_priority("-ts-old-new"))
 
     def point_draw_order(self) -> str:
-        """How map points are layered: `legend` (default, today's order), `date` or
-        `date-new-on-top` — see the module docstring. Read from the `AE_POINT_DRAW_ORDER`
+        """How map points are layered: `legend` (default, today's order) or `date` — see the
+        module docstring. Read from the `AE_POINT_DRAW_ORDER`
         environment variable so it can be switched per run; a round's chart subclass may
         override it instead."""
         order = (os.environ.get(self.POINT_DRAW_ORDER_ENV) or "legend").strip().lower() or "legend"
