@@ -925,7 +925,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const Clade& clade = clade_sections[plan.rank];
             const auto style_it = params.clade_styles.find(clade.name);
             const CladeStyle* style = style_it != params.clade_styles.end() ? &style_it->second : nullptr;
-            const std::string display = (style && !style->display_name.empty()) ? style->display_name : clade.name;
+            std::string display = (style && !style->display_name.empty()) ? style->display_name : clade.name;
+            for (auto nl = display.find('\n'); nl != std::string::npos; nl = display.find('\n', nl + 2))
+                display.replace(nl, 1, "\\n"); // keep the line as the .tal would write it
             fmt::format_to(app, "Clade {} ({})    {{\"name\": \"{}\", \"display_name\": \"{}\", \"section-inclusion-tolerance\": {:.0f}, \"section-exclusion-tolerance\": {:.0f}, \"show\": {}}}\n",
                            clade.name, plan.bands.size(), clade.name, display, plan.incl, plan.excl, !(style && style->hide));
             for (std::size_t bno{0}; bno < plan.bands.size(); ++bno) {
@@ -1012,6 +1014,23 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             return it->second.display_name;
         return name;
     };
+    // A display name may hold "\n" to stack a clade label over several lines (Feb slide style:
+    // the new name with the old nomenclature on the line below, never "new (old)"). Only the horizontal clade-column
+    // label stacks; everywhere else the lines are joined back with a space.
+    const auto clade_label_lines = [](const std::string& text) -> std::vector<std::string> {
+        std::vector<std::string> lines;
+        std::string::size_type start{0};
+        for (auto nl = text.find('\n'); nl != std::string::npos; start = nl + 1, nl = text.find('\n', start))
+            lines.push_back(text.substr(start, nl - start));
+        lines.push_back(text.substr(start));
+        return lines;
+    };
+    const auto clade_label_one_line = [&](const std::string& text) -> std::string {
+        std::string joined{text};
+        std::replace(joined.begin(), joined.end(), '\n', ' ');
+        return joined;
+    };
+    constexpr double clade_label_line_spacing = 1.15; // baseline-to-baseline, in font sizes
 
     // --- time series ---
     TimeSeries time_series;
@@ -1242,7 +1261,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         }
         else {
             for (const std::size_t k : visible_clades)
-                legend_items.emplace_back(clade_display_for(clade_sections[k].name), clade_color_for(k, clade_sections[k].name));
+                legend_items.emplace_back(clade_label_one_line(clade_display_for(clade_sections[k].name)), clade_color_for(k, clade_sections[k].name));
         }
     }
 
@@ -1522,10 +1541,12 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             label_cy[i] = (row_top(static_cast<double>(bd.first_v)) + row_top(static_cast<double>(bd.last_v) + 1.0)) / 2.0 + pl.offset_y * height;
             const double fs = std::max(slot_px * pl.label_scale, 2.5);
             const std::string nm = clade_display_for(clade_sections[pl.rank].name);
-            const double tw = pdf.text_size(nm, fs).first;
+            const double tw = pdf.text_size(clade_label_one_line(nm), fs).first;
             // half text-extent along the leaf axis. text_size under-reports the rendered rotated
             // advance by ~10-12%, so use 0.6·tw (not tw/2) or two adjacent sub-labels still touch.
-            label_half[i] = (pl.rotation == 0) ? fs * 0.6 : tw * 0.6;
+            // A horizontal label stacked over n lines is (n-1) line pitches taller.
+            const double extra_lines = static_cast<double>(clade_label_lines(nm).size() - 1);
+            label_half[i] = (pl.rotation == 0) ? fs * 0.6 + extra_lines * clade_label_line_spacing * fs / 2.0 : tw * 0.6;
         }
         {
             std::unordered_map<int, std::vector<std::size_t>> by_slot;
@@ -1635,11 +1656,19 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 // P1: AD (clades.hh:23-36, parameters.hh:14) draws the arrow SPINE at the Line
                 // default width — BLACK ~1.0px (vs the 0.5px grey arms). Same 1:1 px→pt scale as
                 // the hz-section marker's line_width 1.0. Raised 0.4 → 1.0 (clade brackets were
-                // too thin — known r6 residual).
-                if (y1 - head_len > y0 + head_len)
-                    pdf.line(cx, y0 + head_len, cx, y1 - head_len, BLACK, 1.0 * devw);
-                pdf.filled_triangle(cx, y0, cx - ahw, y0 + head_len, cx + ahw, y0 + head_len, BLACK); // top head (apex up at y0)
-                pdf.filled_triangle(cx, y1, cx - ahw, y1 - head_len, cx + ahw, y1 - head_len, BLACK); // bottom head (apex down at y1)
+                // too thin — known r6 residual). The width is clades_line_width (default 1.0 = AD).
+                const double spine_w = params.clades_line_width * devw;
+                if (params.clades_arrows) {
+                    if (y1 - head_len > y0 + head_len)
+                        pdf.line(cx, y0 + head_len, cx, y1 - head_len, BLACK, spine_w);
+                    pdf.filled_triangle(cx, y0, cx - ahw, y0 + head_len, cx + ahw, y0 + head_len, BLACK); // top head (apex up at y0)
+                    pdf.filled_triangle(cx, y1, cx - ahw, y1 - head_len, cx + ahw, y1 - head_len, BLACK); // bottom head (apex down at y1)
+                }
+                else {
+                    // Feb slide style (clades "arrows": false): a plain line over the band's full
+                    // extent, however short the band — there are no heads to leave room for.
+                    pdf.line(cx, y0, cx, y1, BLACK, spine_w);
+                }
             }
             {
                 const std::string name = clade_display_for(clade.name);
@@ -1652,11 +1681,18 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 // an ae-only addition Sarah has now reverted; pass halo_width 0 so the background is
                 // transparent (matches AD).
                 if (plan.rotation == 0) {
-                    const double tw0 = pdf.text_size(name, clade_fs).first;
-                    // horizontal: right of the arrow normally, left of it when clades sit left of the matrix
-                    const double tx = clades_left ? (cx - ahw - clade_fs * 0.1 - tw0 + plan.offset_x * height)
-                                                  : (cx + ahw + clade_fs * 0.1 + plan.offset_x * height);
-                    pdf.text(tx, center_y + clade_fs * 0.32, name, clade_fs, BLACK, /*center=*/false, /*monospace=*/false, /*halo_width=*/0.0, WHITE);
+                    // horizontal: right of the arrow normally, left of it when clades sit left of the matrix.
+                    // A multi-line name stacks top-to-bottom, the block centred on the band; lines share
+                    // the left edge (right of the bracket) or the right edge (left of it).
+                    const auto lines = clade_label_lines(name);
+                    const double pitch = clade_label_line_spacing * clade_fs;
+                    const double first_y = center_y + clade_fs * 0.32 - pitch * static_cast<double>(lines.size() - 1) / 2.0;
+                    for (std::size_t ln = 0; ln < lines.size(); ++ln) {
+                        const double tw0 = pdf.text_size(lines[ln], clade_fs).first;
+                        const double tx = clades_left ? (cx - ahw - clade_fs * 0.1 - tw0 + plan.offset_x * height)
+                                                      : (cx + ahw + clade_fs * 0.1 + plan.offset_x * height);
+                        pdf.text(tx, first_y + pitch * static_cast<double>(ln), lines[ln], clade_fs, BLACK, /*center=*/false, /*monospace=*/false, /*halo_width=*/0.0, WHITE);
+                    }
                 }
                 else {
                     // clockwise (top→bottom), vertically centred; placed BESIDE the double-arrow with a
@@ -1667,8 +1703,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     // was mis-aimed; AD does NOT overlap, so reverted to the beside-the-arrow offset.)
                     const double tx = clades_left ? (cx - ahw - clade_fs * 1.05 + plan.offset_x * height)
                                                   : (cx + ahw + clade_fs * 0.1 + plan.offset_x * height);
-                    const double tw = pdf.text_size(name, clade_fs).first;
-                    pdf.text_rotated(tx, center_y - tw / 2.0, name, clade_fs, BLACK, 90.0, /*halo_width=*/0.0, WHITE);
+                    // rotated labels do not stack: a multi-line name is drawn on one line
+                    const std::string one_line = clade_label_one_line(name);
+                    const double tw = pdf.text_size(one_line, clade_fs).first;
+                    pdf.text_rotated(tx, center_y - tw / 2.0, one_line, clade_fs, BLACK, 90.0, /*halo_width=*/0.0, WHITE);
                 }
             }
         }
