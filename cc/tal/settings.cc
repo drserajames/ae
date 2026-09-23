@@ -82,6 +82,8 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         params.clades_label_scale = get_double(clades["label_scale"], 0.0);
         params.clades_width_ratio = get_double(clades["width_ratio"], 0.0);
         params.clades_horizontal_lines = get_bool(clades["horizontal_lines"], true);
+        params.clades_arrows = get_bool(clades["arrows"], true);
+        params.clades_line_width = get_double(clades["line_width"], 1.0);
         // AD Clades::Parameters::report defaults to TRUE (acmacs-tal clades.hh:99) — the clade-section
         // diagnostic prints unless the .tal's clades command says `"report": false`.
         params.clades_report = get_bool(clades["report"], true);
@@ -120,7 +122,8 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
             if (std::string name = get_string(entry["name"]); !name.empty())
                 params.clade_styles.insert_or_assign(std::move(name), CladeStyle{
                     .color = get_string(entry["color"]),
-                    .display_name = get_string(entry["display_name"]),
+                    // decoded (rjson keeps escapes raw): a "\n" in a display name stacks the label
+                    .display_name = rjson::v3::unescape(get_string(entry["display_name"])),
                     .hide = get_bool(entry["hide"]),
                     // Fractional and negative slots are meaningful (see CladeStyle::slot); only an
                     // ABSENT `slot` means "auto-place", so the value is never truncated or clamped.

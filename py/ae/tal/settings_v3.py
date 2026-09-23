@@ -515,6 +515,13 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                 # Emit only when explicitly disabled; absent => C++ default (drawn).
                 if cmd.get("horizontal-lines") is False:
                     clades["horizontal_lines"] = False
+                # Feb slide-style brackets: `"arrows": false` draws each bracket as a plain line
+                # (no arrowheads), `"line-width"` sets its width (C++ default 1.0 = AD's Line).
+                # Both emitted only when set, so absent keeps today's report brackets.
+                if cmd.get("arrows") is False:
+                    clades["arrows"] = False
+                if isinstance(cmd.get("line-width"), (int, float)) and not isinstance(cmd.get("line-width"), bool):
+                    clades["line_width"] = float(cmd["line-width"])
                 # AD Clades::Parameters::report (acmacs-tal clades.hh:99) defaults to TRUE — the
                 # clade-section diagnostic (band counts, gaps, hz dump, intersect warnings) prints
                 # on every render. Emit only when explicitly disabled; absent => C++ default (on).
