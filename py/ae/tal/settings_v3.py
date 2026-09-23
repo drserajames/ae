@@ -597,6 +597,21 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                             ts["label_scale"] = float(label["scale"])
                         if isinstance(label.get("rotation"), str):
                             ts["label_rotation"] = label["rotation"]
+                # "dates": false hides both date-label bands (Mon/YY above and below the matrix)
+                # and lets the matrix grow into their space; {"top": bool, "bottom": bool} picks
+                # a band. The words stay in the PDF text layer, invisibly. Emitted only when set,
+                # so an absent key keeps tal-draw's default (both bands drawn).
+                dates = cmd.get("dates")
+                if isinstance(dates, bool):
+                    ts["dates_top"] = ts["dates_bottom"] = dates
+                elif isinstance(dates, dict):
+                    for band in ("top", "bottom"):
+                        if isinstance(dates.get(band), bool):
+                            ts[f"dates_{band}"] = dates[band]
+                # "year-separator": stroke width of the slot separator at a year boundary
+                # (default 0.5, the width of every other separator)
+                if isinstance(cmd.get("year-separator"), (int, float)) and not isinstance(cmd.get("year-separator"), bool):
+                    ts["year_separator"] = float(cmd["year-separator"])
                 # the matrix is coloured by the time-series color-by (AD reports use continent;
                 # ae has the exact AD continent palette). Set the leaf colour mode accordingly.
                 if cmd.get("color-by") == "continent":

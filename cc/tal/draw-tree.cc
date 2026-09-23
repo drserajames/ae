@@ -1191,10 +1191,33 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // top reserve 0.022 → 0.012 (title still fits just above the tree), bottom reserve 0.075 → 0.066
     // (still clears the rotated date labels + viridis date-key). Keep these two literals in sync with
     // the top_reserve / bottom_reserve block below (marker_treeH must equal the tree band height).
-    const double marker_treeH = height - 2.0 * (0.008 * height)
-        - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
-                                        : (params.title.empty() ? 0.0 : 0.035 * height))
-        - ((ts_w > 0.0 || dash_w > 0.0) ? (params.hz_section_labels ? 0.012 * height : 0.017 * height) : 0.0);
+    // The two bands themselves are computed here (and used below) so the two can't drift apart.
+    // time-series "dates": a HIDDEN date band gives its reserve to the matrix, keeping only what
+    // else draws in it: above the matrix the title (band kept whole) and the dash-bar position /
+    // legend labels (kept at their own height); below it the sig-page date-colour key (kept whole).
+    double top_reserve_v = (ts_w > 0.0 || dash_w > 0.0)
+        ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
+        : (params.title.empty() ? 0.0 : 0.035 * height);
+    double bottom_reserve_v = (ts_w > 0.0 || dash_w > 0.0)
+        ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
+        : 0.0;
+    if (ts_w > 0.0 && !params.time_series_dates_top && params.title.empty()) {
+        double need = 0.0; // height the dash-bar labels take above the matrix (same fonts as the dash-bar block)
+        if (dash_w > 0.0) {
+            const double leg_fs = std::clamp(dash_col_w_ref * 0.42, 5.0, 9.0);
+            const double pos_fs = std::clamp(dash_col_w_ref * 0.5, 6.0, 11.0);
+            for (const auto& bar : params.dash_bars) {
+                if (!bar.legend.empty())
+                    need = std::max(need, static_cast<double>(bar.legend.size()) * leg_fs * 1.25 + leg_fs * 0.6);
+                else if (bar.pos >= 1)
+                    need = std::max(need, leg_fs * 0.6 + pos_fs);
+            }
+        }
+        top_reserve_v = need > 0.0 ? std::clamp(need + 1.0 - 0.008 * height, 0.0, top_reserve_v) : 0.0;
+    }
+    if (ts_w > 0.0 && !params.time_series_dates_bottom && !params.hz_section_labels)
+        bottom_reserve_v = 0.0;
+    const double marker_treeH = height - 2.0 * (0.008 * height) - top_reserve_v - bottom_reserve_v;
     const double grey_gap = 0.005 * marker_treeH;   // AD time-series → grey-bar gap (was the full 0.012·width)
 
     // The gaps actually consumed on the right differ from `gap * n_right`: the grey dash bar
@@ -1288,12 +1311,9 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // r8: 0.066 was still ~2.5x what AD leaves — measured, AD's matrix ink ends at 97.5% of page
     // height (its grid bottom is 98.9%, i.e. flush) while ae stopped at 90.1%, ~40pt short on
     // every page. The band only has to clear the date-colour key strip under the matrix.
-    const double bottom_reserve = (ts_w > 0.0 || dash_w > 0.0)
-        ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
-        : 0.0;
-    const double top_reserve = (ts_w > 0.0 || dash_w > 0.0)
-        ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
-        : (params.title.empty() ? 0.0 : 0.035 * height);
+    // (computed above with marker_treeH; a hidden time-series date band shrinks its reserve)
+    const double bottom_reserve = bottom_reserve_v;
+    const double top_reserve = top_reserve_v;
 
     // --- vertical (shared) + tree horizontal transforms ---
     const double height_units = layout.height > 0.0 ? layout.height : 1.0;
@@ -1781,8 +1801,15 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             const double y = row_top(static_cast<double>(leaf_below));
             pdf.line(x_ts0, y, x_ts0 + ts_w, y, rule.color, rule.width * devw);
         }
-        for (std::size_t i = 0; i <= n_slots; ++i) // vertical separators (AD SlotSeparator default = BLACK, 0.5px)
-            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, BLACK, 0.5 * devw);
+        // vertical separators (AD SlotSeparator default = BLACK, 0.5px). An interior separator whose
+        // slot starts a new year (its "YYYY" differs from the previous slot's) is drawn
+        // time-series "year-separator" wide instead (default 0.5, i.e. no different).
+        for (std::size_t i = 0; i <= n_slots; ++i) {
+            const bool year_boundary = i > 0 && i < n_slots
+                                       && time_series.slots[i].first.substr(0, 4) != time_series.slots[i - 1].first.substr(0, 4);
+            const double sep_w = year_boundary ? params.time_series_year_separator : 0.5;
+            pdf.line(x_ts0 + static_cast<double>(i) * slot_w, top, x_ts0 + static_cast<double>(i) * slot_w, bottom, BLACK, sep_w * devw);
+        }
         const double dash_w = std::clamp(vstep * 0.5, 0.15, 2.5); // thin marks (AD line_width 0.1) -> more white space
         for (const auto& node : layout.leaves) {
             const Leaf& leaf = tree.leaf(node_index_t{node.node});
@@ -1849,9 +1876,64 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 pdf.rectangle(x_ts0 + (static_cast<double>(i) / nseg) * ts_w, key_y, ts_w / nseg + 0.6, key_h, col, 0.0, col);
             }
         }
+        // time-series "dates": a hidden band's words are still written — slides/build.py finds the
+        // year columns from these Mon/YY word pairs in the PDF text layer — but in #FE000000
+        // (1/255 opaque, as the info trees' "@@" leaf markers), and INSIDE the matrix edge rather
+        // than in the band, whose space the matrix has taken. Same x as a drawn word; y mirrors
+        // the band across the matrix edge (top: tokens read down from top + 2; bottom: they end
+        // at bottom - 2).
+        const bool show_top = params.time_series_dates_top, show_bottom = params.time_series_dates_bottom;
+        const Color hidden_text{0xFE000000};
+        // a hidden token whose on-page extent starts `from` (downward) — both rotations
+        const auto hidden_token = [&](double lx, double from, const std::string& token) {
+            if (clockwise)
+                pdf.text_rotated(lx, from, token, slot_fs, hidden_text, 90.0);
+            else
+                pdf.text_rotated(lx, from + pdf.text_size(token, slot_fs).first, token, slot_fs, hidden_text, -90.0);
+        };
         for (std::size_t i = 0; i < n_slots; ++i) {
             const std::string& slot_first = time_series.slots[i].first;     // "YYYY-MM-DD"
             const double lx = x_ts0 + (static_cast<double>(i) + 0.5) * slot_w + xoff;
+            if (!show_top || !show_bottom) {
+                // at least one band hidden: draw the visible band(s) as usual, write the hidden one invisibly
+                std::vector<std::string> tokens; // top-to-bottom reading order
+                if (yearly)
+                    tokens.push_back(slot_first.substr(0, 4));
+                else {
+                    int mm = 0;
+                    if (slot_first.size() >= 7) { try { mm = std::stoi(slot_first.substr(5, 2)); } catch (...) { mm = 0; } }
+                    const std::string mon = (mm >= 1 && mm <= 12) ? kMonth3[mm - 1] : (slot_first.size() >= 7 ? slot_first.substr(5, 2) : std::string{});
+                    const std::string yy = slot_first.size() >= 4 ? slot_first.substr(2, 2) : std::string{};
+                    if (clockwise) { tokens.push_back(mon); tokens.push_back(yy); }
+                    else tokens.push_back(fmt::format("{} {}", mon, yy));
+                }
+                double extent = 0.0; // the stacked tokens' length down the page
+                for (std::size_t t = 0; t < tokens.size(); ++t)
+                    extent += pdf.text_size(tokens[t], slot_fs).first + (t > 0 ? pair_gap : 0.0);
+                for (const bool top_band : {true, false}) {
+                    if (top_band ? show_top : show_bottom) {
+                        // visible band: exactly the positions of the both-bands code below
+                        if (yearly || !clockwise)
+                            pdf.text_rotated(lx, top_band ? top_anchor_y : bottom_anchor_y, tokens[0], slot_fs, BLACK, angle);
+                        else if (top_band) {
+                            pdf.text_rotated(lx, top - 2.0 - year_w - pair_gap - month_w, tokens[0], slot_fs, BLACK, 90.0);
+                            pdf.text_rotated(lx, top - 2.0 - year_w, tokens[1], slot_fs, BLACK, 90.0);
+                        }
+                        else {
+                            pdf.text_rotated(lx, bottom + 2.0, tokens[0], slot_fs, BLACK, 90.0);
+                            pdf.text_rotated(lx, bottom + 2.0 + month_w + pair_gap, tokens[1], slot_fs, BLACK, 90.0);
+                        }
+                    }
+                    else {
+                        double from = top_band ? top + 2.0 : bottom - 2.0 - extent;
+                        for (const auto& token : tokens) {
+                            hidden_token(lx, from, token);
+                            from += pdf.text_size(token, slot_fs).first + pair_gap;
+                        }
+                    }
+                }
+                continue;
+            }
             if (yearly) {
                 const std::string yy4 = slot_first.substr(0, 4);
                 pdf.text_rotated(lx, bottom_anchor_y, yy4, slot_fs, BLACK, angle);

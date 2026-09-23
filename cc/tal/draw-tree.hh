@@ -273,6 +273,9 @@ namespace ae::tal
         double time_series_slot_width{0.0};         // slot width as a fraction of height (AD slot.width); 0 = fallback
         double time_series_label_scale{0.0};        // date-label size = slot_width * scale * height; 0 = derived
         std::string time_series_label_rotation{};   // "clockwise" | "anticlockwise" (date reading direction)
+        bool time_series_dates_top{true};           // draw the date band above the matrix; false = words kept invisible (text layer only), band space given to the matrix
+        bool time_series_dates_bottom{true};        // same for the band below the matrix
+        double time_series_year_separator{0.5};     // stroke width of the slot separator at a year boundary (others stay 0.5)
         std::string title{};         // page title (top, centred); empty = none
         bool legend{false};          // draw a clade colour legend (bottom row)
         bool geo_inset{false};       // draw the continent-coloured world-map inset (lower-left); doubles as the continent legend (acmacs-tal LegendContinentMap)

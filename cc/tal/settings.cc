@@ -101,6 +101,9 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
         params.time_series_slot_width = get_double(time_series["slot_width"], 0.0);
         params.time_series_label_scale = get_double(time_series["label_scale"], 0.0);
         params.time_series_label_rotation = get_string(time_series["label_rotation"]);
+        params.time_series_dates_top = get_bool(time_series["dates_top"], true);
+        params.time_series_dates_bottom = get_bool(time_series["dates_bottom"], true);
+        params.time_series_year_separator = get_double(time_series["year_separator"], 0.5);
     }
     if (const auto& legend = config["legend"]; legend.is_object())
         params.legend = get_bool(legend["show"]);
