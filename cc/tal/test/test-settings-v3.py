@@ -122,6 +122,51 @@ def check_dash_bar_colors() -> dict:
     }
 
 
+def check_dash_bar_side() -> dict:
+    """`"side": "left"` on a dash-bar / dash-bar-aa-at (ae extension): emitted only for "left",
+    so default and "right" bars translate exactly as before; a left bar still counts towards the
+    page width, and the extra tal-draw column gap it costs (0.012 of the page width, paid only
+    while bars remain on the right too) grows the page instead of coming out of the tree."""
+    def bars_of(extra_left: dict, extra_right: dict) -> list:
+        tal = {"tal": [
+            {"N": "dash-bar-aa-at", "id": "p3", "pos": 3, **extra_right},
+            {"N": "dash-bar", "id": "grp", "nodes": [{"select": {"aa": ["3A"]}, "color": "black"}], **extra_left},
+        ]}
+        schema, warnings = translate(tal)
+        return schema.get("dash_bars", []), warnings
+
+    default_bars, _ = bars_of({}, {})
+    right_bars, _ = bars_of({"side": "right"}, {"side": "right"})
+    left_bars, _ = bars_of({"side": "left"}, {})
+    odd_bars, odd_warn = bars_of({"side": "middle"}, {})
+
+    def ratio(sides: tuple) -> float:
+        prog = [{"N": "margins", "left": 0.01, "right": 0.01},
+                {"N": "tree", "width-to-height-ratio": 0.40}]
+        for i, side in enumerate(sides):
+            cmd = {"N": "dash-bar", "id": f"b{i}", "width-to-height-ratio": 0.01,
+                   "nodes": [{"select": {"aa": ["3A"]}, "color": "black"}]}
+            if side:
+                cmd["side"] = side
+            prog.append(cmd)
+        schema, _ = translate({"tal": prog})
+        return schema.get("width_to_height_ratio")
+
+    # (.40 + 2 * .01 + .01 + .01) / 1.05 = .44 / 1.05
+    all_right = ratio((None, None))
+    base = round(0.44 / 1.05, 6)
+    return {
+        "dash-bar side: absent -> no side key": all("side" not in b for b in default_bars),
+        "dash-bar side: explicit right -> no side key (schema unchanged)": right_bars == default_bars,
+        "dash-bar side: left emitted on the left bar only": [b.get("side") for b in left_bars] == [None, "left"],
+        "dash-bar side: unknown value warns and stays right": "side" not in odd_bars[1] and any("side" in w for w in odd_warn),
+        "dash-bar side: all-right page width unchanged": all_right == base,
+        "dash-bar side: all-left page width = all-right (bars counted, gaps cancel)": ratio(("left", "left")) == base,
+        "dash-bar side: mixed page grows by the left column gap (0.012 of width)":
+            ratio(("left", None)) == round(0.44 / 1.05 / (1.0 - 0.012), 6),
+    }
+
+
 def check_tip_names_and_edges() -> dict:
     """node-id-size enables per-leaf tip names; continent colouring — whether asked for by
     the `tree` element or by time-series/clades-whocc — must NOT set color_edges.
@@ -303,6 +348,7 @@ def main():
     checks.update(check_curated_method_still_computes())
     checks.update(check_seq_id_passthrough())
     checks.update(check_dash_bar_colors())
+    checks.update(check_dash_bar_side())
     checks.update(check_tip_names_and_edges())
     checks.update(check_time_series_slot())
     checks.update(check_clade_slot_and_gap())

@@ -253,6 +253,7 @@ ae::tal::TreeDrawParameters ae::tal::load_draw_settings(const std::filesystem::p
                     }
                 }
             }
+            bar.left = get_string(entry["side"]) == "left"; // absent / "right" -> today's band
             params.dash_bars.push_back(std::move(bar));
         }
     }
