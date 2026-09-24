@@ -152,6 +152,10 @@ _GAP_DEFAULT_WIDTH = 0.05         # Gap(tal, 0.05)
 _TS_SLOT_DEFAULT_WIDTH = 0.01     # TimeSeries::SlotParameters.width
 _CLADES_SLOT_DEFAULT_WIDTH = 0.02 # Clades::SlotParameters.width
 _HZ_MARKER_DEFAULT_WIDTH = 0.005  # builtin hz-section-marker width-to-height-ratio
+# tal-draw's inter-column gap (cc/tal/draw-tree.cc `gap = 0.012 * width`) — a FRACTION OF THE
+# PAGE WIDTH, not of the height. A `"side": "left"` dash-bar column costs one of these between it
+# and the tree root that no `.tal` element accounts for (see _compute_layout_width).
+_TAL_DRAW_COLUMN_GAP = 0.012
 
 
 def _as_number(value: Any, defines: dict) -> float | None:
@@ -216,6 +220,7 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list,
     # every un-`id`'d gap is its own element. Summing blindly instead double-counts the whole
     # column set and inflates the page by ~1 tree width.
     elements: dict = {}   # (name, id) -> width contribution
+    bar_sides: dict = {}  # (name, id) -> "left"/"right" for the dash bars tal-draw draws (last init wins, as widths)
     gap_seq = 0
 
     def _put(name: str, cmd: dict, value: float) -> None:
@@ -294,8 +299,14 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list,
                     slot_width = _as_number(slot.get("width"), defines) or _CLADES_SLOT_DEFAULT_WIDTH
                     _put(name, cmd, 2 * slot_width)
             elif name in ("dash-bar", "dash-bar-aa-at", "dash-bar-clades"):
+                # A bar is counted whichever side it is drawn on: a `"side": "left"` bar moves
+                # from the right-hand band to its own column left of the tree, it does not leave
+                # the page (dropping it here would hand its width to the tree's budget the wrong
+                # way round — the page shrinks and the tree absorbs the difference).
                 w = _as_number(cmd.get("width-to-height-ratio"), defines)
                 _put(name, cmd, w if w is not None else _DASH_BAR_DEFAULT_WIDTH)
+                if name != "dash-bar-clades":
+                    bar_sides[(name, str(cmd.get("id", "")))] = "left" if cmd.get("side") == "left" else "right"
             elif name == "hz-section-marker":
                 w = _as_number(cmd.get("width-to-height-ratio"), defines)
                 _put(name, cmd, w if w is not None else _HZ_MARKER_DEFAULT_WIDTH)
@@ -318,7 +329,30 @@ def _compute_layout_width(tal: dict, defines: dict, warnings: list,
             if hook not in visited and hook in tal and isinstance(tal[hook], list):
                 walk(tal[hook])
     width = sum(elements.values())
-    return (width + margins["left"] + margins["right"]) / (1.0 + margins["top"] + margins["bottom"])
+    ratio = (width + margins["left"] + margins["right"]) / (1.0 + margins["top"] + margins["bottom"])
+    # `"side": "left"` dash bars (ae extension). Their widths are already in the sum above; what
+    # is not is the extra tal-draw column gap between the left column and the tree root, paid only
+    # while bars remain on the right too (if every bar moves left, the right band's gap goes with
+    # them and the two cancel). That gap is a fraction of the page WIDTH, so grow the page by it:
+    # ratio' = ratio + gap * ratio'. Without this the tree alone pays for the gap.
+    sides = set(bar_sides.values())
+    if sides == {"left", "right"}:
+        ratio /= (1.0 - _TAL_DRAW_COLUMN_GAP)
+    return ratio
+
+
+def _dash_bar_side(cmd: dict, bar: dict, warnings: list) -> None:
+    """ae extension (not in AD): `"side": "left"` on a dash-bar / dash-bar-aa-at draws that bar in
+    its own column LEFT of the tree (page margin | left bars | gap | tree root) instead of in the
+    dash-bar band right of the time series. Emitted only for "left", so the default ("right", or
+    no key) leaves the schema — and the drawing — exactly as before."""
+    side = cmd.get("side")
+    if side is None or side == "right":
+        return
+    if side == "left":
+        bar["side"] = "left"
+    else:
+        warnings.append(f"{cmd.get('N')}: side {side!r} not understood (\"left\" or \"right\") — drawn on the right")
 
 
 def _dash_bar_legend(labels) -> list:
@@ -782,6 +816,7 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     legend = _dash_bar_legend(cmd.get("labels"))
                     if legend:
                         bar["legend"] = legend
+                    _dash_bar_side(cmd, bar, warnings)
                     schema.setdefault("dash_bars", []).append(bar)
             elif name == "dash-bar":
                 # AD's clade/aa-select bar (dash-bar.cc): each leaf is coloured by the FIRST
@@ -800,6 +835,7 @@ def translate(tal: dict, defines: dict | None = None, program: str = "tal") -> t
                     legend = _dash_bar_legend(cmd.get("labels"))
                     if legend:
                         bar["legend"] = legend
+                    _dash_bar_side(cmd, bar, warnings)
                     schema.setdefault("dash_bars", []).append(bar)
             elif name == "dash-bar-style":
                 # Global geometry override for the dash-bar columns: pack the columns tighter

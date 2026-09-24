@@ -1118,7 +1118,8 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // 1 + 0.05 until this was fixed. The page is height*ratio; the band comes out of the tree.
     const double width = width_base;
 
-    // --- horizontal layout: hz-marker column | tree | labels | time-series column | dash bars | clades column ---
+    // --- horizontal layout: [left dash bars | gap] | tree | labels | time-series column | dash bars | clades column ---
+    //     (left dash bars = `"side": "left"` bars, outermost on the left so the aa-label band stays against the root)
     //     The clade column is the RIGHTMOST (acmacs-tal draws it past the time-series, flipped to
     //     the page's right edge), so the bracket/label staircase sits in the right margin like AD. ---
     const double margin = 0.03 * width;
@@ -1180,7 +1181,15 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         : 0.0;
     const double dash_col_w_ref = 0.022 * drawable_w;                  // DEFAULT dash-bar column pitch (legend/label fonts scale off this, so narrower columns don't shrink the text)
     const double dash_col_w = (params.dash_column_width_ratio > 0.0 ? params.dash_column_width_ratio : 0.022) * drawable_w; // width of one dash-bar column
-    const double dash_w = static_cast<double>(params.dash_bars.size()) * dash_col_w;
+    // Bars with "side": "left" get their own column between the page margin and the tree root
+    // (margin | left bars | gap | aa-label band | tree); only the rest go in the right-hand
+    // dash-bar band. `dash_w` is that RIGHT band, so with no left bars everything below is as before.
+    const auto n_dash_left = static_cast<std::size_t>(std::count_if(params.dash_bars.begin(), params.dash_bars.end(), [](const DashBarAAAt& bar) { return bar.left; }));
+    const double dash_w = static_cast<double>(params.dash_bars.size() - n_dash_left) * dash_col_w;
+    const double dash_w_left = static_cast<double>(n_dash_left) * dash_col_w;
+    const double dash_w_all = dash_w + dash_w_left;                     // every bar, either side (legend/reserve sizing)
+    const double left_bars_w = dash_w_left > 0.0 ? dash_w_left + gap : 0.0; // left column + its gap to the tree
+    const double tree_x0 = margin + left_bars_w;                        // left edge of the tree band (the root, before aa_left/hz_w)
     const int n_right = (label_w > 0.0) + (clade_w > 0.0) + (ts_w > 0.0) + (dash_w > 0.0)
                         + (grey_dash_w > 0.0) + (hz_marker_w > 0.0);
     // AD (conf/tal.json:93-105) sets the grey matches-chart-antigen dash-bar just 0.005·treeH to the
@@ -1195,15 +1204,15 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     // time-series "dates": a HIDDEN date band gives its reserve to the matrix, keeping only what
     // else draws in it: above the matrix the title (band kept whole) and the dash-bar position /
     // legend labels (kept at their own height); below it the sig-page date-colour key (kept whole).
-    double top_reserve_v = (ts_w > 0.0 || dash_w > 0.0)
+    double top_reserve_v = (ts_w > 0.0 || dash_w_all > 0.0)
         ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
         : (params.title.empty() ? 0.0 : 0.035 * height);
-    double bottom_reserve_v = (ts_w > 0.0 || dash_w > 0.0)
+    double bottom_reserve_v = (ts_w > 0.0 || dash_w_all > 0.0)
         ? (params.hz_section_labels ? 0.012 * height : 0.017 * height)
         : 0.0;
     if (ts_w > 0.0 && !params.time_series_dates_top && params.title.empty()) {
         double need = 0.0; // height the dash-bar labels take above the matrix (same fonts as the dash-bar block)
-        if (dash_w > 0.0) {
+        if (dash_w_all > 0.0) {
             const double leg_fs = std::clamp(dash_col_w_ref * 0.42, 5.0, 9.0);
             const double pos_fs = std::clamp(dash_col_w_ref * 0.5, 6.0, 11.0);
             for (const auto& bar : params.dash_bars) {
@@ -1231,10 +1240,10 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
               + (grey_dash_w > 0.0 ? grey_gap : 0.0)
               - (hz_marker_w > 0.0 ? gap * 0.25 : 0.0)
         : gap * static_cast<double>(n_right - (clade_w > 0.0 ? 1 : 0)) + (clade_w > 0.0 ? clade_gap : 0.0);
-    const double tree_w = drawable_w - aa_left - hz_w - label_w - clade_w - ts_w - dash_w - grey_dash_w - hz_marker_w - gaps_right;
+    const double tree_w = drawable_w - left_bars_w - aa_left - hz_w - label_w - clade_w - ts_w - dash_w - grey_dash_w - hz_marker_w - gaps_right;
 
 
-    double cursor = margin + aa_left + tree_w;
+    double cursor = tree_x0 + aa_left + tree_w;
     double x_label0{0.0}, x_clade0{0.0}, x_ts0{0.0}, x_dash0{0.0}, x_grey0{0.0}, x_hzmark0{0.0};
     if (params.clades_before_time_series) {
         // AD layout-with-maps order (left→right past the tree): labels, clades, time-series
@@ -1320,7 +1329,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     const double max_cum = layout.max_cumulative > 0.0 ? layout.max_cumulative : 1.0;
     const double vstep = (height - 2.0 * vmargin - top_reserve - bottom_reserve) / height_units;
     const double hstep = tree_w / max_cum;
-    const auto dev_x = [&](double cumulative) { return margin + aa_left + hz_w + cumulative * hstep; };
+    const auto dev_x = [&](double cumulative) { return tree_x0 + aa_left + hz_w + cumulative * hstep; };
     const auto dev_y = [&](double vertical_offset) { return vmargin + top_reserve + (vertical_offset - 0.5) * vstep; };
     // TOP EDGE of the row of `layout.leaves[leaf_index]` = AD LayoutElement::pos_y_above
     // (acmacs-tal cc/layout.cc:253, vertical_step * (cumulative_vertical_offset - vertical_offset/2)).
@@ -1375,7 +1384,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         // At the ROOT (margin + aa_left), not the page margin: with a label band the root is inset,
         // and a title left at the margin would sit out in the band beside the tree instead of above
         // it. With no band (aa_left == 0) this is exactly the old position.
-        pdf.text(margin + aa_left, std::max(title_y, 1.0), params.title, title_fs, BLACK, /*center=*/false);
+        pdf.text(tree_x0 + aa_left, std::max(title_y, 1.0), params.title, title_fs, BLACK, /*center=*/false);
     }
 
     // No horizontal rules are drawn here. Every rule that crosses the time-series matrix — whether
@@ -1967,7 +1976,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     }
 
     // --- dash-bar-aa-at columns: per-leaf dash coloured by the amino acid at a position ---
-    if (dash_w > 0.0) {
+    if (dash_w_all > 0.0) {
         // AD's "Ana" distinct palette (acmacs-base color-distinct.cc): the frequency-order
         // fallback colours (most common aa -> #03569b dark blue, then dark red, yellow, …).
         static const std::array<Color, 16> freq_palette{
@@ -1977,9 +1986,17 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
         const double dash_len = dash_col_w * (params.dash_fill_fraction > 0.0 ? params.dash_fill_fraction : 0.6);
         const double dash_lw = std::clamp(vstep * 0.6, 0.15, 2.5); // thin marks, AD-like white space
         const double pos_fs = std::clamp(dash_col_w_ref * 0.5, 6.0, 11.0); // font off the DEFAULT column width, not the (tunable) actual one
+        std::size_t n_placed_left{0}, n_placed_right{0}; // column index within each side, in program order
         for (std::size_t b = 0; b < params.dash_bars.size(); ++b) {
             const DashBarAAAt& bar = params.dash_bars[b];
-            const double col_x = x_dash0 + (static_cast<double>(b) + 0.5) * dash_col_w;
+            const double col_x = bar.left ? margin + (static_cast<double>(n_placed_left++) + 0.5) * dash_col_w
+                                          : x_dash0 + (static_cast<double>(n_placed_right++) + 0.5) * dash_col_w;
+            // A left bar's column sits on the page margin, so a legend label wider than the margin
+            // plus the column would be centred off the page: nudge it right until its left edge is
+            // on the page. Right-band bars keep the plain column centre (unchanged).
+            const auto legend_x = [&](const std::string& text, double fs) {
+                return bar.left ? std::max(col_x, pdf.text_size(text, fs).first * 0.5 + 1.0) : col_x;
+            };
             std::unordered_map<char, Color> aa_color; // resolved aa -> colour (for the legend swatches)
             if (bar.pos >= 1) {
                 // pos-based (dash-bar-aa-at): colour each leaf by its aa at pos. AD assigns EVERY
@@ -2057,12 +2074,13 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                     if (resolved != aa_color.end())
                         c = resolved->second;                                       // actual draw colour (AD)
                     else { try { if (!item.color.empty()) c = Color{item.color}; } catch (const std::exception&) {} }
-                    pdf.text(col_x, ly, item.text, leg_fs, c, /*center=*/true);
+                    pdf.text(legend_x(item.text, leg_fs), ly, item.text, leg_fs, c, /*center=*/true);
                     ly += leg_fs * 1.25;
                 }
             }
             else if (bar.pos >= 1) {
-                pdf.text(col_x, bar_top - leg_gap - pos_fs * 0.5, fmt::format("{}", bar.pos), pos_fs, BLACK, /*center=*/true);
+                const std::string pos_text = fmt::format("{}", bar.pos);
+                pdf.text(legend_x(pos_text, pos_fs), bar_top - leg_gap - pos_fs * 0.5, pos_text, pos_fs, BLACK, /*center=*/true);
             }
         }
     }
@@ -2170,7 +2188,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
     if (params.geo_inset) {
         const double box_w = 0.134 * height;
         const double box_h = box_w / continent_map_aspect();
-        const double box_x = margin;
+        const double box_x = tree_x0; // right of any left dash bars (== margin without them)
         const double box_y = 0.972 * height - box_h;
         draw_continent_inset(pdf, box_x, box_y, box_w, box_h);
     }
@@ -2317,7 +2335,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // Rasterise the tree's ink into a coarse occupancy grid, then for each label search
             // outward from its anchor for the nearest free rectangle (preferring the AD-style
             // left side and a short tether), reserving each placed box so labels never overlap.
-            const double gx0 = margin, gx1 = dev_x(max_cum);                 // tree band (left of the matrix)
+            const double gx0 = tree_x0, gx1 = dev_x(max_cum);                // tree band (left of the matrix; right of any left dash bars)
             const double gy0 = vmargin + top_reserve, gy1 = height - vmargin - bottom_reserve;
             // Occupancy-grid resolution. This is only a FAST PRE-FILTER — box_hits_ink runs right after
             // it and is the exact test — so the cell can be as fine as memory allows, and it needs to
@@ -2401,7 +2419,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
                 return false;
             };
             // keep labels clear of the top-left title and the positioned strain-name labels
-            if (!params.title.empty()) mark_box(margin + aa_left, gy0, 0.18 * width, mrca_fs * 1.6);
+            if (!params.title.empty()) mark_box(tree_x0 + aa_left, gy0, 0.18 * width, mrca_fs * 1.6);
             for (const auto& b : text_label_boxes) mark_box(b[0], b[1], b[2] - b[0], b[3] - b[1]);
             // ...and the lower-left world-map inset. It never needed reserving while the tree started
             // on the page margin — its own basal branches covered that corner, so nothing could be
@@ -2409,7 +2427,7 @@ static std::size_t render_tree_core(ae::tree::Tree& tree, const std::filesystem:
             // explicitly (same geometry as the draw call above) or a label can land on the map.
             if (params.geo_inset) {
                 const double box_w = 0.134 * height, box_h = box_w / continent_map_aspect();
-                mark_box(margin, 0.972 * height - box_h, box_w, box_h);
+                mark_box(tree_x0, 0.972 * height - box_h, box_w, box_h);
             }
 
             // --- candidate search + conflict-minimising local search (finds a near-branch,

@@ -188,5 +188,95 @@ else:
               f"tal-draw draws the slot count settings_v3 sized for "
               f"(sized {want_slots}, drew {got_slots})")
 
+# ----------------------------------------------------------------------
+# 4. `"side": "left"` dash bars: own column between the page margin and the tree root
+# ----------------------------------------------------------------------
+# Synthetic tree-aa.json (leaves L1-L6, position 3 = T or A). Two bars: a pos-3 dash-bar-aa-at
+# (always on the right) and a black select-bar for 3A (L4, L5), drawn right (default) and left.
+
+def stroked_segments(pdf: Path) -> list[tuple[tuple[float, float, float], float, float, float, float]]:
+    """Every `x0 y0 m x1 y1 l` stroke in the page content, with the stroke colour in force."""
+    out = []
+    data = pdf.read_bytes()
+    num = r"(-?\d+\.?\d*)"
+    for st in re.finditer(rb"stream\r?\n", data):
+        try:
+            text = zlib.decompress(data[st.end():data.find(b"endstream", st.end())]).decode("latin1")
+        except zlib.error:
+            continue
+        color = (0.0, 0.0, 0.0)
+        for m in re.finditer(rf"{num} {num} {num} RG|{num} {num} m\s+{num} {num} l", text):
+            if m.group(1) is not None:
+                color = (float(m.group(1)), float(m.group(2)), float(m.group(3)))
+            else:
+                out.append((color, *(float(m.group(i)) for i in range(4, 8))))
+    return out
+
+
+if os.access(tal_draw, os.X_OK):
+    SIZE, RATIO = 400, 0.8
+    sel_bar = {"selects": [{"aa": ["3A"], "color": "black"}]}
+    variants = {
+        "default": {"dash_bars": [{"pos": 3}, sel_bar]},
+        "right": {"dash_bars": [{"pos": 3, "side": "right"}, {**sel_bar, "side": "right"}]},
+        "left": {"dash_bars": [{"pos": 3}, {**sel_bar, "side": "left"}]},
+    }
+    segs, sizes = {}, {}
+    with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as tmp:
+        tmp = Path(tmp)
+        for tag, extra in variants.items():
+            settings = {"_": "synthetic left-dash-bar fixture — see cc/tal/test/test-page-size.py",
+                        "image_size": SIZE, "width_to_height_ratio": RATIO, "labels": False, **extra}
+            sfile, pdf = tmp / f"side-{tag}.json", tmp / f"side-{tag}.pdf"
+            sfile.write_text(json.dumps(settings))
+            subprocess.run([tal_draw, f"--settings={sfile}", str(HERE / "tree-aa.json"), str(pdf)],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            segs[tag], sizes[tag] = stroked_segments(pdf), media_box(pdf)
+    BLACK = (0.0, 0.0, 0.0)
+
+    def horizontal(tag):
+        return [sg for sg in segs[tag] if abs(sg[2] - sg[4]) < 1e-6 and sg[3] != sg[1]]
+
+    def tree_edges(tag):   # the tree is drawn first: black horizontals up to the first coloured stroke
+        out = []
+        for sg in segs[tag]:
+            if sg[0] != BLACK:
+                break
+            out.append(sg)
+        return out
+
+    def black_dashes(tag):  # the select bar's marks: black horizontals after the tree
+        n_tree = len(tree_edges(tag))
+        return sorted((min(sg[1], sg[3]), max(sg[1], sg[3]), sg[2]) for sg in segs[tag][n_tree:]
+                      if sg[0] == BLACK and abs(sg[2] - sg[4]) < 1e-6)
+
+    check(segs["right"] == segs["default"], '"side": "right" draws exactly what no side key draws')
+    check(sizes["left"] == sizes["default"], f"left bar keeps the page size ({sizes['left']} vs {sizes['default']})")
+    root_default = min(min(sg[1], sg[3]) for sg in tree_edges("default"))
+    root_left = min(min(sg[1], sg[3]) for sg in tree_edges("left"))
+    right_default = max(max(sg[1], sg[3]) for sg in tree_edges("default"))
+    right_left = max(max(sg[1], sg[3]) for sg in tree_edges("left"))
+    dl, dr = black_dashes("left"), black_dashes("default")
+    check(len(dl) == 2 and len(dr) == 2, f"select bar draws the two 3A leaves both ways (left {len(dl)}, right {len(dr)})")
+    margin = 0.03 * SIZE * RATIO
+    check(all(margin <= x0 and x1 < root_left for x0, x1, _ in dl),
+          f"left bar sits between the margin ({margin:.2f}) and the tree root ({root_left:.2f}): {dl}")
+    check(all(x0 > right_default for x0, _, _ in dr), "default bar is right of the tree")
+    check([y for _, _, y in dl] == [y for _, _, y in dr], "left bar marks the same rows (y) as the right-hand one")
+    check(root_left > root_default, f"tree root moves right to make room ({root_default:.2f} -> {root_left:.2f})")
+    w_default, w_left = right_default - root_default, right_left - root_left
+    gap = 0.012 * SIZE * RATIO
+    check(abs(w_default - w_left - gap) < 0.01,
+          f"tree loses only the left column's gap, not the bar (width {w_default:.2f} -> {w_left:.2f}, gap {gap:.2f})")
+    pos3_left = [sg for sg in horizontal("left") if sg[0] != BLACK]
+    pos3_default = [sg for sg in horizontal("default") if sg[0] != BLACK]
+    # the right band is one column narrower and still ends at the same place, so the pos-3 bar
+    # (now the only right bar) moves right by exactly one column pitch, rows unchanged
+    col = 0.022 * (SIZE * RATIO * (1.0 - 0.06))
+    check(len(pos3_left) == len(pos3_default) == 6
+          and all(abs(a[1] - b[1] - col) < 0.01 and abs(a[3] - b[3] - col) < 0.01 and a[2] == b[2]
+                  for a, b in zip(pos3_left, pos3_default)),
+          f"the right-hand pos-3 bar shifts one column ({col:.2f}) right into the freed slot, rows unchanged")
+
 print("FAIL: " + "; ".join(failures) if failures else "OK: page geometry matches AD's formula")
 sys.exit(1 if failures else 0)

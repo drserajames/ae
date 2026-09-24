@@ -176,6 +176,10 @@ namespace ae::tal
         std::vector<std::pair<std::vector<AaCondition>, std::string>> selects{}; // (conditions, colour)
         struct LegendItem { std::string text; std::string color; char aa{0}; }; // aa=0 -> no actual-colour lookup
         std::vector<LegendItem> legend{};
+        // `.tal` "side": "left" — draw this bar in its own column LEFT of the tree (page margin |
+        // left bars | gap | aa-label band | tree root) instead of in the dash-bar band right of the
+        // time series. Default false = "right" = the band, so existing trees are unchanged.
+        bool left{false};
     };
 
     // A horizontal section of the tree (acmacs-tal hz-sections): the contiguous run of
