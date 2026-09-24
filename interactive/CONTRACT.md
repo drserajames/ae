@@ -310,6 +310,10 @@ contracts that feature modules build on (rather than re-deriving) are:
   — true only once the bundle carries `passage_color` (E1). P1 should colour
   tip/point passage markers via these rather than re-deriving the palette.
   **colorBy modes** add `clade` / `continent` / `aa` / `stress` / `time` / `coverage`.
+  `aa` (C1): `Colour.setAAPositions(spec)`, then `Colour.aaColor(v)`. One position →
+  fixed per-residue colour from aapalette's `typical` scheme (`AA_PALETTE`, CC-BY-4.0);
+  several positions → categorical `CAT` over the sorted combinations present. `-`/`X`
+  → `Colour.unmatched()` ("no seq").
   `time` (v6 F1): viridis over [oldest antigen date … `meta.generated`]; gated on
   `Colour.hasTime()`, window via `Colour.timeWindow()`, ramp `Colour.timeStops(n)`.
   `coverage` (v6 F3): active when a serum is selected (`Colour.coverageSerum()`);
