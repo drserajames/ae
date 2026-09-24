@@ -203,7 +203,9 @@ def main() -> int:
         huge_strokes, _ = paths(render(tal_draw, tmpdir, "huge", {"arrows": False, "band_gap": 5000.0}))
         arrow_gap_strokes, arrow_gap_fills = paths(render(tal_draw, tmpdir, "arrow-gap", {"band_gap": 20.0}))
         zero_pdf = render(tal_draw, tmpdir, "zero", {"band_gap": 0.0})
-        zero_same = content(zero_pdf) == content(default_pdf)
+        # compare what is drawn, not the raw streams: cairo's embedded font subset is not
+        # byte-stable between runs, which made a whole-file comparison fail ~1 run in 4
+        zero_same = paths(zero_pdf) == paths(default_pdf) and words(zero_pdf) == words(default_pdf)
 
     top, bottom = rows(default_strokes)
     # the clades column: right of the matrix, whose right edge is its last slot separator (the
