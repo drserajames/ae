@@ -167,7 +167,12 @@ Stage-2 data (E2), for the colour-by-AA and stress/error overlays:
 
 - **Shared `aa` table.** `norm → aligned HA1 AA sequence string` (from the `.asr`
   tree); C1 reads residue `p` as `aa[norm][p-1]`. Same numbering as the clade names
-  and `A` transitions.
+  and `A` transitions. C1 colours: **one position** gives each residue its fixed colour
+  from the `typical` scheme of [aapalette](https://github.com/drserajames/aapalette)
+  (CC-BY-4.0; vendored as `AA_PALETTE` in `js/colour.js`), so K is the same colour at
+  every position and in every subtype; **several positions** (`145, 159` → `KN`) use
+  the categorical `CAT` list over the sorted combinations present. Gaps/`X` stay
+  "no seq".
 - **Per-chart titers.** `titers` (raw strings, so `<`/`>`/`*` are distinguishable),
   `logged` (`log2(titer/10)`, null for missing), `column_bases`, and `min_col_basis`
   — used by N1/N2/C2. `column_bases` are the projection's **forced** bases when present

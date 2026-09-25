@@ -26,14 +26,26 @@
   const PASSAGE_DEFAULT = { egg: "#FF0000", cell: "#0000FF", reassortant: "#FFA500" };
   const PASSAGE_LABEL = { egg: "egg", cell: "cell", reassortant: "reassortant" };
 
-  // categorical palette for colour-by-AA (C1): distinct, stable, assigned to the
-  // sorted set of residue values present so the same value always gets the same hue.
+  // categorical palette for colour-by-AA (C1) at SEVERAL positions: distinct,
+  // stable, assigned to the sorted set of residue combinations present so the same
+  // value always gets the same hue. A single position uses AA_PALETTE below.
   const CAT = [
     "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948",
     "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac", "#1f77b4", "#2ca02c",
     "#d62728", "#9467bd", "#8c564b", "#e377c2", "#17becf", "#bcbd22",
     "#7f7f7f", "#393b79",
   ];
+  // fixed per-residue colours for colour-by-AA at a SINGLE position (C1): the
+  // `typical` scheme of github.com/drserajames/aapalette (aa_palettes.json,
+  // schemes.typical.colors), copied at upstream commit 0c657ea (1 Jul 2026).
+  // Colour data (c) aapalette, licensed CC-BY-4.0 — keep this attribution.
+  // Several positions ("145, 159" -> "KN") still use CAT above.
+  const AA_PALETTE = {
+    A: "#4C6B30", C: "#FFBCD9", D: "#B81212", E: "#FF4D8D", F: "#EFBF04",
+    G: "#666666", H: "#1E5DA5", I: "#71BC78", K: "#1B9AF7", L: "#2ADB2A",
+    M: "#98FB98", N: "#FF8651", P: "#800080", Q: "#D0AB9D", R: "#00CCCC",
+    S: "#6E3D06", T: "#CD5700", V: "#1F8F78", W: "#FFECB1", Y: "#FFFF00",
+  };
   // sequential scale for colour-by-stress (C2): ColorBrewer YlOrRd, low→high.
   const SEQ = ["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"];
 
@@ -134,7 +146,12 @@
       if (aaPos.length) {
         const vals = new Set();
         for (const n in aaSeq) { const v = aaValueOf(n); if (v) vals.add(v); }
-        Array.from(vals).sort().forEach((v, i) => { aaValueColor[v] = CAT[i % CAT.length]; });
+        // one position: fixed aapalette colour per residue (CAT only for a letter
+        // outside the 20, e.g. B/Z/J); several positions: CAT over the sorted values
+        const single = aaPos.length === 1;
+        Array.from(vals).sort().forEach((v, i) => {
+          aaValueColor[v] = (single && AA_PALETTE[v]) || CAT[i % CAT.length];
+        });
       }
       return { positions: aaPos.slice(), nValues: Object.keys(aaValueColor).length };
     },
